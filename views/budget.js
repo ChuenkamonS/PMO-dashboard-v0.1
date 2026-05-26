@@ -60,26 +60,17 @@ function renderBudget() {
   document.getElementById('bgt-total').textContent       = money(approvedAmt);
   document.getElementById('bgt-total-count').textContent = approved.length + ' รายการ';
 
-  const budgets     = typeof loadBudgets === 'function' ? loadBudgets() : {};
-  const budgetTotal = Object.values(budgets).reduce((s,v) => s+(Number(v)||0), 0);
-  const utilPct     = budgetTotal ? Math.round((approvedAmt/budgetTotal)*100) : 0;
-  document.getElementById('bgt-util').textContent = `${utilPct}% Utilized`;
+  const budgets = typeof loadBudgets === 'function' ? loadBudgets() : {};
 
   // Per-project rows
   const allProjects = [...new Set(all.map(m => m.project||'ไม่ระบุ'))];
-  let near = 0;
   const projRows = [];
   allProjects.forEach(p => {
     const projMemos = all.filter(m => (m.project||'ไม่ระบุ') === p);
-    const app    = projMemos.filter(m => memoStatusKey(m)==='completed').reduce((s,m) => s+(Number(m.total)||0), 0);
-    const budget = Number(budgets[p]||0);
-    const util   = budget ? Math.round((app/budget)*100) : 0;
-    if(util >= 80) near++;
-    const rem = Math.max(0, budget-app);
-    const st  = util > 100 ? 'Over Budget' : util >= 70 ? 'Near Limit' : 'Normal';
-    projRows.push({ project:p, budget, approved:app, remaining:rem, util, st, memos:projMemos });
+    const app = projMemos.filter(m => memoStatusKey(m)==='completed').reduce((s,m) => s+(Number(m.total)||0), 0);
+    const st  = 'Normal';
+    projRows.push({ project:p, approved:app, st, memos:projMemos });
   });
-  document.getElementById('bgt-near-limit').textContent = `${near} Projects > 80%`;
 
   // Type chart
   const byType = {};
@@ -92,21 +83,11 @@ function renderBudget() {
   // Project summary table with drill-down
   const sumBody = document.getElementById('bgt-summary-body');
   sumBody.innerHTML = !projRows.length
-    ? '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล</td></tr>'
+    ? '<tr><td colspan="3" style="padding:16px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล</td></tr>'
     : projRows.map(r => `<tr style="cursor:pointer" onclick="drilldownProject('${esc(r.project)}')" title="คลิกดูรายการ memo">
         <td style="font-weight:500">${esc(r.project)}</td>
-        <td class="mono">${money(r.budget)}</td>
         <td class="mono">${money(r.approved)}</td>
-        <td class="mono">${money(r.remaining)}</td>
-        <td>
-          <div style="display:flex;align-items:center;gap:8px">
-            <div style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
-              <div style="height:100%;width:${Math.min(r.util,100)}%;background:${r.util>100?'var(--red)':r.util>=70?'var(--amber)':'var(--green)'};border-radius:3px"></div>
-            </div>
-            <span style="font-size:11px;min-width:32px;text-align:right">${r.util}%</span>
-          </div>
-        </td>
-        <td><span class="badge ${r.st==='Over Budget'?'badge-red':r.st==='Near Limit'?'badge-amber':'badge-green'}">${r.st}</span></td>
+        <td><span class="badge badge-green">${r.st}</span></td>
       </tr>`).join('');
 
   // Init trend tab if active
@@ -306,4 +287,3 @@ function renderBudgetProjChart(allMemos) {
       </div>`).join('');
   }
 }
-
