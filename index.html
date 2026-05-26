@@ -1235,6 +1235,20 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <tbody id="bgt-summary-body"></tbody>
             </table>
           </div>
+
+          <!-- Drill-down panel -->
+          <div id="bgt-drilldown" style="display:none;margin-top:12px">
+            <div class="card" style="padding:0;overflow:hidden">
+              <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+                <span id="bgt-drilldown-title" style="font-size:12px;font-weight:600"></span>
+                <button class="btn-sm" style="font-size:11px;padding:3px 8px" onclick="document.getElementById('bgt-drilldown').style.display='none';document.getElementById('bgt-summary-body').querySelectorAll('tr').forEach(r=>r.style.background='')">✕ ปิด</button>
+              </div>
+              <table class="hist-table">
+                <thead><tr><th>Memo No</th><th>Type</th><th>Subject</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+                <tbody id="bgt-drilldown-body"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
 
         <!-- Tab: Trend Analysis -->
@@ -1249,20 +1263,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <div style="font-size:12px;font-weight:600;margin-bottom:12px">Monthly Trend — 12 เดือน</div>
             <div style="height:300px"><canvas id="bgt-trend-chart"></canvas></div>
           </div>
-        <!-- Drill-down panel (hidden by default) -->
-        <div id="bgt-drilldown" style="display:none;margin-top:12px">
-          <div class="card" style="padding:0;overflow:hidden">
-            <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-              <span id="bgt-drilldown-title" style="font-size:12px;font-weight:600"></span>
-              <button class="btn-sm" style="font-size:11px;padding:3px 8px" onclick="document.getElementById('bgt-drilldown').style.display='none'">✕ ปิด</button>
-            </div>
-            <table class="hist-table">
-              <thead><tr><th>Memo No</th><th>Type</th><th>Subject</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
-              <tbody id="bgt-drilldown-body"></tbody>
-            </table>
-          </div>
-        </div>
-
       </div>
 
       <!-- ════ LICENSE ════ -->
