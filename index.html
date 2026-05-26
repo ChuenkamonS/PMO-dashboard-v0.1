@@ -742,11 +742,27 @@ svg.icon { display: inline-block; vertical-align: middle; }
     </div>
 
     <div class="sb-footer">
-      <div class="sb-user">
-        <div class="sb-avatar">CK</div>
-        <div>
-          <div class="sb-uname">Chuen K.</div>
-          <div class="sb-urole">PMO</div>
+      <div id="sb-user-btn" class="sb-user" onclick="toggleAccountMenu()" style="cursor:pointer;position:relative">
+        <div class="sb-avatar" id="sb-avatar">CK</div>
+        <div style="flex:1">
+          <div class="sb-uname" id="sb-uname">Chuen K.</div>
+          <div class="sb-urole" id="sb-urole">PMO</div>
+        </div>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;color:var(--text-3)"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div id="account-menu" style="display:none;position:absolute;bottom:56px;left:8px;right:8px;background:var(--surface);border:1px solid var(--border-md);border-radius:var(--r);box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:100;overflow:hidden">
+        <div style="padding:6px 10px;font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)">Switch Account</div>
+        <div onclick="switchAccount('Chuen K.','PMO','CK')" class="account-opt" style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px">
+          <div style="width:26px;height:26px;border-radius:6px;background:var(--blue-50);color:var(--blue-800);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0">CK</div>
+          <div><div style="font-weight:600;color:var(--text)">Chuen K.</div><div style="color:var(--text-3);font-size:10px">PMO · Requester</div></div>
+        </div>
+        <div onclick="switchAccount('นวพล ง.','Project Director','NW')" class="account-opt" style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px;border-top:1px solid var(--border)">
+          <div style="width:26px;height:26px;border-radius:6px;background:var(--green-50);color:var(--green);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0">NW</div>
+          <div><div style="font-weight:600;color:var(--text)">นวพล ง.</div><div style="color:var(--text-3);font-size:10px">Project Director · Approver</div></div>
+        </div>
+        <div onclick="switchAccount('ปกรณ์ จ.','CEO','PK')" class="account-opt" style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px;border-top:1px solid var(--border)">
+          <div style="width:26px;height:26px;border-radius:6px;background:var(--amber-50);color:var(--amber);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0">PK</div>
+          <div><div style="font-weight:600;color:var(--text)">ปกรณ์ จ.</div><div style="color:var(--text-3);font-size:10px">CEO · Approver</div></div>
         </div>
       </div>
     </div>
@@ -1089,13 +1105,13 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
           <div style="display:flex;gap:4px;background:var(--bg);border-radius:var(--r);padding:4px">
             <button class="pend-tab-btn active" data-tab="submitted" onclick="switchPendingTab('submitted')" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:var(--surface);color:var(--text)">
-              My Submitted <span class="tab-count" style="margin-left:4px;font-size:11px;color:var(--text-3)"></span>
+              My Submitted <span class="tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
             </button>
             <button class="pend-tab-btn" data-tab="awaiting" onclick="switchPendingTab('awaiting')" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
-              Awaiting My Approval <span class="tab-count badge badge-amber" style="margin-left:4px"></span>
+              Awaiting My Approval <span class="tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
             </button>
             <button class="pend-tab-btn" data-tab="drafts" onclick="switchPendingTab('drafts')" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
-              Drafts <span class="tab-count" style="margin-left:4px;font-size:11px;color:var(--text-3)"></span>
+              Drafts <span class="tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
             </button>
           </div>
         </div>
@@ -1962,5 +1978,23 @@ svg.icon { display: inline-block; vertical-align: middle; }
     </div>
   </div>
 </div>
+
+<script>
+function toggleAccountMenu() {
+  const m = document.getElementById('account-menu');
+  m.style.display = m.style.display === 'none' ? 'block' : 'none';
+}
+function switchAccount(name, role, initials) {
+  document.getElementById('sb-uname').textContent = name;
+  document.getElementById('sb-urole').textContent = role;
+  document.getElementById('sb-avatar').textContent = initials;
+  document.getElementById('account-menu').style.display = 'none';
+  renderPendingMemos();
+}
+document.addEventListener('click', e => {
+  if(!document.getElementById('sb-user-btn')?.contains(e.target))
+    document.getElementById('account-menu').style.display = 'none';
+});
+</script>
 </body>
 </html>
