@@ -1219,9 +1219,9 @@ svg.icon { display: inline-block; vertical-align: middle; }
             </div>
             <div class="card" style="padding:16px">
               <div style="font-size:12px;font-weight:600;margin-bottom:10px">Spend by Project</div>
-              <div style="display:flex;gap:12px;height:220px">
-                <div style="flex:0 0 160px"><canvas id="bgt-proj-chart"></canvas></div>
-                <div id="bgt-proj-legend" style="flex:1;overflow-y:auto;padding-top:4px"></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;height:220px;align-items:center">
+                <div style="height:220px"><canvas id="bgt-proj-chart"></canvas></div>
+                <div id="bgt-proj-legend" style="overflow-y:auto;padding-top:4px"></div>
               </div>
             </div>
           </div>
@@ -1249,16 +1249,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <div style="font-size:12px;font-weight:600;margin-bottom:12px">Monthly Trend — 12 เดือน</div>
             <div style="height:300px"><canvas id="bgt-trend-chart"></canvas></div>
           </div>
-          <div class="card" style="padding:16px">
-            <div style="font-size:12px;font-weight:600;margin-bottom:4px">Spend by Project</div>
-            <div style="font-size:11px;color:var(--text-3);margin-bottom:12px">เดือนที่ spike > 150% ของ rolling average จะ highlight</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:center">
-              <div style="height:300px"><canvas id="bgt-proj-chart"></canvas></div>
-              <div id="bgt-proj-legend" style="font-size:12px"></div>
-            </div>
-          </div>
-        </div>
-
         <!-- Drill-down panel (hidden by default) -->
         <div id="bgt-drilldown" style="display:none;margin-top:12px">
           <div class="card" style="padding:0;overflow:hidden">
