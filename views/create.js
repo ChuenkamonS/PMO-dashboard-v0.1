@@ -242,11 +242,16 @@ function collectMemoData() {
   const apprTitleSel = document.getElementById('f-appr-title');
   const apprTitle = apprTitleSel?.value === 'other' ? (val('#f-appr-title-other') || '') : (apprTitleSel?.value || '');
 
+  // Get current logged-in user from sidebar
+  const requesterName  = document.querySelector('.sb-uname')?.textContent?.trim() || 'User';
+  const requesterTitle = document.querySelector('.sb-urole')?.textContent?.trim() || '';
+
   const data = {
     type: selectedType, typeLabel: TYPE_LABELS[selectedType]||'-',
     memoNo: val('#f-memo-no'), date: dateInput(val('#f-date')),
     project: val('#f-project')==='other' ? val('#f-project-other') : val('#f-project'),
     to: toVal, subject: '', reason: selectedReason(),
+    requesterName, requesterTitle,
     reviewerName: revName || '-', reviewerTitle: revTitle || '-',
     reviewerDate: dateInput(val('#f-signdate')) || TODAY,
     approverName: apprName || '-', approverTitle: apprTitle || '-',
