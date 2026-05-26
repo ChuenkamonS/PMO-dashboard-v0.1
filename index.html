@@ -1215,7 +1215,10 @@ svg.icon { display: inline-block; vertical-align: middle; }
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
             <div class="card" style="padding:16px">
               <div style="font-size:12px;font-weight:600;margin-bottom:10px">Spend by Type</div>
-              <div style="height:220px"><canvas id="bgt-type-chart"></canvas></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;height:220px;align-items:center">
+                <div style="height:220px"><canvas id="bgt-type-chart"></canvas></div>
+                <div id="bgt-type-legend" style="overflow-y:auto;padding-top:4px"></div>
+              </div>
             </div>
             <div class="card" style="padding:16px">
               <div style="font-size:12px;font-weight:600;margin-bottom:10px">Spend by Project</div>
@@ -1603,8 +1606,10 @@ svg.icon { display: inline-block; vertical-align: middle; }
         </div>
       </div>
 
+
     </div><!-- /content -->
   </div><!-- /main -->
+</div><!-- /layout -->
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <!-- Core: shared utils, storage, navigation, PDF -->
