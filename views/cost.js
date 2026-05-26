@@ -235,3 +235,20 @@ function saveInfraCost() {
   closeInfraModal();
   renderCost();
 }
+
+// ── Sub-tab switching ──
+function switchCostTab(tab, btn) {
+  document.querySelectorAll('.cost-tab-panel').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('.cost-stab').forEach(b => b.classList.remove('active'));
+  const panel = document.getElementById('cost-tab-' + tab);
+  if(panel) panel.style.display = '';
+  if(btn) btn.classList.add('active');
+
+  const actions = document.getElementById('cost-tab-actions');
+  if(!actions) return;
+  if(tab === 'overview') {
+    actions.innerHTML = `<button class="btn-primary" onclick="openInfraModal()" style="font-size:12px;padding:6px 14px">+ Add Infra Cost</button>`;
+  } else if(tab === 'infra') {
+    actions.innerHTML = `<button class="btn-primary" onclick="openInfraModal()" style="font-size:12px;padding:6px 14px">+ Add Infra Cost</button>`;
+  }
+}
