@@ -59,14 +59,17 @@ function renderPendingMemos() {
   const allMemos  = loadMemos();
   const pending   = allMemos.filter(m => !m.status || m.status === 'pending');
   const submitted = allMemos.filter(m => ['pending','completed','rejected'].includes(m.status));
+  const drafts    = allMemos.filter(m => m.status === 'draft');
   const el = id => document.getElementById(id);
   if(el('pending-count'))        el('pending-count').textContent        = pending.length;
   if(el('pending-my-submitted')) el('pending-my-submitted').textContent = submitted.filter(m => !m.status || m.status === 'pending').length;
+  if(el('pending-draft-count'))  el('pending-draft-count').textContent  = drafts.length;
   const badge = document.querySelector('#memo-sub .sb-badge');
   if(badge) badge.textContent = pending.length;
   const counts = {
     awaiting:  pending.length,
     submitted: submitted.length,
+    drafts:    drafts.length,
   };
   Object.entries(counts).forEach(([tab, count]) => {
     const el = document.querySelector(`.pend-tab-btn[data-tab="${tab}"] .tab-count`);
@@ -81,6 +84,7 @@ function renderPendingContent() {
   let memos = loadMemos();
   if(_pendingTab==='awaiting')  memos = memos.filter(m => !m.status || m.status==='pending');
   if(_pendingTab==='submitted') memos = memos.filter(m => ['pending','completed','rejected'].includes(m.status));
+  if(_pendingTab==='drafts')    memos = memos.filter(m => m.status==='draft');
   if(_pendingSearch) {
     const s = _pendingSearch.toLowerCase();
     memos = memos.filter(m => (m.memoNo||'').toLowerCase().includes(s)||(m.project||'').toLowerCase().includes(s)||(m.reviewerName||'').toLowerCase().includes(s));
@@ -102,6 +106,7 @@ function renderPendingContent() {
     const emptyStates = {
       awaiting:  { h:'ไม่มี Memo ที่รออนุมัติ',     p:'สร้าง Memo แล้วกด Save & Generate PDF เพื่อให้รายการมาแสดงที่นี่' },
       submitted: { h:'ยังไม่มี Memo ที่เคยส่ง',       p:'Memo ที่สร้างและส่งทั้งหมดจะแสดงที่นี่' },
+      drafts:    { h:'ยังไม่มี Draft',                p:'กด Save to Draft เพื่อบันทึก Memo ไว้ก่อนส่ง' },
       rejected:  { h:'ไม่มี Memo ที่ถูกปฏิเสธ',      p:'Memo ที่ถูก Reject จะแสดงที่นี่เพื่อแก้ไขและส่งใหม่' },
     };
     const es = emptyStates[_pendingTab] || { h:'ไม่มีข้อมูล', p:'ยังไม่มีรายการ' };
@@ -110,16 +115,21 @@ function renderPendingContent() {
   }
 
   // Build cards
-  list.innerHTML = memos.map(m => buildPendingCard(m)).join('');
+  list.innerHTML = _pendingTab === 'drafts'
+    ? memos.map(m => buildDraftCard(m)).join('')
+    : memos.map(m => buildPendingCard(m)).join('');
 
   // Event delegation
   list.onclick = function(e) {
     const btn = e.target.closest('[data-action]');
     if(!btn) return;
     const no = btn.dataset.memo;
-    if(btn.dataset.action==='approve') openApproveModal(no);
-    else if(btn.dataset.action==='reject') openRejectModal(no);
-    else if(btn.dataset.action==='detail') openDetailModal(no);
+    if(btn.dataset.action==='approve')      openApproveModal(no);
+    else if(btn.dataset.action==='reject')  openRejectModal(no);
+    else if(btn.dataset.action==='detail')  openDetailModal(no);
+    else if(btn.dataset.action==='draft-view')   openDetailModal(no);
+    else if(btn.dataset.action==='draft-edit')   editDraft(no);
+    else if(btn.dataset.action==='draft-delete') deleteDraft(no);
   };
 }
 
@@ -210,6 +220,64 @@ function buildPendingCard(memo) {
     </div>
     ${isOwn&&_pendingTab==='awaiting'?`<div style="padding:6px 14px 10px;font-size:11px;color:var(--amber)">⚠ ไม่สามารถอนุมัติ Memo ของตัวเองได้</div>`:''}
   </div>`;
+}
+
+
+// ── Draft Card ──
+function buildDraftCard(memo) {
+  const typeIcon = { sl:'SL', hw:'HW', int:'INT', ent:'ENT', dep:'DEP' }[memo.type] || '?';
+  const iconBg   = { sl:'background:#E6F1FB;color:#0C447C', hw:'background:#F1EFE8;color:#444441', int:'background:#EAF3DE;color:#27500A', ent:'background:#FAEEDA;color:#633806', dep:'background:#EEEDFE;color:#3C3489' }[memo.type] || 'background:#F1EFE8;color:#444441';
+  const created  = formatDateTime(memo.createdAt);
+
+  return `<div class="pend-card" style="border:1px solid var(--border);border-radius:var(--r);margin-bottom:8px;overflow:hidden;border-left:3px solid var(--gray-200)">
+    <div style="padding:12px 14px;display:flex;align-items:flex-start;gap:10px">
+      <div style="width:34px;height:34px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:600;${iconBg}">${typeIcon}</div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px">
+          <span style="font-size:13px;font-weight:600;color:var(--text)">${esc(memo.memoNo)}</span>
+          <span class="badge badge-gray" style="font-size:9px">Draft</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-2)">
+          ${esc(memo.project||'—')} · ${esc(memo.typeLabel||memo.type||'—')}
+        </div>
+        <div style="font-size:11px;color:var(--text-3);margin-top:2px">บันทึกเมื่อ ${esc(created)}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-size:15px;font-weight:600;color:var(--text)">${esc(money(Number(memo.total)||0))}</div>
+      </div>
+    </div>
+    <div style="height:0.5px;background:var(--border)"></div>
+    <div style="padding:10px 14px;display:flex;align-items:center;gap:6px;justify-content:flex-end">
+      <button class="btn-sm" data-action="draft-view" data-memo="${esc(memo.memoNo)}" style="font-size:12px;padding:5px 10px">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> View
+      </button>
+      <button class="btn-sm" data-action="draft-edit" data-memo="${esc(memo.memoNo)}" style="font-size:12px;padding:5px 10px;color:var(--blue)">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Edit
+      </button>
+      <button class="btn-sm" data-action="draft-delete" data-memo="${esc(memo.memoNo)}" style="font-size:12px;padding:5px 10px;color:var(--red)">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete
+      </button>
+    </div>
+  </div>`;
+}
+
+// ── Edit Draft ──
+function editDraft(memoNo) {
+  const memo = loadMemos().find(m => m.memoNo === memoNo);
+  if(!memo || memo.status !== 'draft') return;
+  // Store draft to load in create form
+  try { localStorage.setItem('orbit-pmo-edit-draft', JSON.stringify(memo)); } catch(e) {}
+  swView('create', document.querySelector('.sb-sub-item[onclick*="create"]'), 'Create Memo');
+  // Trigger load after view switch
+  setTimeout(() => { if(typeof applyDraftEdit === 'function') applyDraftEdit(); }, 100);
+}
+
+// ── Delete Draft ──
+function deleteDraft(memoNo) {
+  if(!confirm(`ลบ Draft "${memoNo}" ออกจากระบบ?`)) return;
+  const memos = loadMemos().filter(m => m.memoNo !== memoNo);
+  storeMemos(memos);
+  renderPendingMemos();
 }
 
 
