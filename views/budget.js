@@ -318,5 +318,12 @@ function drilldownProject(project) {
       }).join('');
 
   panel.style.display = '';
-  panel.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  // Highlight selected row
+  document.querySelectorAll('#bgt-summary-body tr').forEach(r => r.style.background = '');
+  const rows = document.querySelectorAll('#bgt-summary-body tr');
+  rows.forEach(r => {
+    if(r.querySelector('td')?.textContent === project) r.style.background = 'var(--blue-50)';
+  });
+  // Scroll drilldown into view within the content area
+  setTimeout(() => panel.scrollIntoView({ behavior:'smooth', block:'nearest' }), 50);
 }
