@@ -169,7 +169,7 @@ function buildPendingCard(memo) {
         <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:12px">
           <div style="flex:1">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap">
-              <span style="font-size:14px;font-weight:600;color:var(--text)">${esc(memo.subject||typeLabel)}</span>
+              <span style="font-size:14px;font-weight:600;color:var(--text)">${esc(typeLabel)}${memo.project ? ' — ' + esc(memo.project) : ''}</span>
               <span class="badge badge-purple" style="font-size:9px">${esc(stage)}</span>
             </div>
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
