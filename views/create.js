@@ -379,6 +379,23 @@ function validateMemo(data) {
   if(missing.length) { alert('กรุณากรอกข้อมูลให้ครบ:\n\n• '+missing.join('\n• ')); return false; }
   return true;
 }
+// ── Save as Draft ──
+function saveDraft() {
+  if(!selectedType) { alert('กรุณาเลือกประเภท Memo ก่อน'); return; }
+  const data = collectMemoData();
+  data.status = 'draft';
+  if(!data.memoNo) {
+    data.memoNo = 'DRAFT-' + Date.now().toString(36).toUpperCase();
+  }
+  // If editing existing draft, keep same memoNo
+  saveMemo(data);
+  renderPendingMemos();
+  alert(`✓ บันทึก Draft แล้ว — ${data.memoNo}`);
+  resetMemoForm();
+  swView('pending', document.querySelector('.sb-sub-item[onclick*="pending"]'), 'Pending Approval');
+  switchPendingTab('drafts');
+}
+
 async function generateMemoPdf() {
   const data = collectMemoData();
   if(!validateMemo(data)) return;
@@ -481,3 +498,61 @@ function saveBulkAcct() {
 document.addEventListener('click', e => {
   if(e.target === document.getElementById('bulk-acct-modal')) closeBulkAcctModal();
 });
+// ── Apply Draft Edit ──
+function applyDraftEdit() {
+  try {
+    const raw = localStorage.getItem('orbit-pmo-edit-draft');
+    if(!raw) return;
+    const memo = JSON.parse(raw);
+    if(!memo || memo.status !== 'draft') return;
+    localStorage.removeItem('orbit-pmo-edit-draft');
+
+    // Select type
+    const typeBtn = document.querySelector(`.type-btn[onclick*="selectType('${memo.type}"]`) ||
+                    [...document.querySelectorAll('.type-btn')].find(b => b.getAttribute('onclick')?.includes(`'${memo.type}'`));
+    if(typeBtn) typeBtn.click();
+
+    // Fill common fields after short delay (selectType rerenders form)
+    setTimeout(() => {
+      // Store memoNo so saveDraft/submit updates instead of creates
+      const memoNoEl = document.getElementById('f-memo-no');
+      if(memoNoEl) memoNoEl.value = memo.memoNo || '';
+
+      const projSel = document.getElementById('f-project');
+      if(projSel) {
+        const opt = [...projSel.options].find(o => o.value === memo.project);
+        if(opt) { projSel.value = memo.project; toggleOtherProject(); }
+        else { projSel.value = 'other'; toggleOtherProject(); const oth = document.getElementById('f-project-other'); if(oth) oth.value = memo.project || ''; }
+      }
+
+      const toSel = document.getElementById('f-to');
+      if(toSel) { const opt = [...toSel.options].find(o => o.value === memo.to); if(opt) toSel.value = memo.to; else { toSel.value = 'other'; toggleToOther(); const oth = document.getElementById('f-to-other'); if(oth) oth.value = memo.to || ''; } }
+
+      const subjectEl = document.getElementById('f-subject');
+      if(subjectEl) { subjectEl.value = memo.subject || ''; subjectEl.dataset.manualEdit = 'true'; }
+
+      const reasonSel = document.getElementById('f-reason');
+      if(reasonSel) {
+        const opt = [...reasonSel.options].find(o => o.value === memo.reason);
+        if(opt) reasonSel.value = memo.reason;
+        else { reasonSel.value = 'other'; toggleOther(); const oth = document.getElementById('f-reason-other'); if(oth) oth.value = memo.reason || ''; }
+      }
+
+      // Reviewer/Approver
+      const revNameSel = document.getElementById('f-reviewer-name');
+      if(revNameSel) { const opt = [...revNameSel.options].find(o => o.value === memo.reviewerName); if(opt) revNameSel.value = memo.reviewerName; else { revNameSel.value = 'other'; toggleReviewerNameOther(); const oth = document.getElementById('f-reviewer-name-other'); if(oth) oth.value = memo.reviewerName || ''; } }
+      const revTitleSel = document.getElementById('f-reviewer-title');
+      if(revTitleSel) { const opt = [...revTitleSel.options].find(o => o.value === memo.reviewerTitle); if(opt) revTitleSel.value = memo.reviewerTitle; }
+      const signDate = document.getElementById('f-signdate');
+      if(signDate && memo.reviewerDate) signDate.value = memo.reviewerDate.slice(0,10);
+
+      const apprNameSel = document.getElementById('f-approver-name');
+      if(apprNameSel) { const opt = [...apprNameSel.options].find(o => o.value === memo.approverName); if(opt) apprNameSel.value = memo.approverName; else { apprNameSel.value = 'other'; toggleApproverNameOther(); const oth = document.getElementById('f-approver-name-other'); if(oth) oth.value = memo.approverName || ''; } }
+      const apprTitleSel = document.getElementById('f-appr-title');
+      if(apprTitleSel) { const opt = [...apprTitleSel.options].find(o => o.value === memo.approverTitle); if(opt) apprTitleSel.value = memo.approverTitle; }
+      const apprDate = document.getElementById('f-apprdate');
+      if(apprDate && memo.approverDate) apprDate.value = memo.approverDate.slice(0,10);
+
+    }, 150);
+  } catch(e) { console.error('applyDraftEdit error', e); }
+}
