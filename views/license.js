@@ -137,6 +137,17 @@ function renderLicense() {
   document.getElementById('lic-annual').textContent   = money(annualCost);
   document.getElementById('lic-renewal-3m').textContent = renewal3m ? `Renewal 3m: ${money(renewal3m)}` : 'ไม่มี renewal ใน 3 เดือน';
 
+  // Renewal alert badge on sidebar
+  const badge = document.getElementById('lic-renewal-badge');
+  if(badge) {
+    if(renewSoonCount > 0) {
+      badge.textContent = renewSoonCount;
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
   // Trend chart
   renderLicenseTrend(allLicenses);
 
