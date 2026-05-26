@@ -293,6 +293,7 @@ function swView(id, el, title) {
   if(id === 'device') renderDevice();
   if(id === 'history') renderHistoryMemos();
   if(id === 'cost') { if(typeof renderCost==='function') renderCost(); }
+  if(id === 'resource') { if(typeof renderResource==='function') renderResource(); }
 }
 function toggleMemoSub(el) {
   el.classList.add('active');
