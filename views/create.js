@@ -309,21 +309,73 @@ function collectMemoData() {
 }
 function validateMemo(data) {
   const missing = [];
+
+  // ── Common fields ──
   if(!data.type) missing.push('ประเภท Memo');
   if(!val('#f-project')) missing.push('โครงการ');
   else if(val('#f-project')==='other' && !val('#f-project-other')) missing.push('ชื่อโครงการ');
   if(!data.to) missing.push('เรียน');
+  if(!data.subject || !data.subject.trim()) missing.push('หัวข้อเรื่อง (ห้ามว่าง)');
   if(!data.reason) missing.push('เหตุผลในการขอ');
+
+  // ── Signature fields ──
   if(!data.reviewerName || data.reviewerName==='-') missing.push('ชื่อ Reviewer');
+  if(!data.reviewerTitle || data.reviewerTitle==='-') missing.push('ตำแหน่ง Reviewer');
+  if(!val('#f-signdate')) missing.push('วันที่ลงนาม Reviewer');
   if(!data.approverName || data.approverName==='-') missing.push('ชื่อ Approver');
-  if(data.type==='sl' && !Array.from(document.querySelectorAll('#sl-rows .item-row input:first-child')).some(i=>i.value.trim()))
-    missing.push('รายการ Software (อย่างน้อย 1 รายการ)');
-  if(data.type==='hw' && !Array.from(document.querySelectorAll('#hw-rows .item-row input:first-child')).some(i=>i.value.trim()))
-    missing.push('รายการ Hardware (อย่างน้อย 1 รายการ)');
-  if(data.type==='int' && !Array.from(document.querySelectorAll('.int-name')).some(i=>i.value.trim()))
-    missing.push('รายชื่อผู้เข้าร่วม (อย่างน้อย 1 คน)');
-  if(data.type==='ent' && !document.querySelector('#fs-ent input')?.value?.trim())
-    missing.push('ชื่อลูกค้า / บริษัท');
+  if(!data.approverTitle || data.approverTitle==='-') missing.push('ตำแหน่ง Approver');
+  if(!val('#f-apprdate')) missing.push('วันที่ลงนาม Approver');
+
+  // ── SL ──
+  if(data.type==='sl') {
+    const slRows = Array.from(document.querySelectorAll('#sl-rows .item-row'));
+    if(!slRows.some(r => r.querySelector('input:first-child')?.value?.trim()))
+      missing.push('ชื่อ Software (อย่างน้อย 1 รายการ)');
+    slRows.forEach((r, i) => {
+      const name = r.querySelector('input:first-child')?.value?.trim();
+      if(!name) return;
+      if(!(parseFloat(r.querySelector('.sl-price')?.value) > 0)) missing.push(`Software แถว ${i+1}: ราคา/เดือน`);
+      if(!(parseInt(r.querySelector('.sl-mo')?.value) > 0))    missing.push(`Software แถว ${i+1}: จำนวนเดือน`);
+      if(!(parseInt(r.querySelector('.sl-qty')?.value) > 0))   missing.push(`Software แถว ${i+1}: จำนวน (Qty)`);
+    });
+    const amtWords = document.querySelector('#fs-sl .form-grid .fg:nth-child(2) input')?.value?.trim();
+    if(!amtWords) missing.push('จำนวนเงินเป็นตัวอักษร (SL)');
+  }
+
+  // ── HW ──
+  if(data.type==='hw') {
+    const hwRows = Array.from(document.querySelectorAll('#hw-rows .item-row'));
+    if(!hwRows.some(r => r.querySelector('input:first-child')?.value?.trim()))
+      missing.push('ชื่ออุปกรณ์ (อย่างน้อย 1 รายการ)');
+    hwRows.forEach((r, i) => {
+      const name = r.querySelector('input:first-child')?.value?.trim();
+      if(!name) return;
+      if(!(parseFloat(r.querySelector('.hw-price')?.value) > 0)) missing.push(`Hardware แถว ${i+1}: ราคา/ชิ้น`);
+      if(!(parseInt(r.querySelector('.hw-qty')?.value) > 0))     missing.push(`Hardware แถว ${i+1}: จำนวน`);
+    });
+    const amtWords = document.querySelector('#fs-hw .form-grid .fg:nth-child(1) input')?.value?.trim();
+    if(!amtWords) missing.push('จำนวนเงินเป็นตัวอักษร (HW)');
+  }
+
+  // ── INT ──
+  if(data.type==='int') {
+    if(!Array.from(document.querySelectorAll('.int-name')).some(i=>i.value.trim()))
+      missing.push('รายชื่อผู้เข้าร่วม (อย่างน้อย 1 คน)');
+    const fs = document.querySelector('#fs-int');
+    const inp = fs?.querySelectorAll('input');
+    if(!inp?.[0]?.value?.trim()) missing.push('ไตรมาส/ครั้งที่');
+    if(!inp?.[1]?.value?.trim()) missing.push('วันที่จัดกิจกรรม');
+    if(!(parseFloat(inp?.[2]?.value) > 0)) missing.push('วงเงิน/คน');
+    if(!inp?.[3]?.value?.trim()) missing.push('จำนวนเงินเป็นตัวอักษร (INT)');
+  }
+
+  // ── ENT ──
+  if(data.type==='ent') {
+    const entInp = document.querySelectorAll('#fs-ent input');
+    if(!entInp[0]?.value?.trim()) missing.push('ชื่อลูกค้า / บริษัท');
+    if(!entInp[1]?.value?.trim()) missing.push('วันที่ (ENT)');
+  }
+
   if(missing.length) { alert('กรุณากรอกข้อมูลให้ครบ:\n\n• '+missing.join('\n• ')); return false; }
   return true;
 }
