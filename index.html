@@ -734,6 +734,11 @@ svg.icon { display: inline-block; vertical-align: middle; }
         Device Management
       </div>
 
+      <div class="sb-section">Resource</div>
+      <div class="sb-item" onclick="swView('resource',this,'Resource Management')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Resource
+      </div>
     </div>
 
     <div class="sb-footer">
@@ -1609,7 +1614,111 @@ svg.icon { display: inline-block; vertical-align: middle; }
         </div>
       </div>
 
+      <!-- Cost: Budget Modal -->
+      <div id="budget-cost-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
+        <div class="card" style="width:480px;max-width:95vw;max-height:80vh;overflow-y:auto;padding:24px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <span style="font-size:15px;font-weight:700">📊 Set Annual Budget</span>
+            <button class="btn-sm" onclick="closeBudgetCostModal()" style="padding:4px 10px">✕</button>
+          </div>
+          <div id="budget-cost-form"></div>
+          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
+            <button class="btn-ghost" onclick="closeBudgetCostModal()">Cancel</button>
+            <button class="btn-primary" onclick="saveBudgetCost()">💾 Save</button>
+          </div>
+        </div>
+      </div>
 
+      <!-- ════ RESOURCE MANAGEMENT ════ -->
+      <div id="view-resource" class="view">
+
+        <!-- KPI cards -->
+        <div class="metric-row" id="res-kpi" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px"></div>
+
+        <!-- Filter row -->
+        <div class="filter-row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px">
+          <input type="text" id="res-search" placeholder="🔍 ค้นหา Project, Position, Team..."
+            style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px"
+            oninput="renderResource()">
+          <select id="res-f-status" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+            <option value="all">ทุกสถานะ</option>
+            <option value="pending">Pending</option>
+            <option value="sourcing">Sourcing</option>
+            <option value="interviewing">Interviewing</option>
+            <option value="offer">Offer in Progress</option>
+            <option value="document">Document Processing</option>
+            <option value="filled">Filled</option>
+            <option value="mitigated">Mitigated</option>
+            <option value="resolved">Resolved</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <select id="res-f-hiring" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+            <option value="all">ทุก Hiring Type</option>
+            <option>Permanent (Direct)</option>
+            <option>Secondment</option>
+            <option>Sub-contract</option>
+          </select>
+          <select id="res-f-project" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+            <option value="all">ทุกโครงการ</option>
+            <option>AOA-MP</option><option>TTB</option><option>Geo9</option>
+            <option>Release 2.1</option><option>Release 3</option>
+          </select>
+          <select id="res-f-level" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+            <option value="all">ทุก Level</option>
+            <option>Junior</option><option>Mid</option><option>Senior</option>
+            <option>Lead</option><option>Manager</option>
+          </select>
+          <button class="btn-export" onclick="exportResourceCsv()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export CSV
+          </button>
+          <button class="btn-primary" style="margin-left:auto" onclick="openResModal()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            New Request
+          </button>
+        </div>
+
+        <!-- Table -->
+        <div class="card" style="padding:0;overflow:hidden">
+          <table class="hist-table">
+            <thead><tr>
+              <th style="padding-left:12px;width:12%">Request ID</th>
+              <th style="width:9%">Team</th>
+              <th style="width:9%">Project</th>
+              <th style="width:12%">Position</th>
+              <th style="width:7%">Level</th>
+              <th style="width:4%;text-align:center">HC</th>
+              <th style="width:10%">Hiring Type</th>
+              <th style="width:7%">Start</th>
+              <th style="width:7%">End</th>
+              <th style="width:7%">Request Date</th>
+              <th style="width:7%">Resolved</th>
+              <th style="width:8%;text-align:center">Status</th>
+              <th style="width:11%;text-align:center">Action</th>
+            </tr></thead>
+            <tbody id="res-table-body"></tbody>
+          </table>
+        </div>
+
+        <!-- Pagination -->
+        <div id="res-pagination" style="display:flex;justify-content:space-between;align-items:center;padding:10px 4px;font-size:12px"></div>
+      </div>
+
+      <!-- ════ RESOURCE: New/Edit Modal ════ -->
+      <div id="resource-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
+        <div class="card" style="width:640px;max-width:95vw;max-height:90vh;overflow-y:auto;padding:24px;position:relative">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+            <span id="res-modal-title" style="font-size:15px;font-weight:700">New Resource Request</span>
+            <button class="btn-sm" onclick="closeResModal()" style="padding:4px 10px">✕</button>
+          </div>
+          <input type="hidden" id="res-edit-id">
+          <div id="res-form-body"></div>
+          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px">
+            <button class="btn-ghost" onclick="closeResModal()">Cancel</button>
+            <button class="btn-primary" onclick="saveResource()">💾 Save</button>
+          </div>
+        </div>
+      </div>
 
       <!-- ════ RESOURCE: Status Modal ════ -->
       <div id="resource-status-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
@@ -1668,11 +1777,15 @@ svg.icon { display: inline-block; vertical-align: middle; }
 <script src="views/budget.js"></script>
 <script src="views/license.js"></script>
 <script src="views/device.js"></script>
+<script src="views/bulk_import.js"></script>
+<script src="views/resource.js"></script>
 <script src="views/cost.js"></script>
 <style>
+  #resource-detail-drawer.open { transform: translateX(0); }
   .badge-purple { background:#E9D5FF; color:#6B21A8; }
   .badge-teal   { background:#CCFBF1; color:#115E59; }
   .badge-yellow { background:#FEF9C3; color:#854D0E; }
+  #resource-detail-drawer.open { transform: translateX(0); }
 </style>
 <script>initApp();</script>
 
