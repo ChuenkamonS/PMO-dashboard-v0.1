@@ -170,6 +170,38 @@ function renderCost() {
     switchCostTab('overview', document.querySelector('.cost-stab[data-tab="overview"]'));
   }
 }
+function openInfraModal(project, program) {
+  const s = typeof loadSettings === 'function' ? loadSettings() : null;
+  const projects = s?.projects || ['AOA-MP','TTB','Geo9','Release 2.1','Release 3'];
+  const infraCosts = loadInfraCosts();
+
+  document.getElementById('infra-modal').style.display = 'flex';
+  document.getElementById('infra-form').innerHTML = `
+    <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px">
+      <div class="fg"><label>Project *</label>
+        <select id="inf-project" class="ri">
+          <option value="">— เลือกโครงการ —</option>
+          ${projects.map(p=>`<option value="${esc(p)}" ${p===project?'selected':''}>${esc(p)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fg"><label>Program *</label>
+        <input id="inf-program" class="ri" placeholder="เช่น AWS, DataDog, BrowserStack" value="${esc(program||'')}">
+      </div>
+      <div class="fg"><label>Monthly Cost (THB) *</label>
+        <input id="inf-monthly" class="ri" type="number" min="0" placeholder="0"
+          value="${project && program ? (infraCosts[project]?.[program]||'') : ''}">
+      </div>
+      <div class="fg"><label>Type</label>
+        <select id="inf-type" class="ri">
+          <option value="General">General</option>
+          <option value="AI">AI</option>
+          <option value="Cloud">Cloud</option>
+          <option value="Monitoring">Monitoring</option>
+          <option value="Testing">Testing</option>
+        </select>
+      </div>
+    </div>`;
+}
 function closeInfraModal() { document.getElementById('infra-modal').style.display = 'none'; }
 
 // Edit all projects for a given program
