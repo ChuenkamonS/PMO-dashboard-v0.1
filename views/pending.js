@@ -43,12 +43,22 @@ function formatDateTime(iso) {
 }
 
 // ── Tab state ──
-let _pendingTab = 'awaiting';
+let _pendingTab = 'submitted';
 let _pendingSearch = '';
 
 function switchPendingTab(tab) {
   _pendingTab = tab;
-  document.querySelectorAll('.pend-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.pend-tab-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === tab);
+    // Reset inline background/color so CSS class takes over
+    if(b.dataset.tab === tab) {
+      b.style.background = '';
+      b.style.color = '';
+    } else {
+      b.style.background = 'transparent';
+      b.style.color = 'var(--text-2)';
+    }
+  });
   renderPendingContent();
 }
 
