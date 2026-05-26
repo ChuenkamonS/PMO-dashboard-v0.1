@@ -102,23 +102,7 @@ function renderCost() {
     <div class="metric-card"><div class="metric-label">Annual Budget</div>
       <div class="metric-val">${money(totalBudget)}</div>
       <div class="metric-sub">Monthly: ${money(totalBudget/12)}</div></div>
-      <div class="fg"><label>Program *</label>
-        <input id="inf-program" class="ri" placeholder="เช่น AWS, DataDog, BrowserStack" value="${esc(program||'')}">
-      </div>
-      <div class="fg"><label>Monthly Cost (THB) *</label>
-        <input id="inf-monthly" class="ri" type="number" min="0" placeholder="0"
-          value="${project && program ? (infraCosts[project]?.[program]||'') : ''}">
-      </div>
-      <div class="fg"><label>Type</label>
-        <select id="inf-type" class="ri">
-          <option value="General">General</option>
-          <option value="AI">AI</option>
-          <option value="Cloud">Cloud</option>
-          <option value="Monitoring">Monitoring</option>
-          <option value="Testing">Testing</option>
-        </select>
-      </div>
-    </div>`;
+  `;
 }
 function closeInfraModal() { document.getElementById('infra-modal').style.display = 'none'; }
 
@@ -250,4 +234,3 @@ function switchCostTab(tab, btn) {
       <button class="btn-primary" onclick="openInfraModal()" style="font-size:12px;padding:6px 14px">+ Add Infra Cost</button>`;
   }
 }
-
