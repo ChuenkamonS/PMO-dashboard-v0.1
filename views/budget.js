@@ -102,22 +102,35 @@ function renderBudgetTypeChart(rows) {
   if(!canvas || typeof Chart === 'undefined') return;
   if(canvas._chart) canvas._chart.destroy();
   const TYPE_COLORS = { sl:'#185FA5', hw:'#3B6D11', int:'#854F0B', ent:'#3C3489', dep:'#A32D2D' };
+  const TYPE_LABELS = { sl:'Software License', hw:'Hardware', int:'Team Activity', ent:'Client Expense', dep:'Deployment' };
   const total = rows.reduce((s,[,v]) => s+v.total, 0);
+  const COLORS = rows.map(([t]) => TYPE_COLORS[t]||'#888');
   canvas._chart = new Chart(canvas, {
     type: 'doughnut',
     data: {
-      labels: rows.map(([t]) => ({ sl:'Software License', hw:'Hardware', int:'Team Activity', ent:'Client Expense', dep:'Deployment' }[t] || t.toUpperCase())),
-      datasets: [{ data: rows.map(([,v]) => v.total), backgroundColor: rows.map(([t]) => TYPE_COLORS[t]||'#888'), borderWidth: 2, hoverOffset: 6 }]
+      labels: rows.map(([t]) => TYPE_LABELS[t] || t.toUpperCase()),
+      datasets: [{ data: rows.map(([,v]) => v.total), backgroundColor: COLORS, borderWidth: 2, hoverOffset: 6 }]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
       cutout: '62%',
       plugins: {
-        legend: { position: 'bottom', labels: { font: { size: 11 }, padding: 12, boxWidth: 12 } },
+        legend: { display: false },
         tooltip: { callbacks: { label: ctx => ` ${money(ctx.raw)} (${Math.round(ctx.raw/total*100)}%)` } }
       }
     }
   });
+  // Side legend
+  const legend = document.getElementById('bgt-type-legend');
+  if(legend) {
+    legend.innerHTML = rows.map(([t,v], i) => `
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+        <div style="width:8px;height:8px;border-radius:50%;background:${COLORS[i]};flex-shrink:0"></div>
+        <div style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${TYPE_LABELS[t]||t.toUpperCase()}</div>
+        <div style="font-size:11px;font-weight:500;color:var(--text-2);white-space:nowrap">${money(v.total)}</div>
+        <div style="font-size:10px;color:var(--text-3);min-width:28px;text-align:right">${total ? Math.round(v.total/total*100) : 0}%</div>
+      </div>`).join('');
+  }
 }
 
 // ── Trend tab ──
