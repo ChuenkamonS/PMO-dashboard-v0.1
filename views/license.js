@@ -289,8 +289,15 @@ function saveLicenseManual() {
   };
   if(editId) {
     const idx = licenses.findIndex(l => String(l.id)===String(editId));
-    if(idx>=0) licenses[idx] = { ...licenses[idx], ...data };
-    else licenses.push({ id: nextLicenseId(), ...data, createdAt: now });
+    if(idx>=0) {
+      // Update existing manual license
+      licenses[idx] = { ...licenses[idx], ...data };
+    } else {
+      // Editing a memo-sourced license — save as manual override with same id
+      const allLics = getAllLicenses();
+      const orig = allLics.find(l => String(l.id)===String(editId));
+      licenses.push({ ...(orig||{}), ...data, id: editId, createdAt: orig?.createdAt||now, source: 'manual' });
+    }
   } else {
     licenses.push({ id: nextLicenseId(), ...data, createdAt: now });
   }
