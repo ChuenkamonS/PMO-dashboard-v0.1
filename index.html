@@ -846,7 +846,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
               </div>
             </div>
             <div class="fg" style="margin-bottom:8px">
-              <label>หัวข้อเรื่อง <span style="font-weight:400;color:var(--text-3)">(สร้างอัตโนมัติ — แก้ไขได้)</span></label>
+              <label>หัวข้อเรื่อง * <span style="font-weight:400;color:var(--text-3)">(สร้างอัตโนมัติ — แก้ไขได้)</span></label>
               <input type="text" id="f-subject" placeholder="เว้นว่างเพื่อใช้อัตโนมัติ" oninput="this.dataset.manualEdit=this.value?'true':'false'" onfocus="if(!this.value)this.placeholder=memoSubject({type:selectedType,project:document.getElementById('f-project')?.value==='other'?document.getElementById('f-project-other')?.value:document.getElementById('f-project')?.value})">
             </div>
             <div class="fg">
@@ -870,7 +870,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <!-- SL fields -->
             <div class="fs" id="fs-sl">
               <div class="items-hdr" style="grid-template-columns:3fr 1.2fr 0.8fr 0.8fr 30px">
-                <span>ชื่อ Software</span><span>฿/เดือน</span><span>เดือน</span><span>จำนวน</span><span></span>
+                <span>ชื่อ Software *</span><span>฿/เดือน *</span><span>เดือน *</span><span>จำนวน *</span><span></span>
               </div>
               <div id="sl-rows">
                 <div class="item-row" style="grid-template-columns:3fr 1.2fr 0.8fr 0.8fr 30px">
@@ -884,7 +884,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <button class="add-btn" onclick="addSLRow()">+ เพิ่ม Software</button>
               <div class="form-grid" style="margin-top:12px">
                 <div class="fg"><label>วันที่แปลงเรท USD→THB</label><input type="date" id="sl-ratedate"></div>
-                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร</label><input type="text" placeholder="เช่น สองแสนห้าหมื่นบาทถ้วน"></div>
+                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร *</label><input type="text" placeholder="เช่น สองแสนห้าหมื่นบาทถ้วน"></div>
               </div>
               <div class="total-box"><span class="total-label">Total Amount</span><span class="total-val" id="sl-total">฿0</span></div>
             </div>
@@ -892,7 +892,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <!-- HW fields -->
             <div class="fs" id="fs-hw">
               <div class="items-hdr" style="grid-template-columns:3fr 1.4fr 1fr 30px">
-                <span>ชื่ออุปกรณ์</span><span>ราคา/ชิ้น (THB)</span><span>จำนวน</span><span></span>
+                <span>ชื่ออุปกรณ์ *</span><span>ราคา/ชิ้น (THB) *</span><span>จำนวน *</span><span></span>
               </div>
               <div id="hw-rows">
                 <div class="item-row" style="grid-template-columns:3fr 1.4fr 1fr 30px">
@@ -904,7 +904,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
               </div>
               <button class="add-btn" onclick="addHWRow()">+ เพิ่มอุปกรณ์</button>
               <div class="form-grid" style="margin-top:12px">
-                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร</label><input type="text" placeholder="เช่น หนึ่งแสนห้าหมื่นแปดพันบาทถ้วน"></div>
+                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร *</label><input type="text" placeholder="เช่น หนึ่งแสนห้าหมื่นแปดพันบาทถ้วน"></div>
                 <div class="fg"><label>ผู้รับผิดชอบดูแลอุปกรณ์</label><input type="text" placeholder="ชื่อ-นามสกุล"></div>
               </div>
               <div class="total-box"><span class="total-label">Total Amount</span><span class="total-val" id="hw-total">฿0</span></div>
@@ -913,10 +913,10 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <!-- INT fields -->
             <div class="fs" id="fs-int">
               <div class="form-grid" style="margin-bottom:12px">
-                <div class="fg"><label>ไตรมาส / ครั้งที่</label><input type="text" placeholder="เช่น Q2 / 2568"></div>
+                <div class="fg"><label>ไตรมาส / ครั้งที่ *</label><input type="text" placeholder="เช่น Q2 / 2568"></div>
                 <div class="fg"><label>วันที่จัดกิจกรรม *</label><input type="date"></div>
                 <div class="fg"><label>วงเงินต่อคน (บาท) *</label><input type="number" id="int-pp" value="1500" oninput="calcINT()"></div>
-                <div class="fg"><label>จำนวนเงินต่อคนเป็นตัวอักษร</label><input type="text" placeholder="หนึ่งพันห้าร้อยบาทถ้วน"></div>
+                <div class="fg"><label>จำนวนเงินต่อคนเป็นตัวอักษร *</label><input type="text" placeholder="หนึ่งพันห้าร้อยบาทถ้วน"></div>
               </div>
               <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:7px">รายชื่อผู้เข้าร่วม *</div>
               <div id="int-names">
@@ -1021,7 +1021,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 </select>
                 <input type="text" id="f-reviewer-title-other" placeholder="กรอกตำแหน่ง" style="display:none;margin-top:6px">
               </div>
-              <div class="fg"><label>วันที่ลงนาม</label><input type="date" id="f-signdate"></div>
+              <div class="fg"><label>วันที่ลงนาม *</label><input type="date" id="f-signdate"></div>
             </div>
             <div style="font-size:11px;font-weight:600;color:var(--text-3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px">Approver</div>
             <div class="form-grid-3">
@@ -1046,7 +1046,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 </select>
                 <input type="text" id="f-appr-title-other" placeholder="กรอกตำแหน่ง" style="display:none;margin-top:6px">
               </div>
-              <div class="fg"><label>วันที่ลงนาม</label><input type="date" id="f-apprdate"></div>
+              <div class="fg"><label>วันที่ลงนาม *</label><input type="date" id="f-apprdate"></div>
             </div>
           </div>
 
