@@ -23,7 +23,7 @@ function pendingAge(memo) {
   if(!iso) return 0;
   return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000));
 }
-function currentUser() { return 'Chuen K.'; }
+function currentUser() { return document.getElementById('sb-uname')?.textContent?.trim() || 'Chuen K.'; }
 function appendAuditLog(memos, memoNo, action, comment) {
   const idx = memos.findIndex(m => m.memoNo === memoNo);
   if(idx<0) return;
@@ -147,7 +147,7 @@ function buildPendingCard(memo) {
   const days   = pendingAge(memo);
   const amt    = Number(memo.total)||0;
   const stage  = memo.approvalStage || 'Pending A1';
-  const isOwn  = (memo.requesterName || memo.reviewerName) === currentUser();
+  const isOwn  = (memo.requesterName || '') === currentUser();
   const canAct = _pendingTab==='awaiting' && !isOwn;
 
   const waitCls = days > 7
@@ -405,7 +405,7 @@ function openDetailModal(memoNo) {
         </div>`).join('')
     : '<div style="font-size:12px;color:var(--text-3);padding:8px 0">ยังไม่มีประวัติ</div>';
 
-  const isOwn  = memo.reviewerName===currentUser();
+  const isOwn  = (memo.requesterName || '') === currentUser();
   const canAct = (!memo.status||memo.status==='pending') && !isOwn;
 
   document.getElementById('detail-content').innerHTML = `
