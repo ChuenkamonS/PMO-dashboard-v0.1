@@ -230,38 +230,69 @@ function buildPendingCard(memo) {
 
 // ── Draft Card ──
 function buildDraftCard(memo) {
-  const typeIcon = { sl:'SL', hw:'HW', int:'INT', ent:'ENT', dep:'DEP' }[memo.type] || '?';
-  const iconBg   = { sl:'background:#E6F1FB;color:#0C447C', hw:'background:#F1EFE8;color:#444441', int:'background:#EAF3DE;color:#27500A', ent:'background:#FAEEDA;color:#633806', dep:'background:#EEEDFE;color:#3C3489' }[memo.type] || 'background:#F1EFE8;color:#444441';
-  const created  = formatDateTime(memo.createdAt);
+  const amt    = Number(memo.total)||0;
+  const typeLabel = { sl:'Software License', hw:'Hardware', int:'Team Activity', ent:'Client Expense', dep:'Deployment' }[memo.type] || memo.typeLabel || '-';
+  const accentColor = { sl:'#185FA5', hw:'#444441', int:'#3B6D11', ent:'#854F0B', dep:'#3C3489' }[memo.type] || '#888780';
 
-  return `<div class="pend-card" style="border:1px solid var(--border);border-radius:var(--r);margin-bottom:8px;overflow:hidden;border-left:3px solid var(--gray-200)">
-    <div style="padding:12px 14px;display:flex;align-items:flex-start;gap:10px">
-      <div style="width:34px;height:34px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:600;${iconBg}">${typeIcon}</div>
-      <div style="flex:1;min-width:0">
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px">
-          <span style="font-size:13px;font-weight:600;color:var(--text)">${esc(memo.memoNo)}</span>
-          <span class="badge badge-gray" style="font-size:9px">Draft</span>
+  return `<div class="pend-card" id="pcard-${esc(memo.memoNo)}" style="border:1px solid var(--border);border-radius:var(--r);margin-bottom:8px;overflow:hidden">
+    <div style="display:flex;align-items:stretch">
+      <div style="width:4px;background:${accentColor};flex-shrink:0;border-radius:var(--r) 0 0 var(--r)"></div>
+      <div style="flex:1;padding:14px 16px">
+
+        <!-- Header -->
+        <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:12px">
+          <div style="flex:1">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap">
+              <span style="font-size:14px;font-weight:600;color:var(--text)">${esc(typeLabel)}${memo.project ? ' — ' + esc(memo.project) : ''}</span>
+              <span class="badge badge-gray" style="font-size:9px">Draft</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:11px;color:var(--text-3)">${esc(memo.memoNo)}</span>
+              <span style="color:var(--border-md)">·</span>
+              <span style="font-size:11px;color:var(--text-3)">${esc(formatDateTime(memo.createdAt))}</span>
+            </div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-size:16px;font-weight:600;color:var(--text)">${esc(money(amt))}</div>
+          </div>
         </div>
-        <div style="font-size:11px;color:var(--text-2)">
-          ${esc(memo.project||'—')} · ${esc(memo.typeLabel||memo.type||'—')}
+
+        <!-- Info block -->
+        <div style="display:flex;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden;margin-bottom:10px">
+          <div style="flex:1;padding:9px 13px;border-right:1px solid var(--border)">
+            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">โครงการ</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(memo.project||'-')}</div>
+          </div>
+          <div style="flex:1;padding:9px 13px;border-right:1px solid var(--border)">
+            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">ผู้ขอ</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(memo.requesterName||memo.reviewerName||'-')}</div>
+            <div style="font-size:10px;color:var(--text-3)">${esc(memo.requesterTitle||'PMO')}</div>
+          </div>
+          <div style="flex:1;padding:9px 13px;border-right:1px solid var(--border)">
+            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Reviewer (A1)</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(memo.reviewerName||'-')}</div>
+            <div style="font-size:10px;color:var(--text-3)">${esc(memo.reviewerTitle||'-')}</div>
+          </div>
+          <div style="flex:1;padding:9px 13px">
+            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Approver (A2)</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(memo.approverName||'—')}</div>
+            <div style="font-size:10px;color:var(--text-3)">${esc(memo.approverTitle||'-')}</div>
+          </div>
         </div>
-        <div style="font-size:11px;color:var(--text-3);margin-top:2px">บันทึกเมื่อ ${esc(created)}</div>
+
+        <!-- Actions -->
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
+          <button class="btn-sm" data-action="draft-view" data-memo="${esc(memo.memoNo)}" style="font-size:12px;padding:5px 10px">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> View
+          </button>
+          <button class="btn-sm" data-action="draft-edit" data-memo="${esc(memo.memoNo)}" style="font-size:12px;padding:5px 10px;color:var(--blue)">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Edit
+          </button>
+          <button class="btn-sm" data-action="draft-delete" data-memo="${esc(memo.memoNo)}" style="font-size:12px;padding:5px 10px;color:var(--red)">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete
+          </button>
+        </div>
       </div>
-      <div style="text-align:right;flex-shrink:0">
-        <div style="font-size:15px;font-weight:600;color:var(--text)">${esc(money(Number(memo.total)||0))}</div>
-      </div>
-    </div>
-    <div style="height:0.5px;background:var(--border)"></div>
-    <div style="padding:10px 14px;display:flex;align-items:center;gap:6px;justify-content:flex-end">
-      <button class="btn-sm" data-action="draft-view" data-memo="${esc(memo.memoNo)}" style="font-size:12px;padding:5px 10px">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> View
-      </button>
-      <button class="btn-sm" data-action="draft-edit" data-memo="${esc(memo.memoNo)}" style="font-size:12px;padding:5px 10px;color:var(--blue)">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Edit
-      </button>
-      <button class="btn-sm" data-action="draft-delete" data-memo="${esc(memo.memoNo)}" style="font-size:12px;padding:5px 10px;color:var(--red)">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete
-      </button>
     </div>
   </div>`;
 }
