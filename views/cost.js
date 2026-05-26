@@ -54,23 +54,20 @@ function getApprovedMemosByProject() {
 
 // ── Main render ──
 function renderCost() {
-  const infraCosts  = loadInfraCosts();   // { project: { program: monthlyTHB } }
-  const costBudgets = loadCostBudgets();  // { project: { program: annualTHB } }
+  const infraCosts  = loadInfraCosts();
+  const costBudgets = loadCostBudgets();
   const licByProj   = getLicenseCostByProject();
 
-  // All projects union
   const allProjects = [...new Set([
     ...Object.keys(licByProj),
     ...Object.keys(infraCosts),
     ...Object.keys(costBudgets),
   ])].sort();
 
-  // All infra programs union
   const allInfraPrograms = [...new Set(
     Object.values(infraCosts).flatMap(p => Object.keys(p))
   )].sort();
 
-  // Compute per-project totals
   let totalLicense = 0, totalInfra = 0, totalBudget = 0;
   const projData = allProjects.map(proj => {
     const licCost  = Object.values(licByProj[proj]||{}).reduce((s,v)=>s+v,0);
@@ -83,9 +80,6 @@ function renderCost() {
   });
 
   const totalActual = totalLicense + totalInfra;
-  const remaining   = Math.max(0, totalBudget - totalActual);
-  const ytd = totalActual * (CUR_MONTH + 1);
-  const variance = totalBudget ? Math.round(((totalActual - totalBudget/12) / (totalBudget/12)) * 100) : 0;
 
   // ── KPI Cards ──
   const kpi = document.getElementById('cost-kpi');
@@ -103,6 +97,83 @@ function renderCost() {
       <div class="metric-val">${money(totalBudget)}</div>
       <div class="metric-sub">Monthly: ${money(totalBudget/12)}</div></div>
   `;
+
+  // ── Cost by Project Table ──
+  const projBody = document.getElementById('cost-proj-body');
+  if(projBody) {
+    if(!projData.length) {
+      projBody.innerHTML = `<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล — กรอก Infra Cost หรือเพิ่ม License ก่อน</td></tr>`;
+    } else {
+      projBody.innerHTML = projData.map(d => `<tr>
+          <td style="padding-left:14px;font-weight:500">${esc(d.proj)}</td>
+          <td class="mono">${money(d.licCost)}</td>
+          <td class="mono">${money(d.infraCost)}</td>
+          <td class="mono" style="font-weight:700">${money(d.total)}</td>
+        </tr>`).join('') + `<tr style="background:var(--bg);font-weight:600">
+        <td style="padding-left:14px">Total</td>
+        <td class="mono">${money(totalLicense)}</td>
+        <td class="mono">${money(totalInfra)}</td>
+        <td class="mono" style="color:var(--blue)">${money(totalActual)}</td>
+      </tr>`;
+    }
+  }
+
+  // ── Infra Cost Matrix ──
+  const infraThead = document.getElementById('cost-infra-thead');
+  const infraBody  = document.getElementById('cost-infra-body');
+  if(infraThead && infraBody) {
+    if(!allInfraPrograms.length) {
+      infraThead.innerHTML = '';
+      infraBody.innerHTML = `<tr><td colspan="3" style="padding:16px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล Infra — กด "+ Add Infra Cost" เพื่อเพิ่ม</td></tr>`;
+    } else {
+      const infraProjects = [...new Set(Object.keys(infraCosts))].sort();
+      const thS = 'padding:8px 12px;font-size:11px;font-weight:600;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap';
+      infraThead.innerHTML = `<tr>
+        <th style="${thS};text-align:left;padding-left:14px">Program</th>
+        ${infraProjects.map(p => `<th style="${thS}">${esc(p)}</th>`).join('')}
+        <th style="${thS}">Total/Mo</th>
+        <th style="${thS}">Actions</th>
+      </tr>`;
+      const tdS = 'padding:7px 12px;border-bottom:1px solid var(--border);font-size:12px;text-align:right';
+      infraBody.innerHTML = allInfraPrograms
+        .sort((a,b) => {
+          const ta = infraProjects.reduce((s,p)=>s+(infraCosts[p]?.[a]||0),0);
+          const tb = infraProjects.reduce((s,p)=>s+(infraCosts[p]?.[b]||0),0);
+          return tb - ta;
+        })
+        .map(prog => {
+          const rowTotal = infraProjects.reduce((s,p) => s+(infraCosts[p]?.[prog]||0), 0);
+          return `<tr>
+            <td style="${tdS};text-align:left;padding-left:14px;font-weight:500">${esc(prog)}</td>
+            ${infraProjects.map(proj => {
+              const val = infraCosts[proj]?.[prog];
+              return val
+                ? `<td style="${tdS};cursor:pointer" onclick="openInfraModal('${esc(proj)}','${esc(prog)}')" title="Click to edit">${money(val)}</td>`
+                : `<td style="${tdS};color:var(--text-3)">—</td>`;
+            }).join('')}
+            <td style="${tdS};font-weight:700;color:var(--blue)">${money(rowTotal)}</td>
+            <td style="${tdS};text-align:center;white-space:nowrap">
+              <button class="btn-sm" style="padding:2px 7px;font-size:11px" onclick="openInfraModalForProgram('${esc(prog)}')">✎</button>
+              <button class="btn-sm" style="padding:2px 7px;font-size:11px;color:var(--red)" onclick="deleteInfraProgram('${esc(prog)}')">✕</button>
+            </td>
+          </tr>`;
+        }).join('') + `<tr style="background:var(--bg)">
+          <td style="${tdS};text-align:left;padding-left:14px;font-weight:600;color:var(--text-2)">Total</td>
+          ${infraProjects.map(proj => {
+            const projTotal = allInfraPrograms.reduce((s,prog) => s+(infraCosts[proj]?.[prog]||0), 0);
+            return `<td style="${tdS};font-weight:600">${projTotal ? money(projTotal) : '—'}</td>`;
+          }).join('')}
+          <td style="${tdS};font-weight:700;color:var(--blue)">${money(allInfraPrograms.reduce((s,prog) => s+infraProjects.reduce((ss,p)=>ss+(infraCosts[p]?.[prog]||0),0), 0))}</td>
+          <td></td>
+        </tr>`;
+    }
+  }
+
+  // Init tab buttons on first load
+  const actions = document.getElementById('cost-tab-actions');
+  if(actions && !actions.hasChildNodes()) {
+    switchCostTab('overview', document.querySelector('.cost-stab[data-tab="overview"]'));
+  }
 }
 function closeInfraModal() { document.getElementById('infra-modal').style.display = 'none'; }
 
