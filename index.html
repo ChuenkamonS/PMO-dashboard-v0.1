@@ -1193,17 +1193,11 @@ svg.icon { display: inline-block; vertical-align: middle; }
           <select id="bgt-project" onchange="renderBudget()"><option value="all">ทุกโครงการ</option><option>AOA-MP</option><option>TTB</option><option>Geo9</option><option>Release 2.1</option><option>Release 3</option></select>
           <input id="bgt-search" type="search" placeholder="ค้นหา memo/project" oninput="renderBudget()">
           <select id="bgt-filter-type" onchange="renderBudget()"><option value="all">ทุกประเภท</option><option value="sl">SL</option><option value="hw">HW</option><option value="int">INT</option><option value="ent">ENT</option><option value="dep">DEP</option></select>
-          <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="downloadTemplate('budget')" title="Download Template">⬇ Template</button>
-          <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="importBulk('budget')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Import Excel
-          </button>
         </div>
 
         <!-- KPI cards -->
-        <div class="metric-row" style="grid-template-columns:repeat(4,1fr)">
+        <div class="metric-row" style="grid-template-columns:repeat(2,1fr)">
           <div class="metric-card"><div class="metric-label">Approved Spend</div><div class="metric-val" id="bgt-total">฿0</div><div class="metric-sub" id="bgt-total-count">0 รายการ</div></div>
-          <div class="metric-card"><div class="metric-label">Budget Utilization</div><div class="metric-val" id="bgt-util">0%</div><div class="metric-sub" id="bgt-near-limit">0 Projects > 80%</div></div>
         </div>
 
         <!-- Sub-tab bar -->
@@ -1218,12 +1212,17 @@ svg.icon { display: inline-block; vertical-align: middle; }
 
         <!-- Tab: Overview -->
         <div id="bgt-tab-overview" class="cost-tab-panel">
-          <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:12px;margin-bottom:12px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
             <div class="card" style="padding:16px">
-              <div style="font-size:12px;font-weight:600;margin-bottom:12px">Budget vs Actual — รายโปรเจค</div>
+              <div style="font-size:12px;font-weight:600;margin-bottom:10px">Spend by Type</div>
+              <div style="height:220px"><canvas id="bgt-type-chart"></canvas></div>
             </div>
             <div class="card" style="padding:16px">
-              <div style="font-size:12px;font-weight:600;margin-bottom:12px">Spend by Type</div>
+              <div style="font-size:12px;font-weight:600;margin-bottom:10px">Spend by Project</div>
+              <div style="display:flex;gap:12px;height:220px">
+                <div style="flex:0 0 160px"><canvas id="bgt-proj-chart"></canvas></div>
+                <div id="bgt-proj-legend" style="flex:1;overflow-y:auto;padding-top:4px"></div>
+              </div>
             </div>
           </div>
           <div class="card" style="padding:0;overflow:hidden">
@@ -1232,7 +1231,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <span style="font-size:11px;color:var(--text-3)">คลิก row เพื่อดู memo รายการย่อย</span>
             </div>
             <table class="hist-table">
-              <thead><tr><th>Project</th><th>Budget</th><th>Actual Spend</th><th>Remaining</th><th>Utilization</th><th>Status</th></tr></thead>
+              <thead><tr><th>Project</th><th>Actual Spend</th><th>Status</th></tr></thead>
               <tbody id="bgt-summary-body"></tbody>
             </table>
           </div>
