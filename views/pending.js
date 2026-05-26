@@ -382,31 +382,87 @@ function confirmReject() {
 function openDetailModal(memoNo) {
   const memo = loadMemos().find(m=>m.memoNo===memoNo);
   if(!memo) return;
-  const auditLog = (memo.auditLog||[]).map(e=>`<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)"><div style="font-size:11px;color:var(--text-3);white-space:nowrap">${esc(shortDate(e.timestamp))}</div><div style="font-size:11px;color:var(--text-2)"><strong>${esc(e.actor)}</strong> — ${esc(e.action)}${e.comment?`<br><span style="color:var(--text-3)">${esc(e.comment)}</span>`:''}</div></div>`).join('')||'<div style="font-size:11px;color:var(--text-3);padding:8px 0">ยังไม่มีประวัติ</div>';
-  const sections = (memo.sections||[]).map(s=>`<div style="margin-bottom:12px"><div style="font-size:12px;font-weight:700;color:var(--blue);margin-bottom:6px">${esc(s.title)}</div>${s.html}</div>`).join('');
+
+  const typeLabel = { sl:'Software License', hw:'Hardware', int:'Team Activity', ent:'Client Expense', dep:'Deployment' }[memo.type] || (memo.type||'').toUpperCase();
+  const accentColor = { sl:'#185FA5', hw:'#444441', int:'#3B6D11', ent:'#854F0B', dep:'#3C3489' }[memo.type] || '#888780';
+  const statusCls = memo.status==='completed'?'badge-green':memo.status==='rejected'?'badge-red':memo.status==='draft'?'badge-gray':'badge-amber';
+  const statusLabel = memo.status==='completed'?'Completed':memo.status==='rejected'?'Rejected':memo.status==='draft'?'Draft':'Pending';
+
+  const sections = (memo.sections||[]).map(s=>`
+    <div style="margin-bottom:16px">
+      <div style="font-size:11px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">${esc(s.title)}</div>
+      <div style="border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden;font-size:12px">${s.html}</div>
+    </div>`).join('');
+
+  const auditLog = (memo.auditLog||[]).length
+    ? (memo.auditLog||[]).map(e=>`
+        <div style="display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)">
+          <div style="font-size:11px;color:var(--text-3);white-space:nowrap;min-width:90px">${esc(shortDate(e.timestamp))}</div>
+          <div style="font-size:12px;color:var(--text-2)">
+            <span style="font-weight:600;color:var(--text)">${esc(e.actor)}</span> — ${esc(e.action)}
+            ${e.comment?`<div style="font-size:11px;color:var(--text-3);margin-top:2px">${esc(e.comment)}</div>`:''}
+          </div>
+        </div>`).join('')
+    : '<div style="font-size:12px;color:var(--text-3);padding:8px 0">ยังไม่มีประวัติ</div>';
+
   const isOwn  = memo.reviewerName===currentUser();
   const canAct = (!memo.status||memo.status==='pending') && !isOwn;
+
   document.getElementById('detail-content').innerHTML = `
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
-      <div style="font-size:16px;font-weight:700">${esc(memo.memoNo)}</div>
-      <span class="badge ${badgeClass(memo.type)}">${esc(String(memo.type||'').toUpperCase())}</span>
-      <span class="badge ${memo.status==='completed'?'badge-green':memo.status==='rejected'?'badge-red':'badge-amber'}">${memo.status==='completed'?'Completed':memo.status==='rejected'?'Rejected':'Pending'}</span>
+    <!-- Header -->
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+      <div style="width:4px;height:32px;background:${accentColor};border-radius:2px;flex-shrink:0"></div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+          <span style="font-size:15px;font-weight:700;color:var(--text)">${esc(memo.memoNo)}</span>
+          <span class="badge ${statusCls}" style="font-size:10px">${statusLabel}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-3)">${esc(typeLabel)} · ${esc(memo.project||'-')} · ${esc(memo.date||'-')}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-size:20px;font-weight:700;color:var(--blue-800)">${esc(money(memo.total||0))}</div>
+      </div>
     </div>
-    <div class="form-grid" style="margin-bottom:12px">
-      <div><div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase">วันที่</div><div>${esc(memo.date||'-')}</div></div>
-      <div><div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase">โครงการ</div><div>${esc(memo.project||'-')}</div></div>
-      <div><div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase">เรียน</div><div>${esc(memo.to||'-')}</div></div>
-      <div><div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase">วงเงิน</div><div style="font-size:16px;font-weight:700;color:var(--blue-800)">${esc(money(memo.total||0))}</div></div>
+
+    <!-- Info row -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      <div style="background:var(--bg);border-radius:var(--r-sm);padding:10px 12px">
+        <div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:4px">เรียน</div>
+        <div style="font-size:13px;color:var(--text)">${esc(memo.to||'-')}</div>
+      </div>
+      <div style="background:var(--bg);border-radius:var(--r-sm);padding:10px 12px">
+        <div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:4px">เหตุผลในการขอ</div>
+        <div style="font-size:12px;color:var(--text);line-height:1.5">${esc(memo.reason||'-')}</div>
+      </div>
     </div>
-    <div style="margin-bottom:10px"><div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:4px">เหตุผล</div><div style="font-size:13px">${esc(memo.reason||'-')}</div></div>
-    <div style="margin-bottom:14px">${sections}</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px;background:var(--bg);border-radius:var(--r-sm);margin-bottom:14px">
-      <div><div style="font-size:10px;color:var(--text-3);font-weight:600;margin-bottom:2px">ผู้ขอ</div><div style="font-weight:600">${esc(memo.requesterName||memo.reviewerName||'-')}</div><div style="font-size:11px;color:var(--text-3)">${esc(memo.requesterTitle||'PMO')}</div></div>
-      <div><div style="font-size:10px;color:var(--text-3);font-weight:600;margin-bottom:2px">APPROVER</div><div style="font-weight:600">${esc(memo.approverName||'-')}</div><div style="font-size:11px;color:var(--text-3)">${esc(memo.approverTitle||'-')}</div></div>
+
+    <!-- Sections (tables) -->
+    ${sections}
+
+    <!-- People -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      <div style="border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px">
+        <div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:4px">ผู้ขอ</div>
+        <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(memo.requesterName||memo.reviewerName||'-')}</div>
+        <div style="font-size:11px;color:var(--text-3)">${esc(memo.requesterTitle||'PMO')}</div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px">
+        <div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:4px">Approver</div>
+        <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(memo.approverName||'-')}</div>
+        <div style="font-size:11px;color:var(--text-3)">${esc(memo.approverTitle||'-')}</div>
+      </div>
     </div>
-    ${memo.approvalNote?`<div style="padding:10px;background:var(--green-50);border-radius:var(--r-sm);margin-bottom:10px;font-size:12px"><strong>Approval Note:</strong> ${esc(memo.approvalNote)}</div>`:''}
-    ${memo.rejectionReason?`<div style="padding:10px;background:var(--red-50);border-radius:var(--r-sm);margin-bottom:10px;font-size:12px"><strong>Rejection Reason:</strong> ${esc(memo.rejectionReason)}</div>`:''}
-    <div><div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:8px">Audit Log</div>${auditLog}</div>`;
+
+    <!-- Approval/Rejection note -->
+    ${memo.approvalNote?`<div style="padding:10px 12px;background:var(--green-50);border-radius:var(--r-sm);margin-bottom:12px;font-size:12px;color:var(--green)"><span style="font-weight:600">Approval Note:</span> ${esc(memo.approvalNote)}</div>`:''}
+    ${memo.rejectionReason?`<div style="padding:10px 12px;background:var(--red-50);border-radius:var(--r-sm);margin-bottom:12px;font-size:12px;color:var(--red)"><span style="font-weight:600">Rejection Reason:</span> ${esc(memo.rejectionReason)}</div>`:''}
+
+    <!-- Audit log -->
+    <div>
+      <div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Audit Log</div>
+      <div style="border:1px solid var(--border);border-radius:var(--r-sm);padding:0 12px">${auditLog}</div>
+    </div>`;
+
   const acts = document.getElementById('detail-actions');
   acts.innerHTML = canAct
     ? `<button class="btn-primary" onclick="closeDetailModal();openApproveModal('${esc(memo.memoNo)}')">✓ Approve</button>
