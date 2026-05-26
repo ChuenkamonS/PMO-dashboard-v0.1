@@ -163,10 +163,10 @@ function buildPendingCard(memo) {
     <!-- Left accent + content -->
     <div style="display:flex;align-items:stretch">
       <div style="width:4px;background:${accentColor};flex-shrink:0;border-radius:var(--r) 0 0 var(--r)"></div>
-      <div style="flex:1;padding:14px 16px">
+      <div style="flex:1;padding:10px 14px">
 
         <!-- Header: title + status + amount -->
-        <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:12px">
+        <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px">
           <div style="flex:1">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap">
               <span style="font-size:14px;font-weight:600;color:var(--text)">${esc(typeLabel)}${memo.project ? ' — ' + esc(memo.project) : ''}</span>
@@ -179,36 +179,36 @@ function buildPendingCard(memo) {
             </div>
           </div>
           <div style="text-align:right;flex-shrink:0">
-            <div style="font-size:16px;font-weight:600;color:var(--text)">${esc(money(amt))}</div>
+            <div style="font-size:14px;font-weight:600;color:var(--text)">${esc(money(amt))}</div>
             <span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;${waitCls}">รอ ${days} วัน</span>
           </div>
         </div>
 
         <!-- Info block: โครงการ / ผู้ขอ / Reviewer / Approver -->
-        <div style="display:flex;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden;margin-bottom:10px">
-          <div style="flex:1;padding:9px 13px;border-right:1px solid var(--border)">
-            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">โครงการ</div>
-            <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(memo.project||'-')}</div>
+        <div style="display:flex;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden;margin-bottom:8px">
+          <div style="flex:1;padding:7px 11px;border-right:1px solid var(--border)">
+            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">โครงการ</div>
+            <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(memo.project||'-')}</div>
           </div>
-          <div style="flex:1;padding:9px 13px;border-right:1px solid var(--border)">
-            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">ผู้ขอ</div>
-            <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(memo.requesterName||memo.reviewerName||'-')}</div>
+          <div style="flex:1;padding:7px 11px;border-right:1px solid var(--border)">
+            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">ผู้ขอ</div>
+            <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(memo.requesterName||memo.reviewerName||'-')}</div>
             <div style="font-size:10px;color:var(--text-3)">${esc(memo.requesterTitle||'PMO')}</div>
           </div>
-          <div style="flex:1;padding:9px 13px;border-right:1px solid var(--border)">
-            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Reviewer (A1)</div>
-            <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(memo.reviewerName||'-')}</div>
+          <div style="flex:1;padding:7px 11px;border-right:1px solid var(--border)">
+            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">Reviewer (A1)</div>
+            <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(memo.reviewerName||'-')}</div>
             <div style="font-size:10px;color:var(--text-3)">${esc(memo.reviewerTitle||'-')}</div>
           </div>
-          <div style="flex:1;padding:9px 13px">
-            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Approver (A2)</div>
-            <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(memo.approverName||'—')}</div>
+          <div style="flex:1;padding:7px 11px">
+            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">Approver (A2)</div>
+            <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(memo.approverName||'—')}</div>
             <div style="font-size:10px;color:var(--text-3)">${esc(memo.approverTitle||'-')}</div>
           </div>
         </div>
 
         <!-- Action row -->
-        <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-top:8px">
           ${canAct ? `
             <button class="btn-approve" data-action="approve" data-memo="${esc(memo.memoNo)}" style="font-size:12px;padding:5px 12px">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Approve
@@ -237,10 +237,10 @@ function buildDraftCard(memo) {
   return `<div class="pend-card" id="pcard-${esc(memo.memoNo)}" style="border:1px solid var(--border);border-radius:var(--r);margin-bottom:8px;overflow:hidden">
     <div style="display:flex;align-items:stretch">
       <div style="width:4px;background:${accentColor};flex-shrink:0;border-radius:var(--r) 0 0 var(--r)"></div>
-      <div style="flex:1;padding:14px 16px">
+      <div style="flex:1;padding:10px 14px">
 
         <!-- Header -->
-        <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:12px">
+        <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px">
           <div style="flex:1">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap">
               <span style="font-size:14px;font-weight:600;color:var(--text)">${esc(typeLabel)}${memo.project ? ' — ' + esc(memo.project) : ''}</span>
@@ -253,35 +253,35 @@ function buildDraftCard(memo) {
             </div>
           </div>
           <div style="text-align:right;flex-shrink:0">
-            <div style="font-size:16px;font-weight:600;color:var(--text)">${esc(money(amt))}</div>
+            <div style="font-size:14px;font-weight:600;color:var(--text)">${esc(money(amt))}</div>
           </div>
         </div>
 
         <!-- Info block -->
-        <div style="display:flex;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden;margin-bottom:10px">
-          <div style="flex:1;padding:9px 13px;border-right:1px solid var(--border)">
-            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">โครงการ</div>
-            <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(memo.project||'-')}</div>
+        <div style="display:flex;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden;margin-bottom:8px">
+          <div style="flex:1;padding:7px 11px;border-right:1px solid var(--border)">
+            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">โครงการ</div>
+            <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(memo.project||'-')}</div>
           </div>
-          <div style="flex:1;padding:9px 13px;border-right:1px solid var(--border)">
-            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">ผู้ขอ</div>
-            <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(memo.requesterName||memo.reviewerName||'-')}</div>
+          <div style="flex:1;padding:7px 11px;border-right:1px solid var(--border)">
+            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">ผู้ขอ</div>
+            <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(memo.requesterName||memo.reviewerName||'-')}</div>
             <div style="font-size:10px;color:var(--text-3)">${esc(memo.requesterTitle||'PMO')}</div>
           </div>
-          <div style="flex:1;padding:9px 13px;border-right:1px solid var(--border)">
-            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Reviewer (A1)</div>
-            <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(memo.reviewerName||'-')}</div>
+          <div style="flex:1;padding:7px 11px;border-right:1px solid var(--border)">
+            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">Reviewer (A1)</div>
+            <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(memo.reviewerName||'-')}</div>
             <div style="font-size:10px;color:var(--text-3)">${esc(memo.reviewerTitle||'-')}</div>
           </div>
-          <div style="flex:1;padding:9px 13px">
-            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Approver (A2)</div>
-            <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(memo.approverName||'—')}</div>
+          <div style="flex:1;padding:7px 11px">
+            <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">Approver (A2)</div>
+            <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(memo.approverName||'—')}</div>
             <div style="font-size:10px;color:var(--text-3)">${esc(memo.approverTitle||'-')}</div>
           </div>
         </div>
 
         <!-- Actions -->
-        <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-top:8px">
           <button class="btn-sm" data-action="draft-view" data-memo="${esc(memo.memoNo)}" style="font-size:12px;padding:5px 10px">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> View
           </button>
@@ -443,12 +443,12 @@ function openDetailModal(memoNo) {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
       <div style="border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px">
         <div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:4px">ผู้ขอ</div>
-        <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(memo.requesterName||memo.reviewerName||'-')}</div>
+        <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(memo.requesterName||memo.reviewerName||'-')}</div>
         <div style="font-size:11px;color:var(--text-3)">${esc(memo.requesterTitle||'PMO')}</div>
       </div>
       <div style="border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px">
         <div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:4px">Approver</div>
-        <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(memo.approverName||'-')}</div>
+        <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(memo.approverName||'-')}</div>
         <div style="font-size:11px;color:var(--text-3)">${esc(memo.approverTitle||'-')}</div>
       </div>
     </div>
