@@ -195,8 +195,8 @@ function badgeClass(type) {
   return { sl:'badge-blue', hw:'badge-gray', int:'badge-green', ent:'badge-amber', dep:'badge-purple' }[type] || 'badge-gray';
 }
 function table(headers, rows, numericIndexes=[], centerIndexes=[]) {
-  const thStyle = 'background:#e8e8e8;color:#111;font-weight:600;padding:8px 10px;text-align:center;border:1px solid #ccc;font-size:13pt';
-  const tdBase  = 'padding:7px 10px;border:1px solid #ccc;font-size:13pt';
+  const thStyle = 'background:#e8e8e8;color:#111;font-weight:600;padding:7px 10px;text-align:center;border:1px solid #ccc;font-size:12px';
+  const tdBase  = 'padding:7px 10px;border:1px solid #ccc;font-size:12px';
   // Last row = total row if numericIndexes provided
   const bodyRows = rows.map((row, ri) => {
     const isLast = ri === rows.length - 1 && numericIndexes.length > 0;
