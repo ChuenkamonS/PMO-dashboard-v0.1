@@ -816,7 +816,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <span class="card-title">ข้อมูลทั่วไป</span>
             </div>
             <div class="form-grid" style="margin-bottom:10px">
-              <div class="fg"><label>เลข Memo *</label><input type="text" id="f-memo-no" placeholder=""></div>
+              <div class="fg"><label>เลข Memo</label><input type="text" id="f-memo-no" placeholder=""></div>
               <div class="fg"><label>ลงวันที่ *</label><input type="date" id="f-date"></div>
               <div class="fg">
                 <label>โครงการ *</label>
@@ -870,7 +870,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <!-- SL fields -->
             <div class="fs" id="fs-sl">
               <div class="items-hdr" style="grid-template-columns:3fr 1.2fr 0.8fr 0.8fr 30px">
-                <span>ชื่อ Software *</span><span>฿/เดือน *</span><span>จำนวนเดือน *</span><span>จำนวน seat *</span><span></span>
+                <span>ชื่อ Software *</span><span>฿/เดือน *</span><span>เดือน *</span><span>จำนวน *</span><span></span>
               </div>
               <div id="sl-rows">
                 <div class="item-row" style="grid-template-columns:3fr 1.2fr 0.8fr 0.8fr 30px">
@@ -938,7 +938,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 <div class="fg"><label>สถานที่ *</label><input type="text" placeholder="เช่น ร้านอาหาร The River Café"></div>
                 <div class="fg"><label>จำนวนผู้เข้าร่วม (คน) *</label><input type="number" placeholder="10"></div>
                 <div class="fg"><label>วงเงินรวม (บาท) *</label><input type="number" placeholder="50000"></div>
-                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร *</label><input type="text" placeholder="เช่น ห้าหมื่นบาทถ้วน"></div>
+                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร</label><input type="text" placeholder="เช่น ห้าหมื่นบาทถ้วน"></div>
               </div>
             </div>
 
@@ -951,7 +951,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 <div class="fg"><label>รูปแบบ</label>
                   <select><option>Onsite</option><option>Online</option><option>Online / Onsite</option></select>
                 </div>
-                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร *</label><input type="text" placeholder="เช่น หนึ่งร้อยบาทถ้วน"></div>
+                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร</label><input type="text" placeholder="เช่น หนึ่งร้อยบาทถ้วน"></div>
                 <div class="fg"><label>วงเงินอำนาจอนุมัติ (บาท)</label><input type="text" value="500,000"></div>
               </div>
               <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:7px">รายชื่อพนักงานที่ Deploy <span style="font-weight:400;color:var(--text-3)">(optional)</span></div>
@@ -996,7 +996,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
           <div class="card">
             <div class="card-head">
               <div class="card-num" id="rev-num">4</div>
-              <span class="card-title">Reviewer & Approver *</span>
+              <span class="card-title">Reviewer & Approver</span>
             </div>
             <div style="font-size:11px;font-weight:600;color:var(--text-3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px">Reviewer</div>
             <div class="form-grid-3" style="margin-bottom:14px">
@@ -1052,6 +1052,10 @@ svg.icon { display: inline-block; vertical-align: middle; }
 
           <div class="action-row">
             <button class="btn-ghost" onclick="resetMemoForm()">ยกเลิก</button>
+            <button class="btn-sm" onclick="saveDraft()" style="font-size:13px;padding:8px 16px" id="btn-save-draft" style="display:none">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+              Save to Draft
+            </button>
             <button class="btn-primary" onclick="generateMemoPdf()">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               Save & Generate PDF
@@ -1063,7 +1067,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
 
       <!-- ════ PENDING ════ -->
       <div id="view-pending" class="view">
-        <div class="metric-row" style="grid-template-columns:repeat(2,1fr);margin-bottom:14px">
+        <div class="metric-row" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
           <div class="metric-card">
             <div class="metric-label">Awaiting My Approval</div>
             <div class="metric-val" id="pending-count" style="color:var(--amber)">0</div>
@@ -1073,6 +1077,11 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <div class="metric-label">My Requests Pending Approval</div>
             <div class="metric-val" id="pending-my-submitted" style="color:var(--blue)">0</div>
             <div class="metric-sub">รอผู้อื่นอนุมัติ</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Drafts</div>
+            <div class="metric-val" id="pending-draft-count" style="color:var(--text-2)">0</div>
+            <div class="metric-sub">บันทึกไว้ยังไม่ส่ง</div>
           </div>
         </div>
 
@@ -1084,6 +1093,9 @@ svg.icon { display: inline-block; vertical-align: middle; }
             </button>
             <button class="pend-tab-btn" data-tab="awaiting" onclick="switchPendingTab('awaiting')" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
               Awaiting My Approval <span class="tab-count badge badge-amber" style="margin-left:4px"></span>
+            </button>
+            <button class="pend-tab-btn" data-tab="drafts" onclick="switchPendingTab('drafts')" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
+              Drafts <span class="tab-count" style="margin-left:4px;font-size:11px;color:var(--text-3)"></span>
             </button>
           </div>
         </div>
@@ -1171,7 +1183,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
           <div style="overflow-x:auto">
             <table class="hist-table">
               <thead><tr>
-                <th style="width:11%;padding-left:16px">เลข Memo*</th>
+                <th style="width:11%;padding-left:16px">เลข Memo</th>
                 <th style="width:6%">Type</th>
                 <th style="width:10%">โครงการ</th>
                 <th style="width:10%">ผู้ขอ</th>
