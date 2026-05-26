@@ -305,3 +305,4 @@ function switchCostTab(tab, btn) {
       <button class="btn-primary" onclick="openInfraModal()" style="font-size:12px;padding:6px 14px">+ Add Infra Cost</button>`;
   }
 }
+
