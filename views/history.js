@@ -123,7 +123,7 @@ function histMatchesAmount(memo, preset, minVal, maxVal) {
 
 // ── Filter / sort (backend-ready: swap loadMemos() for API later) ──
 function getHistoryMemos() {
-  return loadMemos();
+  return loadMemos().filter(m => m.status === 'completed' || m.status === 'rejected');
 }
 
 function filteredHistoryMemos() {
