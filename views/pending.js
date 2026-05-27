@@ -125,43 +125,44 @@ function renderPendingContent() {
   }
 
   // Build table
-  const thead = `<table class="hist-table" style="table-layout:fixed;width:100%">
+  const thead = `<table class="hist-table hist-table--dense" style="table-layout:fixed;width:100%">
     <colgroup>
       <col style="width:3px">
-      <col style="width:14%">
+      <col style="width:13%">
+      <col style="width:5%">
+      <col style="width:8%">
+      <col style="width:10%">
+      <col style="width:8%">
+      <col style="width:9%">
+      <col style="width:13%">
+      <col style="width:13%">
       <col style="width:6%">
-      <col style="width:9%">
-      <col style="width:11%">
-      <col style="width:9%">
-      <col style="width:11%">
-      <col style="width:12%">
-      <col style="width:12%">
-      <col style="width:7%">
-      <col style="width:9%">
+      <col style="width:10%">
     </colgroup>
-    <thead><tr style="background:var(--bg)">
-      <th style="padding:0;width:3px"></th>
-      <th style="padding:8px 10px;font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border)">เลข Memo</th>
-      <th style="padding:8px 10px;font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border)">Type</th>
-      <th style="padding:8px 10px;font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border)">โครงการ</th>
-      <th style="padding:8px 10px;font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border)">ผู้ขอ</th>
-      <th style="padding:8px 10px;font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);text-align:right">วงเงิน</th>
-      <th style="padding:8px 10px;font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border)">สถานะ</th>
-      <th style="padding:8px 10px;font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border)">Reviewer (A1)</th>
-      <th style="padding:8px 10px;font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border)">Approver (A2)</th>
-      <th style="padding:8px 10px;font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border)">รอ</th>
-      <th style="padding:8px 10px;font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);text-align:center">จัดการ</th>
+    <thead><tr>
+      <th style="padding:0;width:3px;border-bottom:1px solid var(--border)"></th>
+      <th>เลข Memo</th>
+      <th>Type</th>
+      <th>โครงการ</th>
+      <th>ผู้ขอ</th>
+      <th style="text-align:right">วงเงิน</th>
+      <th>สถานะ</th>
+      <th>Reviewer (A1)</th>
+      <th>Approver (A2)</th>
+      <th>รอ</th>
+      <th style="text-align:center">จัดการ</th>
     </tr></thead><tbody>`;
 
   const rows = _pendingTab === 'drafts'
     ? memos.map(m => buildDraftRow(m)).join('')
     : memos.map(m => buildPendingRow(m)).join('');
 
-  list.innerHTML = `<div style="border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
-    <div style="padding:8px 12px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-3);background:var(--bg)">
+  list.innerHTML = `<div class="card" style="padding:0;overflow:hidden">
+    <div style="padding:8px 14px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-3)">
       แสดง ${memos.length} รายการ · คลิกแถวเพื่อดูรายละเอียด
     </div>
-    ${thead}${rows}</tbody></table></div>`;
+    <div style="overflow-x:auto">${thead}${rows}</tbody></table></div>
+  </div>`;
 
   // Event delegation
   list.onclick = function(e) {
@@ -205,29 +206,29 @@ function buildPendingRow(memo) {
 
   return `<tr style="cursor:pointer" onclick="if(!event.target.closest('[data-action]'))openDetailModal('${esc(memo.memoNo)}')">
     <td style="width:3px;padding:0;background:${accent}"></td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
       <span style="font-size:12px;font-weight:600;color:var(--blue)">${esc(memo.memoNo)}</span>
       <div style="font-size:10px;color:var(--text-3)">${esc(formatDateTime(memo.createdAt))}</div>
     </td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
       <span style="font-size:10px;font-weight:600;background:${typeBg};color:${typeTxt};padding:2px 7px;border-radius:4px">${typeLbl}</span>
     </td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-size:12px;color:var(--text)">${esc(memo.project||'—')}</td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-size:12px;color:var(--text)">${esc(memo.requesterName||memo.reviewerName||'—')}</td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border);text-align:right;font-size:12px;font-weight:600;color:var(--text)">${money(amt)}</td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text)">${esc(memo.project||'—')}</td>
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text)">${esc(memo.requesterName||memo.reviewerName||'—')}</td>
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border);text-align:right;font-size:12px;font-weight:600;color:var(--text)">${money(amt)}</td>
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
       <span style="font-size:10px;font-weight:500;padding:2px 7px;border-radius:4px;${statusCls}">${esc(statusLbl)}</span>
     </td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-size:11px;color:var(--text)">
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text)">
       ${esc(memo.reviewerName||'—')}<div style="font-size:10px;color:var(--text-3)">${esc(memo.reviewerTitle||'')}</div>
     </td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-size:11px;color:var(--text)">
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text)">
       ${esc(memo.approverName||'—')}<div style="font-size:10px;color:var(--text-3)">${esc(memo.approverTitle||'')}</div>
     </td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
       <span style="font-size:10px;font-weight:500;padding:2px 7px;border-radius:10px;${waitCls}">${days} วัน</span>
     </td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border);text-align:center;white-space:nowrap">${actionBtns}</td>
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border);text-align:center;white-space:nowrap">${actionBtns}</td>
   </tr>`;
 }
 
@@ -240,22 +241,22 @@ function buildDraftRow(memo) {
 
   return `<tr style="cursor:pointer" onclick="if(!event.target.closest('[data-action]'))openDetailModal('${esc(memo.memoNo)}')">
     <td style="width:3px;padding:0;background:${accent}"></td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
       <span style="font-size:12px;font-weight:600;color:var(--text-2)">${esc(memo.memoNo)}</span>
       <div style="font-size:10px;color:var(--text-3)">${esc(formatDateTime(memo.createdAt))}</div>
     </td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
       <span style="font-size:10px;font-weight:600;background:${typeBg};color:${typeTxt};padding:2px 7px;border-radius:4px">${typeLbl}</span>
     </td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-size:12px;color:var(--text)">${esc(memo.project||'—')}</td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-size:12px;color:var(--text)">${esc(memo.requesterName||memo.reviewerName||'—')}</td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border);text-align:right;font-size:12px;font-weight:600;color:var(--text)">${money(amt)}</td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text)">${esc(memo.project||'—')}</td>
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text)">${esc(memo.requesterName||memo.reviewerName||'—')}</td>
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border);text-align:right;font-size:12px;font-weight:600;color:var(--text)">${money(amt)}</td>
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
       <span style="font-size:10px;font-weight:500;background:#F1EFE8;color:#5F5E5A;padding:2px 7px;border-radius:4px">Draft</span>
     </td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-size:11px;color:var(--text-3)" colspan="2">—</td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">—</td>
-    <td style="padding:8px 10px;border-bottom:0.5px solid var(--border);text-align:center;white-space:nowrap">
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-3)" colspan="2">—</td>
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border)">—</td>
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border);text-align:center;white-space:nowrap">
       <button data-action="draft-view"   data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 6px;cursor:pointer">⊙</button>
       <button data-action="draft-edit"   data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 6px;cursor:pointer;color:var(--blue);margin-left:2px">✎</button>
       <button data-action="draft-delete" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 6px;cursor:pointer;color:var(--red);margin-left:2px">✕</button>
