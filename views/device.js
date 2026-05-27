@@ -116,10 +116,10 @@ function renderDeviceSummaries(devices) {
         <td>${d.other||'—'}</td>
         <td style="text-align:right;padding-right:16px;font-weight:600">${d.total}</td>
       </tr>`
-    ).join('') + `<tr style="background:var(--bg);font-weight:600;font-size:11px">
-        <td style="padding-left:16px;color:var(--text-3)">Total</td>
-        <td>${grandTotal.mobile}</td><td>${grandTotal.tablet}</td><td>${grandTotal.other}</td>
-        <td style="text-align:right;padding-right:16px">${grandTotal.total}</td>
+    ).join('') + `<tr style="background:var(--blue-50);border-top:1.5px solid var(--blue-100);font-weight:600;font-size:12px">
+        <td style="padding-left:16px;color:var(--blue-800)">Total</td>
+        <td style="color:var(--blue-800)">${grandTotal.mobile}</td><td style="color:var(--blue-800)">${grandTotal.tablet}</td><td style="color:var(--blue-800)">${grandTotal.other}</td>
+        <td style="text-align:right;padding-right:16px;color:var(--blue-800)">${grandTotal.total}</td>
       </tr>`;
   }
 
