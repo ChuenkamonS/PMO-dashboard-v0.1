@@ -170,26 +170,26 @@ function renderDevice() {
 
   tbody.innerHTML = devices.map(d => {
     const statusB = deviceStatusBadge(d.status);
-    const condB   = deviceConditionBadge(d.condition);
-    const warr    = warrantyStatus(d.warranty);
     const platLbl = PLATFORM_LABEL[d.platform||'other'] || d.platform || '—';
     const typeLbl = TYPE_LABEL[d.type||'other'] || d.type || '—';
-    return `<tr>
+    const updDate = d.updatedAt ? shortDate(d.updatedAt) : (d.assignedDate ? shortDate(d.assignedDate) : '—');
+    return `<tr style="cursor:pointer" onclick="openDeviceDetail(${d.id})">
       <td style="padding-left:16px;font-weight:500">
         ${esc(d.name)}
         ${d.brand?`<div style="font-size:10px;color:var(--text-3);font-weight:400">${esc(d.brand)}</div>`:''}
       </td>
-      <td><span style="font-size:11px;font-weight:500">${esc(platLbl)}</span></td>
-      <td><span style="font-size:11px">${esc(typeLbl)}</span></td>
-      <td><span style="font-family:monospace;font-size:11px">${esc(d.assetTag||'—')}</span></td>
-      <td><span style="font-family:monospace;font-size:11px">${esc(d.serial||'—')}</span></td>
+      <td style="font-size:12px">${esc(platLbl)}</td>
+      <td style="font-size:12px">${esc(typeLbl)}</td>
+      <td style="font-family:monospace;font-size:11px">${esc(d.assetTag||'—')}</td>
+      <td style="font-family:monospace;font-size:11px">${esc(d.serial||'—')}</td>
+      <td style="font-size:12px">
+        ${esc(d.owner||'—')}
+        ${d.position?`<div style="font-size:10px;color:var(--text-3)">${esc(d.position)}</div>`:''}
+      </td>
       <td style="font-size:12px">${esc(d.project||'—')}</td>
-      <td style="font-size:12px">${esc(d.owner||'—')}${d.assignedDate?`<br><span style="font-size:10px;color:var(--text-3)">${esc(shortDate(d.assignedDate))}</span>`:''}</td>
-      <td style="font-size:11px">${esc(d.company||'—')}</td>
-      <td><span class="badge ${condB.cls}" style="font-size:10px">${esc(condB.label)}</span></td>
-      <td>${warr?`<span class="badge ${warr.cls}" style="font-size:10px">${esc(warr.label)}</span>`:'<span style="color:var(--text-3);font-size:11px">—</span>'}</td>
       <td style="text-align:center"><span class="badge ${statusB.cls}" style="font-size:10px">${esc(statusB.label)}</span></td>
-      <td style="text-align:center;white-space:nowrap">
+      <td style="font-size:11px;color:var(--text-3)">${updDate}</td>
+      <td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">
         <button class="btn-sm" data-action="edit" data-id="${d.id}" style="padding:3px 7px;font-size:11px">✎</button>
         <button class="btn-sm" data-action="delete" data-id="${d.id}" style="padding:3px 7px;font-size:11px;color:var(--red)">✕</button>
       </td>
@@ -218,11 +218,18 @@ function openDeviceModal(id) {
     setVal('dev-name', d.name);        setVal('dev-brand', d.brand);
     setVal('dev-platform', d.platform||'other'); setVal('dev-type', d.type||'mobile');
     setVal('dev-asset', d.assetTag);   setVal('dev-serial', d.serial);
+    setVal('dev-asset-acc', d.assetAcc); setVal('dev-qty', d.qty||1);
+    setVal('dev-os-version', d.osVersion);
     setVal('dev-company', d.company);  setVal('dev-project', d.project);
-    setVal('dev-owner', d.owner);      setVal('dev-assigned-date', d.assignedDate);
+    setVal('dev-owner', d.owner);      setVal('dev-position', d.position);
+    setVal('dev-assigned-date', d.assignedDate);
     setVal('dev-return-date', d.returnDate); setVal('dev-memo-ref', d.memoRef);
     setVal('dev-warranty', d.warranty); setVal('dev-condition', d.condition||'good');
     setVal('dev-status', d.status||'in-use'); setVal('dev-note', d.note);
+    setVal('dev-qa-owner', d.qaOwner);
+    // Load photo preview
+    const prevImg = document.getElementById('dev-photo-preview');
+    if(prevImg) { prevImg.src = d.photo||''; prevImg.style.display = d.photo ? 'block' : 'none'; }
   } else {
     document.getElementById('dev-modal-title').textContent = 'Add Device';
     document.getElementById('dev-edit-id').value = '';
@@ -243,16 +250,37 @@ function saveDevice() {
   const devices = loadDevices();
   const now = new Date().toISOString();
   const g = id => document.getElementById(id)?.value?.trim()||'';
+  const photoInput = document.getElementById('dev-photo-input');
+  let photoData = null;
+  if(photoInput?.files?.length) {
+    // Read photo as base64
+    try {
+      const file = photoInput.files[0];
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const editId2 = document.getElementById('dev-edit-id').value;
+        const devices2 = loadDevices();
+        const idx2 = editId2 ? devices2.findIndex(d => d.id === Number(editId2)) : -1;
+        if(idx2 >= 0) { devices2[idx2].photo = ev.target.result; storeDevices(devices2); }
+      };
+      reader.readAsDataURL(file);
+    } catch(e) {}
+  }
+
   const data = {
     name,
     brand:        g('dev-brand'),
     platform:     g('dev-platform') || 'other',
     type:         g('dev-type') || 'mobile',
     assetTag:     g('dev-asset'),
+    assetAcc:     g('dev-asset-acc'),
     serial:       g('dev-serial'),
+    qty:          Number(g('dev-qty'))||1,
+    osVersion:    g('dev-os-version'),
     company:      g('dev-company'),
     project:      g('dev-project'),
     owner:        g('dev-owner'),
+    position:     g('dev-position'),
     assignedDate: g('dev-assigned-date'),
     returnDate:   g('dev-return-date'),
     memoRef:      g('dev-memo-ref'),
@@ -260,6 +288,7 @@ function saveDevice() {
     condition:    g('dev-condition') || 'good',
     status:       g('dev-status') || 'in-use',
     note:         g('dev-note'),
+    qaOwner:      g('dev-qa-owner'),
     updatedAt:    now,
   };
   if(editId) {
@@ -304,3 +333,115 @@ function exportDeviceCsv() {
 document.addEventListener('click', e => {
   if(e.target === document.getElementById('device-modal')) closeDeviceModal();
 });
+
+// ── Device Detail Panel ──
+function openDeviceDetail(id) {
+  const d = loadDevices().find(dev => dev.id === id);
+  if(!d) return;
+  const platLbl = PLATFORM_LABEL[d.platform||'other'] || d.platform || '—';
+  const typeLbl = TYPE_LABEL[d.type||'other'] || d.type || '—';
+  const statusB = deviceStatusBadge(d.status);
+  const condB   = deviceConditionBadge(d.condition);
+  const typeIcon = { mobile:'📱', tablet:'📟', laptop:'💻', other:'🖥' }[d.type||'other'] || '🖥';
+
+  const panel = document.getElementById('dev-detail-panel');
+  if(!panel) { openDeviceModal(id); return; }
+
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:42px;height:42px;border-radius:var(--r-sm);background:var(--blue-50);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">${typeIcon}</div>
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--text)">${esc(d.name)}</div>
+          <div style="font-size:11px;color:var(--text-3)">${esc(d.brand||'')} · ${esc(platLbl)} · ${esc(typeLbl)}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <span class="badge ${statusB.cls}" style="font-size:10px">${esc(statusB.label)}</span>
+        <span class="badge ${condB.cls}" style="font-size:10px">${esc(condB.label)}</span>
+        <button class="btn-sm" onclick="openDeviceModal(${id})" style="font-size:11px;padding:3px 8px">✎ Edit</button>
+        <button class="btn-sm" onclick="document.getElementById('dev-detail-panel').innerHTML=''" style="font-size:11px;padding:3px 8px">✕</button>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px">
+
+      <div>
+        <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Device info</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+          ${infoCell('OS', platLbl)}
+          ${infoCell('OS version', d.osVersion||'—')}
+          ${infoCell('Type', typeLbl)}
+          ${infoCell('Serial no.', d.serial||'—')}
+          ${infoCell('Asset IT', d.assetTag||'—')}
+          ${infoCell('Asset ACC', d.assetAcc||'—')}
+          ${infoCell('QTY', d.qty||1)}
+          ${infoCell('Warranty', d.warranty ? shortDate(d.warranty) : '—')}
+          ${infoCell('Condition', condB.label)}
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Assignment</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+          ${infoCell('Assignee', d.owner||'—')}
+          ${infoCell('Position', d.position||'—')}
+          ${infoCell('Project', d.project||'—')}
+          ${infoCell('Received date', d.assignedDate ? shortDate(d.assignedDate) : '—')}
+          ${infoCell('QA Owner', d.qaOwner||'—')}
+          ${infoCell('Updated', d.updatedAt ? shortDate(d.updatedAt) : '—')}
+        </div>
+      </div>
+
+      ${d.note ? `<div>
+        <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Remark</div>
+        <div style="background:var(--bg);border-radius:var(--r-sm);padding:8px 12px;font-size:12px;color:var(--text-2)">${esc(d.note)}</div>
+      </div>` : ''}
+
+      <div>
+        <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Device photo</div>
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          ${d.photo
+            ? `<img src="${d.photo}" style="width:80px;height:80px;border-radius:var(--r-sm);object-fit:cover;border:1px solid var(--border);cursor:pointer" onclick="window.open('${d.photo}')" title="คลิกเพื่อดูขนาดเต็ม">`
+            : `<div style="width:80px;height:80px;border-radius:var(--r-sm);border:1px dashed var(--border-md);background:var(--bg);display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:11px">No photo</div>`}
+          <div>
+            <label style="cursor:pointer">
+              <input type="file" accept="image/*" style="display:none" onchange="uploadDevicePhoto(${id}, this)">
+              <span class="btn-sm" style="font-size:11px;padding:4px 10px;display:inline-block">📷 Upload photo</span>
+            </label>
+            <div style="font-size:10px;color:var(--text-3);margin-top:4px">JPG, PNG · max 5MB<br>Photo replaces previous</div>
+          </div>
+        </div>
+      </div>
+
+    </div>`;
+
+  panel.style.display = 'block';
+  panel.scrollIntoView({ behavior:'smooth', block:'nearest' });
+}
+
+function infoCell(label, value) {
+  return `<div style="background:var(--bg);border-radius:var(--r-sm);padding:8px 10px">
+    <div style="font-size:9px;color:var(--text-3);margin-bottom:2px">${esc(String(label))}</div>
+    <div style="font-size:12px;color:var(--text);font-weight:500">${esc(String(value))}</div>
+  </div>`;
+}
+
+function uploadDevicePhoto(id, input) {
+  if(!input.files?.length) return;
+  const file = input.files[0];
+  if(file.size > 5 * 1024 * 1024) { alert('ไฟล์ใหญ่เกิน 5MB'); return; }
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const devices = loadDevices();
+    const idx = devices.findIndex(d => d.id === id);
+    if(idx >= 0) {
+      devices[idx].photo = ev.target.result;
+      devices[idx].updatedAt = new Date().toISOString();
+      storeDevices(devices);
+      openDeviceDetail(id);
+      renderDevice();
+    }
+  };
+  reader.readAsDataURL(file);
+}
