@@ -18,6 +18,29 @@ function nextDeviceId() {
   return max + 1;
 }
 
+
+// ── Find existing device by unique keys (Asset IT, Asset ACC, Serial) ──
+function findExistingDevice(devices, data) {
+  return devices.findIndex(d => {
+    if(data.assetTag && d.assetTag && data.assetTag === d.assetTag) return true;
+    if(data.assetAcc && d.assetAcc && data.assetAcc === d.assetAcc) return true;
+    if(data.serial   && d.serial   && data.serial   === d.serial)   return true;
+    return false;
+  });
+}
+
+
+// ── Find existing device by unique keys (Asset IT | Asset ACC | Serial) ──
+function findDuplicateDevice(devices, data, excludeId) {
+  return devices.find(d => {
+    if(excludeId && d.id === excludeId) return false;
+    if(data.assetTag && d.assetTag && data.assetTag === d.assetTag) return true;
+    if(data.assetAcc  && d.assetAcc  && data.assetAcc  === d.assetAcc)  return true;
+    if(data.serial    && d.serial    && data.serial    === d.serial)    return true;
+    return false;
+  });
+}
+
 // ── Helpers ──
 const PLATFORM_LABEL = { ios:'iOS', android:'Android', huawei:'Huawei', windows:'Windows', other:'Other' };
 const TYPE_LABEL = { mobile:'Mobile', tablet:'Tablet', laptop:'Laptop', other:'Other' };
@@ -330,7 +353,18 @@ function saveDevice() {
     const idx = devices.findIndex(d => d.id === Number(editId));
     if(idx >= 0) devices[idx] = { ...devices[idx], ...data };
   } else {
-    devices.push({ id: nextDeviceId(), ...data, createdAt: now });
+    // Check for duplicate by unique keys
+    const dupIdx = findExistingDevice(devices, data);
+    if(dupIdx >= 0) {
+      const dup = devices[dupIdx];
+      const matchField = (data.assetTag && data.assetTag === dup.assetTag) ? `Asset IT: ${data.assetTag}`
+                       : (data.assetAcc && data.assetAcc === dup.assetAcc) ? `Asset ACC: ${data.assetAcc}`
+                       : `Serial: ${data.serial}`;
+      if(!confirm(`พบอุปกรณ์ซ้ำ (${matchField})\nอัปเดตข้อมูลอันเดิมแทน?`)) return;
+      devices[dupIdx] = { ...devices[dupIdx], ...data };
+    } else {
+      devices.push({ id: nextDeviceId(), ...data, createdAt: now });
+    }
   }
   storeDevices(devices);
   closeDeviceModal();
@@ -501,3 +535,4 @@ function uploadDevicePhoto(id, input) {
   };
   reader.readAsDataURL(file);
 }
+
