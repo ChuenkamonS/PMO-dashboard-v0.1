@@ -314,13 +314,28 @@ function deleteDevice(id) {
 function exportDeviceCsv() {
   const devices = loadDevices();
   if(!devices.length) { alert('ไม่มีข้อมูลสำหรับ Export'); return; }
-  const headers = ['ID','Device Name','Brand','Platform','Type','IT Asset ID','Serial No','Owner','Assigned Date','Project','Company','Return Date','Warranty','Condition','Status','Memo Ref','Note'];
+  const headers = ['PBX Number','OS','Type','Brand / Model','QTY','Asset IT','Asset ACC','Serial','Assignee','Position','Project','Received date','QA Owner','Updated Date','Remark','OS version','Status','Condition','Warranty','Memo Ref'];
   const rows = devices.map(d => [
-    d.id, d.name, d.brand||'', PLATFORM_LABEL[d.platform]||d.platform||'',
-    TYPE_LABEL[d.type]||d.type||'', d.assetTag||'', d.serial||'',
-    d.owner||'', d.assignedDate||'', d.project||'', d.company||'',
-    d.returnDate||'', d.warranty||'', d.condition||'', d.status||'',
-    d.memoRef||'', d.note||''
+    d.pbxNumber||'',
+    PLATFORM_LABEL[d.platform||'other']||d.platform||'',
+    TYPE_LABEL[d.type||'other']||d.type||'',
+    d.name||'',
+    d.qty||1,
+    d.assetTag||'',
+    d.assetAcc||'',
+    d.serial||'',
+    d.owner||'',
+    d.position||'',
+    d.project||'',
+    d.assignedDate||'',
+    d.qaOwner||'',
+    d.updatedAt ? d.updatedAt.slice(0,10) : '',
+    d.note||'',
+    d.osVersion||'',
+    d.status||'',
+    d.condition||'',
+    d.warranty||'',
+    d.memoRef||''
   ]);
   const csv = [headers,...rows].map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob = new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8;'});
