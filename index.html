@@ -1535,21 +1535,23 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <div class="card" style="padding:0;overflow:hidden">
           <table class="hist-table">
             <thead><tr>
-              <th style="width:13%;padding-left:16px">Device / Brand</th>
-              <th style="width:7%">Platform</th>
+              <th style="width:16%;padding-left:16px">Brand / Model</th>
+              <th style="width:8%">OS</th>
               <th style="width:7%">Type</th>
-              <th style="width:10%">IT Asset ID</th>
-              <th style="width:10%">Serial No.</th>
-              <th style="width:10%">โครงการ</th>
-              <th style="width:10%">ผู้ถือ</th>
-              <th style="width:8%">Company</th>
-              <th style="width:8%">Condition</th>
-              <th style="width:9%">Warranty</th>
-              <th style="width:8%;text-align:center">สถานะ</th>
-              <th style="width:8%;text-align:center">Action</th>
+              <th style="width:10%">Asset IT</th>
+              <th style="width:11%">Serial No.</th>
+              <th style="width:11%">Assignee</th>
+              <th style="width:9%">Project</th>
+              <th style="width:9%;text-align:center">Status</th>
+              <th style="width:9%">Updated</th>
+              <th style="width:10%;text-align:center">Action</th>
             </tr></thead>
             <tbody id="dev-table-body"></tbody>
           </table>
+
+          <!-- Device detail panel -->
+          <div id="dev-detail-panel" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-top:12px"></div>
+
         </div>
       </div>
 
@@ -1907,7 +1909,10 @@ svg.icon { display: inline-block; vertical-align: middle; }
     </div>
     <div class="form-grid" style="margin-bottom:10px">
       <div class="fg"><label>IT Asset ID</label><input type="text" id="dev-asset" placeholder="เช่น OD-001"></div>
+      <div class="fg"><label>Asset ACC</label><input type="text" id="dev-asset-acc" placeholder="เช่น ACC-001"></div>
       <div class="fg"><label>Serial Number</label><input type="text" id="dev-serial" placeholder="S/N หรือ IMEI"></div>
+      <div class="fg"><label>QTY</label><input type="number" id="dev-qty" min="1" value="1"></div>
+      <div class="fg"><label>OS Version</label><input type="text" id="dev-os-version" placeholder="เช่น iOS 17.4.1"></div>
       <div class="fg"><label>Company</label>
         <select id="dev-company">
           <option value="">— ไม่ระบุ —</option>
@@ -1924,7 +1929,9 @@ svg.icon { display: inline-block; vertical-align: middle; }
       </div>
     </div>
     <div class="form-grid" style="margin-bottom:10px">
-      <div class="fg"><label>ผู้ถือครอง</label><input type="text" id="dev-owner" placeholder="ชื่อ-นามสกุล"></div>
+      <div class="fg"><label>Assignee</label><input type="text" id="dev-owner" placeholder="ชื่อ-นามสกุล"></div>
+      <div class="fg"><label>Position</label><input type="text" id="dev-position" placeholder="เช่น PMO, Developer"></div>
+      <div class="fg"><label>QA Owner</label><input type="text" id="dev-qa-owner" placeholder="เช่น Best IT"></div>
       <div class="fg"><label>วันที่รับอุปกรณ์</label><input type="date" id="dev-assigned-date"></div>
       <div class="fg"><label>Return Date</label><input type="date" id="dev-return-date"></div>
       <div class="fg"><label>Link HW Memo</label><input type="text" id="dev-memo-ref" placeholder="เช่น ORB-2605-004"></div>
@@ -1937,6 +1944,10 @@ svg.icon { display: inline-block; vertical-align: middle; }
     <div class="fg" style="margin-bottom:16px">
       <label>หมายเหตุ</label>
       <textarea id="dev-note" placeholder="รายละเอียดเพิ่มเติม..." style="min-height:52px"></textarea>
+      <div class="fg"><label>Device Photo</label>
+        <input type="file" id="dev-photo-input" accept="image/*" style="font-size:12px">
+        <img id="dev-photo-preview" src="" style="display:none;width:80px;height:80px;object-fit:cover;border-radius:var(--r-sm);margin-top:6px;border:1px solid var(--border)">
+      </div>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-ghost" onclick="closeDeviceModal()">ยกเลิก</button>
