@@ -183,9 +183,12 @@ function renderDevice() {
   if(statFilter !== 'all') devices = devices.filter(d => d.status === statFilter);
   if(projFilter !== 'all') devices = devices.filter(d => d.project === projFilter);
   if(compFilter !== 'all') devices = devices.filter(d => d.company === compFilter);
-  if(search) devices = devices.filter(d =>
-    `${d.name} ${d.brand} ${d.serial} ${d.assetTag} ${d.owner} ${d.project} ${d.company}`.toLowerCase().includes(search)
-  );
+  if(search) devices = devices.filter(d => [
+    d.name, d.brand, d.serial, d.assetTag, d.assetAcc, d.pbxNumber,
+    d.owner, d.position, d.project, d.company, d.osVersion,
+    d.qaOwner, d.note, d.memoRef, d.type, d.platform,
+    PLATFORM_LABEL[d.platform||'other'], TYPE_LABEL[d.type||'other']
+  ].some(v => v && String(v).toLowerCase().includes(search)));
 
   const tbody = document.getElementById('dev-table-body');
   if(!devices.length) {
@@ -535,4 +538,3 @@ function uploadDevicePhoto(id, input) {
   };
   reader.readAsDataURL(file);
 }
-
