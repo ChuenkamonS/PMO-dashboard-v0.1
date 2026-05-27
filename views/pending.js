@@ -127,8 +127,7 @@ function renderPendingContent() {
   // Build table
   const thead = `<table class="hist-table hist-table--dense" style="table-layout:fixed;width:100%">
     <colgroup>
-      <col style="width:3px">
-      <col style="width:13%">
+      <col style="width:14%">
       <col style="width:5%">
       <col style="width:8%">
       <col style="width:10%">
@@ -140,7 +139,6 @@ function renderPendingContent() {
       <col style="width:10%">
     </colgroup>
     <thead><tr>
-      <th style="padding:0;width:3px;border-bottom:1px solid var(--border)"></th>
       <th>เลข Memo</th>
       <th>Type</th>
       <th>โครงการ</th>
@@ -205,7 +203,6 @@ function buildPendingRow(memo) {
     : `<button class="btn-sm" data-action="detail" data-memo="${esc(memo.memoNo)}" style="font-size:11px;padding:3px 8px">Details</button>`;
 
   return `<tr style="cursor:pointer" onclick="if(!event.target.closest('[data-action]'))openDetailModal('${esc(memo.memoNo)}')">
-    <td style="width:3px;padding:0;background:${accent}"></td>
     <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
       <span style="font-size:12px;font-weight:600;color:var(--blue)">${esc(memo.memoNo)}</span>
       <div style="font-size:10px;color:var(--text-3)">${esc(formatDateTime(memo.createdAt))}</div>
@@ -240,7 +237,6 @@ function buildDraftRow(memo) {
   const typeTxt = TYPE_TEXT_PENDING[memo.type]  || '#444441';
 
   return `<tr style="cursor:pointer" onclick="if(!event.target.closest('[data-action]'))openDetailModal('${esc(memo.memoNo)}')">
-    <td style="width:3px;padding:0;background:${accent}"></td>
     <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
       <span style="font-size:12px;font-weight:600;color:var(--text-2)">${esc(memo.memoNo)}</span>
       <div style="font-size:10px;color:var(--text-3)">${esc(formatDateTime(memo.createdAt))}</div>
