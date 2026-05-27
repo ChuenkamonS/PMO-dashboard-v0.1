@@ -190,8 +190,8 @@ function renderDevice() {
       <td style="text-align:center"><span class="badge ${statusB.cls}" style="font-size:10px">${esc(statusB.label)}</span></td>
       <td style="font-size:11px;color:var(--text-3)">${updDate}</td>
       <td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">
-        <button class="btn-sm" data-action="edit" data-id="${d.id}" style="padding:3px 7px;font-size:11px">✎</button>
-        <button class="btn-sm" data-action="delete" data-id="${d.id}" style="padding:3px 7px;font-size:11px;color:var(--red)">✕</button>
+        <button class="btn-sm" onclick="event.stopPropagation();openDeviceModal(${d.id})" style="padding:3px 7px;font-size:11px">✎</button>
+        <button class="btn-sm" onclick="event.stopPropagation();deleteDevice(${d.id})" style="padding:3px 7px;font-size:11px;color:var(--red)">✕</button>
       </td>
     </tr>`;
   }).join('');
@@ -344,10 +344,17 @@ function openDeviceDetail(id) {
   const condB   = deviceConditionBadge(d.condition);
   const typeIcon = { mobile:'📱', tablet:'📟', laptop:'💻', other:'🖥' }[d.type||'other'] || '🖥';
 
-  const panel = document.getElementById('dev-detail-panel');
-  if(!panel) { openDeviceModal(id); return; }
+  let panel = document.getElementById('dev-detail-modal');
+  if(!panel) {
+    panel = document.createElement('div');
+    panel.id = 'dev-detail-modal';
+    panel.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:200;align-items:center;justify-content:center';
+    panel.onclick = e => { if(e.target === panel) panel.style.display='none'; };
+    document.body.appendChild(panel);
+  }
 
   panel.innerHTML = `
+    <div style="background:var(--surface);border-radius:var(--r);width:min(680px,95vw);max-height:85vh;overflow-y:auto;padding:20px 22px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)">
       <div style="display:flex;align-items:center;gap:10px">
         <div style="width:42px;height:42px;border-radius:var(--r-sm);background:var(--blue-50);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">${typeIcon}</div>
@@ -360,7 +367,7 @@ function openDeviceDetail(id) {
         <span class="badge ${statusB.cls}" style="font-size:10px">${esc(statusB.label)}</span>
         <span class="badge ${condB.cls}" style="font-size:10px">${esc(condB.label)}</span>
         <button class="btn-sm" onclick="openDeviceModal(${id})" style="font-size:11px;padding:3px 8px">✎ Edit</button>
-        <button class="btn-sm" onclick="document.getElementById('dev-detail-panel').innerHTML=''" style="font-size:11px;padding:3px 8px">✕</button>
+        <button class="btn-sm" onclick="document.getElementById('dev-detail-modal').style.display='none'" style="font-size:11px;padding:3px 8px">✕</button>
       </div>
     </div>
 
@@ -414,10 +421,9 @@ function openDeviceDetail(id) {
         </div>
       </div>
 
+    </div>
     </div>`;
-
-  panel.style.display = 'block';
-  panel.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  panel.style.display = 'flex';
 }
 
 function infoCell(label, value) {
