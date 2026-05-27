@@ -3,6 +3,8 @@
 // ─────────────────────────────────────────
 
 const DEVICE_KEY = 'orbit-pmo-devices-v1';
+const DEV_PAGE_SIZE = 20;
+let _devVisibleCount = DEV_PAGE_SIZE;
 
 function loadDevices() {
   try { const d = JSON.parse(localStorage.getItem(DEVICE_KEY)||'[]'); return Array.isArray(d)?d:[]; }
@@ -168,7 +170,15 @@ function renderDevice() {
     return;
   }
 
-  tbody.innerHTML = devices.map(d => {
+  // Reset visible count when filters change
+  const filterKey = JSON.stringify({search, platFilter, typeFilter, statFilter, projFilter, compFilter});
+  if(typeof _devLastFilter !== 'undefined' && _devLastFilter !== filterKey) _devVisibleCount = DEV_PAGE_SIZE;
+  window._devLastFilter = filterKey;
+
+  const visibleDevices = devices.slice(0, _devVisibleCount);
+  const remaining = devices.length - _devVisibleCount;
+
+  tbody.innerHTML = visibleDevices.map(d => {
     const statusB = deviceStatusBadge(d.status);
     const platLbl = PLATFORM_LABEL[d.platform||'other'] || d.platform || '—';
     const typeLbl = TYPE_LABEL[d.type||'other'] || d.type || '—';
@@ -203,6 +213,31 @@ function renderDevice() {
     if(btn.dataset.action==='edit')   openDeviceModal(id);
     if(btn.dataset.action==='delete') deleteDevice(id);
   };
+
+  // Load more footer
+  const footer = document.getElementById('dev-load-more-footer');
+  if(footer) {
+    if(remaining > 0) {
+      footer.style.display = '';
+      footer.innerHTML = `
+        <div style="padding:12px 14px;border-top:1px solid var(--border);text-align:center;background:var(--bg)">
+          <button class="btn-sm" onclick="devLoadMore()" style="font-size:12px;padding:6px 20px">
+            + Load ${Math.min(remaining, DEV_PAGE_SIZE)} more
+          </button>
+          <div style="font-size:11px;color:var(--text-3);margin-top:5px">แสดงอยู่ ${visibleDevices.length} จาก ${devices.length} รายการ</div>
+        </div>`;
+    } else {
+      footer.style.display = devices.length > DEV_PAGE_SIZE ? '' : 'none';
+      if(devices.length > DEV_PAGE_SIZE) {
+        footer.innerHTML = `<div style="padding:10px 14px;border-top:1px solid var(--border);text-align:center;background:var(--bg);font-size:11px;color:var(--text-3)">แสดงครบทั้งหมด ${devices.length} รายการ</div>`;
+      }
+    }
+  }
+}
+
+function devLoadMore() {
+  _devVisibleCount += DEV_PAGE_SIZE;
+  renderDevice();
 }
 
 // ── Modal ──
