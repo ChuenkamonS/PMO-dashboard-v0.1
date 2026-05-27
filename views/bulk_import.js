@@ -76,7 +76,7 @@ function numVal(v) { const n = Number(v); return isNaN(n) ? 0 : n; }
 function importLicenses(rows) {
   const existing = loadManualLicenses();
   const now = new Date().toISOString();
-  let added = 0, skipped = 0;
+  let added = 0, skipped = 0, updated = 0;
 
   rows.forEach(row => {
     const name = strVal(row['Name'] || row['name'] || row['Software Name'] || row['software_name'] || row['ชื่อ Software']);
@@ -126,7 +126,7 @@ function importLicenses(rows) {
 function importDevices(rows) {
   const existing = loadDevices();
   const now = new Date().toISOString();
-  let added = 0, skipped = 0;
+  let added = 0, skipped = 0, updated = 0;
 
   rows.forEach(row => {
     const name = strVal(row['Brand / Model'] || row['Name'] || row['name'] || row['Device Name']);
@@ -161,13 +161,27 @@ function importDevices(rows) {
       status:       'in-use',
       createdAt:    now,
     };
-    existing.push(device);
-    added++;
+    const dupIdx = typeof findExistingDevice === 'function'
+      ? findExistingDevice(existing, device)
+      : existing.findIndex(d => {
+          if(device.assetTag && d.assetTag && device.assetTag === d.assetTag) return true;
+          if(device.assetAcc && d.assetAcc && device.assetAcc === d.assetAcc) return true;
+          if(device.serial   && d.serial   && device.serial   === d.serial)   return true;
+          return false;
+        });
+
+    if(dupIdx >= 0) {
+      existing[dupIdx] = { ...existing[dupIdx], ...device, id: existing[dupIdx].id, createdAt: existing[dupIdx].createdAt };
+      updated++;
+    } else {
+      existing.push(device);
+      added++;
+    }
   });
 
   storeDevices(existing);
   renderDevice();
-  alert(`✓ Import สำเร็จ\nเพิ่ม ${added} device${skipped ? `\nข้ามแถวว่าง ${skipped} แถว` : ''}`);
+  alert(`✓ Import สำเร็จ\nเพิ่มใหม่ ${added}${updated ? ` · อัปเดตเดิม ${updated}` : ''}${skipped ? `\nข้ามแถวว่าง ${skipped}` : ''} รายการ`);
 }
 
 // ─────────────────────────────────
