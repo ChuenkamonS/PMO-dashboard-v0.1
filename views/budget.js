@@ -193,8 +193,10 @@ function renderBudgetOverview() {
 
   // ── KPIs ──
   const total    = approved.reduce((s,m) => s+(Number(m.total)||0), 0);
+  const infraMonthly = Object.values(loadInfraCosts()).reduce((s,p) => s + Object.values(p).reduce((ss,v)=>ss+v,0), 0);
+  const infraMonths  = rangeVal === 'all' ? 12 : parseInt(rangeVal);
   const slInfra  = approved.filter(m => m.type === 'sl').reduce((s,m) => s+(Number(m.total)||0), 0)
-                 + Object.values(loadInfraCosts()).reduce((s,p) => s+Object.values(p).reduce((ss,v)=>ss+v,0), 0);
+                 + infraMonthly * infraMonths;
   const others   = approved.filter(m => ['hw','int','ent','dep'].includes(m.type)).reduce((s,m) => s+(Number(m.total)||0), 0);
 
   const setKpi = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = money(val); };
@@ -918,43 +920,17 @@ function _renderBudgetVsActual(allProjects, infraCosts, licByProj) {
     else parsedItems.forEach(item => processItem((item.price||0)*(item.qty||1), item.months||12));
   });
 
-  // Budget per project = forecast avg × rangeVal months + infra × rangeVal
+  // Budget per project = current monthly license rate (from licByProj) × rangeVal + infra × rangeVal
+  // licByProj comes from getLicenseCostByProject() which reads active license records directly —
+  // this is the monthly cost we *expect* to keep paying, making Budget vs Actual meaningful.
   const projData = allProjects.map(proj => {
-    const licProgs  = {};
-    approved.forEach(memo => {
-      if((memo.project||'(ไม่ระบุ)') !== proj) return;
-      const startDate = parseThaiDate(memo.date) || parseThaiDate(memo.createdAt) || new Date();
-      const startMo = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
-      const slItems = memo.slItems || [];
-      const parsedItems = !slItems.length
-        ? _parseSLSectionHTML((memo.sections||[]).find(s=>s.title?.includes('Software'))?.html||'')
-        : slItems;
-      parsedItems.forEach(item => {
-        const prog = item.name || 'SL';
-        const mo   = item.months || 12;
-        const monthly = (item.price||0)*(item.qty||1);
-        for(let i = 0; i < mo; i++) {
-          const d = new Date(startMo.getFullYear(), startMo.getMonth()+i, 1);
-          const key = monthKey(d);
-          if(!licProgs[prog]) licProgs[prog] = {};
-          licProgs[prog][key] = (licProgs[prog][key]||0) + monthly;
-        }
-      });
-    });
-
-    // Forecast per prog = avg past actual
-    let licForecast = 0;
-    Object.values(licProgs).forEach(monthData => {
-      const past = Object.values(monthData).filter(v=>v>0);
-      licForecast += past.length ? past.reduce((s,v)=>s+v,0)/past.length : 0;
-    });
-
-    const infraMo = Object.values(infraCosts[proj]||{}).reduce((s,v)=>s+v,0);
-    const budget  = (licForecast + infraMo) * rangeVal;
-    const actual  = (actualByProj[proj]||0) + infraMo * rangeVal;
-    const pct     = budget > 0 ? Math.round(actual/budget*100) : 0;
-    const color   = pct > 100 ? 'var(--red)' : pct >= 90 ? 'var(--amber)' : 'var(--green)';
-    const barW    = Math.min(pct, 100);
+    const infraMo    = Object.values(infraCosts[proj]||{}).reduce((s,v)=>s+v,0);
+    const licMonthly = licByProj[proj] || 0;
+    const budget     = (licMonthly + infraMo) * rangeVal;
+    const actual     = (actualByProj[proj]||0) + infraMo * rangeVal;
+    const pct        = budget > 0 ? Math.round(actual/budget*100) : 0;
+    const color      = pct > 100 ? 'var(--red)' : pct >= 90 ? 'var(--amber)' : 'var(--green)';
+    const barW       = Math.min(pct, 100);
 
     return { proj, budget, actual, remaining: budget-actual, pct, color, barW };
   }).filter(d => d.budget > 0 || d.actual > 0);
