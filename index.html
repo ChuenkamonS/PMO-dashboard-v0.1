@@ -1316,18 +1316,38 @@ svg.icon { display: inline-block; vertical-align: middle; }
 
               <!-- Forecast vs Actual -->
               <div id="sl-panel-forecast" style="display:none;padding:0">
-                <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-                  <span style="font-size:11px;color:var(--text-3)">Forecast = avg actual ย้อนหลัง (จาก SL memo) → 6 เดือนหน้า</span>
-                  <select id="sl-forecast-proj" onchange="renderBudgetSLInfra()" style="font-size:11px;padding:3px 8px">
-                    <option value="all">ทุกโปรเจค</option>
-                  </select>
+                <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+                  <span style="font-size:11px;color:var(--text-3)">Forecast = avg actual (SL memo) · คลิก Actual cell เพื่อดู memo</span>
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <select id="sl-forecast-proj" onchange="renderBudgetSLInfra()" style="font-size:11px;padding:3px 8px">
+                      <option value="all">ทุกโปรเจค</option>
+                    </select>
+                    <select id="sl-forecast-months" onchange="renderBudgetSLInfra()" style="font-size:11px;padding:3px 8px">
+                      <option value="6">6 เดือน</option>
+                      <option value="12">12 เดือน</option>
+                    </select>
+                  </div>
                 </div>
                 <div style="overflow-x:auto">
                   <table class="hist-table">
-                    <thead><tr>
-                      <th>Project</th><th>เดือน</th><th>Forecast (฿)</th><th>Actual (฿)</th><th>Variance</th><th>Perf Test</th>
-                    </tr></thead>
+                    <thead id="sl-forecast-thead"></thead>
                     <tbody id="sl-forecast-body"></tbody>
+                  </table>
+                </div>
+                <!-- Memo breakdown panel -->
+                <div id="sl-memo-breakdown" style="display:none;border-top:1px solid var(--border)">
+                  <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--bg)">
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <span style="font-size:12px;font-weight:600">Memo breakdown</span>
+                      <span id="sl-breakdown-title" style="font-size:11px;background:var(--blue-50);color:var(--blue);padding:2px 8px;border-radius:4px"></span>
+                    </div>
+                    <button class="btn-sm" onclick="document.getElementById('sl-memo-breakdown').style.display='none'" style="font-size:11px;padding:3px 8px">✕</button>
+                  </div>
+                  <table class="hist-table">
+                    <thead><tr>
+                      <th>Memo No</th><th>Software</th><th>฿/เดือน</th><th>Qty</th><th>Monthly (฿)</th>
+                    </tr></thead>
+                    <tbody id="sl-breakdown-body"></tbody>
                   </table>
                 </div>
               </div>
