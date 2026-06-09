@@ -720,10 +720,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
         Budget & Spend
       </div>
-      <div class="sb-item" onclick="swView('cost',this,'OPEX & Forecast')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-        OPEX & Forecast
-      </div>
       <div class="sb-item" onclick="swView('license',this,'License Management')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
         License Management
@@ -1221,103 +1217,109 @@ svg.icon { display: inline-block; vertical-align: middle; }
 
       <!-- ════ BUDGET ════ -->
       <div id="view-budget" class="view">
-        <!-- Filter row -->
-        <div class="filter-row">
-          <select id="bgt-range" onchange="renderBudget()"><option value="month">เดือนนี้</option><option value="last-month">เดือนที่แล้ว</option><option value="3-months">3 เดือน</option><option value="all">ทั้งหมด</option></select>
-          <select id="bgt-project" onchange="renderBudget()"><option value="all">ทุกโครงการ</option><option>AOA-MP</option><option>TTB</option><option>Geo9</option><option>Release 2.1</option><option>Release 3</option></select>
-          <input id="bgt-search" type="search" placeholder="ค้นหา memo/project" oninput="renderBudget()">
-          <select id="bgt-filter-type" onchange="renderBudget()"><option value="all">ทุกประเภท</option><option value="sl">SL</option><option value="hw">HW</option><option value="int">INT</option><option value="ent">ENT</option><option value="dep">DEP</option></select>
-        </div>
-
-        <!-- KPI cards -->
-        <div class="metric-row" style="grid-template-columns:repeat(2,1fr)">
-          <div class="metric-card"><div class="metric-label">Approved Spend</div><div class="metric-val" id="bgt-total">฿0</div><div class="metric-sub" id="bgt-total-count">0 รายการ</div></div>
-        </div>
 
         <!-- Sub-tab bar -->
-        <div class="cost-tab-bar" style="margin-bottom:0">
-          <div id="bgt-subtab-bar" style="display:flex;gap:4px">
+        <div class="cost-tab-bar" style="margin-bottom:12px">
+          <div style="display:flex;gap:4px">
             <button class="cost-stab active" data-tab="overview" onclick="switchBudgetTab('overview',this)">Overview</button>
-            <button class="cost-stab" data-tab="trend" onclick="switchBudgetTab('trend',this)">Trend Analysis</button>
-          </div>
-          <div style="display:flex;gap:8px;padding-bottom:6px">
+            <button class="cost-stab" data-tab="sl-infra" onclick="switchBudgetTab('sl-infra',this)">SL + Infra</button>
+            <button class="cost-stab" data-tab="others" onclick="switchBudgetTab('others',this)">Others</button>
           </div>
         </div>
 
-        <!-- Tab: Overview -->
+        <!-- ── SUB-TAB: OVERVIEW ── -->
         <div id="bgt-tab-overview" class="cost-tab-panel">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
-            <div class="card" style="padding:16px">
-              <div style="font-size:12px;font-weight:600;margin-bottom:10px">Spend by Type</div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;height:220px;align-items:center">
-                <div style="height:220px"><canvas id="bgt-type-chart"></canvas></div>
-                <div id="bgt-type-legend" style="overflow-y:auto;padding-top:4px"></div>
-              </div>
-            </div>
-            <div class="card" style="padding:16px">
-              <div style="font-size:12px;font-weight:600;margin-bottom:10px">Spend by Project</div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;height:220px;align-items:center">
-                <div style="height:220px"><canvas id="bgt-proj-chart"></canvas></div>
-                <div id="bgt-proj-legend" style="overflow-y:auto;padding-top:4px"></div>
-              </div>
-            </div>
-          </div>
-          <div class="card" style="padding:0;overflow:hidden">
-            <div style="padding:14px 16px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-              <span style="font-size:12px;font-weight:600">Project Financial Summary</span>
-              <span style="font-size:11px;color:var(--text-3)">คลิก row เพื่อดู memo รายการย่อย</span>
-            </div>
-            <table class="hist-table">
-              <thead><tr><th>Project</th><th>Actual Spend</th><th>Status</th></tr></thead>
-              <tbody id="bgt-summary-body"></tbody>
-            </table>
+
+          <div class="metric-row" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
+            <div class="metric-card"><div class="metric-label">Total Spend</div><div class="metric-val" id="bgt-kpi-total" style="color:var(--blue)">฿0</div><div class="metric-sub">ทุกประเภท</div></div>
+            <div class="metric-card"><div class="metric-label">SL + Infra</div><div class="metric-val" id="bgt-kpi-sl-infra" style="color:var(--green)">฿0</div><div class="metric-sub">License + OPEX</div></div>
+            <div class="metric-card"><div class="metric-label">Others</div><div class="metric-val" id="bgt-kpi-others" style="color:var(--amber)">฿0</div><div class="metric-sub">HW + INT + ENT + DEP</div></div>
           </div>
 
-          <!-- Drill-down panel -->
-          <div id="bgt-drilldown" style="display:none;margin-top:12px">
-            <div class="card" style="padding:0;overflow:hidden">
-              <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-                <span id="bgt-drilldown-title" style="font-size:12px;font-weight:600"></span>
-                <button class="btn-sm" style="font-size:11px;padding:3px 8px" onclick="document.getElementById('bgt-drilldown').style.display='none'">✕ ปิด</button>
+          <div class="card" style="padding:16px;margin-bottom:12px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+              <span style="font-size:12px;font-weight:600">Monthly Trend — 12 เดือน</span>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                <span style="font-size:11px;font-weight:500;color:var(--text-2)">Project:</span>
+                <div id="ov-proj-checkboxes" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+                <span style="font-size:11px;font-weight:500;color:var(--text-2);margin-left:4px">Type:</span>
+                <div id="ov-type-checkboxes" style="display:flex;gap:8px;flex-wrap:wrap"></div>
               </div>
+            </div>
+            <div style="height:280px"><canvas id="ov-trend-chart"></canvas></div>
+          </div>
+
+          <div class="card" style="padding:16px">
+            <div style="font-size:12px;font-weight:600;margin-bottom:12px">Spend by Project</div>
+            <div style="height:260px"><canvas id="ov-proj-bar-chart"></canvas></div>
+          </div>
+
+        </div>
+
+        <!-- ── SUB-TAB: SL + INFRA ── -->
+        <div id="bgt-tab-sl-infra" class="cost-tab-panel" style="display:none">
+
+          <div class="metric-row" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
+            <div class="metric-card"><div class="metric-label">Total Monthly Cost</div><div class="metric-val" id="sl-kpi-total" style="color:var(--blue)">฿0</div><div class="metric-sub">License + Infra</div></div>
+            <div class="metric-card"><div class="metric-label">License Cost</div><div class="metric-val" id="sl-kpi-license" style="color:var(--green)">฿0</div><div class="metric-sub">จาก License Monitor</div></div>
+            <div class="metric-card"><div class="metric-label">Infra Cost (OPEX)</div><div class="metric-val" id="sl-kpi-infra" style="color:var(--amber)">฿0</div><div class="metric-sub">AWS, DataDog ฯลฯ</div></div>
+          </div>
+
+          <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+              <span style="font-size:12px;font-weight:600">Forecast vs Actual</span>
+              <span style="font-size:11px;color:var(--text-3)">Forecast = avg ย้อนหลัง → 6 เดือนหน้า</span>
+            </div>
+            <div style="overflow-x:auto">
               <table class="hist-table">
-                <thead><tr><th>Memo No</th><th>Type</th><th>Subject</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
-                <tbody id="bgt-drilldown-body"></tbody>
+                <thead><tr>
+                  <th>Project</th><th>เดือน</th><th>Forecast (฿)</th><th>Actual (฿)</th><th>Variance</th><th>Perf Test</th>
+                </tr></thead>
+                <tbody id="sl-forecast-body"></tbody>
               </table>
             </div>
           </div>
-        </div>
 
-        <!-- Tab: Trend Analysis -->
-        <div id="bgt-tab-trend" class="cost-tab-panel" style="display:none">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
-            <span style="font-size:12px;font-weight:500;color:var(--text-2)">Project overlay:</span>
-            <div id="bgt-proj-checkboxes" style="display:flex;gap:8px;flex-wrap:wrap"></div>
-            <span style="font-size:12px;font-weight:500;color:var(--text-2);margin-left:8px">Type:</span>
-            <div id="bgt-type-checkboxes" style="display:flex;gap:8px;flex-wrap:wrap"></div>
-          </div>
-          <div class="card" style="padding:16px;margin-bottom:12px">
-            <div style="font-size:12px;font-weight:600;margin-bottom:12px">Monthly Trend — 12 เดือน</div>
-            <div style="height:300px"><canvas id="bgt-trend-chart"></canvas></div>
-          </div>
-        </div>
-
-        <!-- Drill-down panel (hidden by default) -->
-        <div id="bgt-drilldown" style="display:none;margin-top:12px">
-          <div class="card" style="padding:0;overflow:hidden">
-            <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-              <span id="bgt-drilldown-title" style="font-size:12px;font-weight:600"></span>
-              <button class="btn-sm" style="font-size:11px;padding:3px 8px" onclick="document.getElementById('bgt-drilldown').style.display='none'">✕ ปิด</button>
+          <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
+              <span style="font-size:12px;font-weight:600">Cost by Project (Monthly)</span>
             </div>
             <table class="hist-table">
-              <thead><tr><th>Memo No</th><th>Type</th><th>Subject</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
-              <tbody id="bgt-drilldown-body"></tbody>
+              <thead><tr>
+                <th style="padding-left:14px">Project</th><th>License (฿)</th><th>Infra (฿)</th><th>Total/Mo (฿)</th>
+              </tr></thead>
+              <tbody id="sl-proj-body"></tbody>
             </table>
+          </div>
+
+          <div class="card" style="padding:0;overflow:hidden">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+              <span style="font-size:12px;font-weight:600">Infra Cost by Program × Project</span>
+              <div style="display:flex;gap:8px">
+                <label style="cursor:pointer">
+                  <input type="file" id="infra-bulk-input" accept=".xlsx,.xls" style="display:none" onchange="handleInfraBulkUpload(event)">
+                  <span class="btn-sm" style="font-size:11px;padding:4px 10px;display:inline-block">⬆ Bulk Upload</span>
+                </label>
+                <button class="btn-primary" onclick="openInfraModal()" style="font-size:11px;padding:4px 12px">+ Add Infra Cost</button>
+              </div>
+            </div>
+            <div style="overflow-x:auto">
+              <table class="hist-table"><thead id="sl-infra-thead"></thead><tbody id="sl-infra-body"></tbody></table>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ── SUB-TAB: OTHERS (Phase 2) ── -->
+        <div id="bgt-tab-others" class="cost-tab-panel" style="display:none">
+          <div class="card" style="padding:48px;text-align:center">
+            <div style="font-size:36px;margin-bottom:12px">🚧</div>
+            <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:8px">Coming Soon — Phase 2</div>
+            <div style="font-size:13px;color:var(--text-3);max-width:400px;margin:0 auto;line-height:1.8">Budget vs Actual สำหรับ HW / INT / ENT / DEP<br>อยู่ระหว่างรอ confirm budget structure กับทีม</div>
           </div>
         </div>
 
       </div>
-
       <!-- ════ LICENSE ════ -->
       <div id="view-license" class="view">
 
@@ -1556,110 +1558,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
         </div>
       </div>
 
-      <!-- ════ COST DASHBOARD ════ -->
-      <div id="view-cost" class="view">
-
-        <!-- KPI -->
-        <!-- KPI Cards (always visible) -->
-        <div class="metric-row" id="cost-kpi" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px"></div>
-
-        <!-- Tab bar row -->
-        <div class="cost-tab-bar">
-          <div id="cost-subtab-bar">
-            <button class="cost-stab active" data-tab="overview" onclick="switchCostTab('overview',this)">Overview</button>
-            <button class="cost-stab" data-tab="infra" onclick="switchCostTab('infra',this)">Infra Cost</button>
-          </div>
-          <div id="cost-tab-actions" style="display:flex;gap:8px;margin-left:auto;padding-bottom:6px"></div>
-        </div>
-
-        <!-- ── Sub-tab: Overview ── -->
-        <div id="cost-tab-overview" class="cost-tab-panel">
-          <!-- Cost by Project table -->
-          <div class="card" style="padding:0;overflow:hidden">
-            <div style="padding:12px 16px 10px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600">Cost by Project (Monthly)</div>
-            <div style="overflow-x:auto">
-              <table class="hist-table">
-                <thead><tr>
-                  <th style="padding-left:14px">Project</th>
-                  <th>License (฿)</th>
-                  <th>Infra (฿)</th>
-                  <th>Total/Mo (฿)</th>
-                </tr></thead>
-                <tbody id="cost-proj-body"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <!-- ── Sub-tab: Infra Cost ── -->
-        <div id="cost-tab-infra" class="cost-tab-panel" style="display:none">
-          <div class="card" style="padding:0;overflow:hidden">
-            <div style="padding:12px 16px 10px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600">Infra Cost by Program × Project</div>
-            <div style="overflow-x:auto">
-              <table class="hist-table">
-                <thead id="cost-infra-thead"></thead>
-                <tbody id="cost-infra-body"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <!-- ── Sub-tab: Forecast ── -->
-        <div id="cost-tab-forecast" class="cost-tab-panel" style="display:none">
-          <div class="card" style="padding:0;overflow:hidden">
-            <div style="padding:12px 16px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-              <div>
-                <div style="font-size:12px;font-weight:600">Year-End Forecast by Project × Program</div>
-                <div style="font-size:11px;color:var(--text-3);margin-top:2px">คำนวณจาก run rate ปัจจุบัน — ไม่รวม license ที่จะหมดอายุกลางปี</div>
-              </div>
-              <div style="display:flex;gap:8px;align-items:center">
-                <select id="forecast-filter-proj" onchange="renderForecast()" style="font-family:inherit;font-size:12px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-                  <option value="all">ทุกโครงการ</option>
-                </select>
-                <button class="btn-sm" onclick="exportForecastCsv()" style="font-size:12px;padding:5px 10px">⬇ Export CSV</button>
-              </div>
-            </div>
-            <div style="overflow-x:auto">
-              <table class="hist-table">
-                <thead id="forecast-thead"></thead>
-                <tbody id="forecast-body"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- Cost: Infra Input Modal -->
-      <div id="infra-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
-        <div class="card" style="width:500px;max-width:95vw;padding:24px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-            <span style="font-size:15px;font-weight:700">Add / Edit Infra Cost</span>
-            <button class="btn-sm" onclick="closeInfraModal()" style="padding:4px 10px">✕</button>
-          </div>
-          <div id="infra-form"></div>
-          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
-            <button class="btn-ghost" onclick="closeInfraModal()">Cancel</button>
-            <button class="btn-primary" onclick="saveInfraCost()">💾 Save</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Cost: Budget Modal -->
-      <div id="budget-cost-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
-        <div class="card" style="width:480px;max-width:95vw;max-height:80vh;overflow-y:auto;padding:24px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-            <span style="font-size:15px;font-weight:700">📊 Set Annual Budget</span>
-            <button class="btn-sm" onclick="closeBudgetCostModal()" style="padding:4px 10px">✕</button>
-          </div>
-          <div id="budget-cost-form"></div>
-          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
-            <button class="btn-ghost" onclick="closeBudgetCostModal()">Cancel</button>
-            <button class="btn-primary" onclick="saveBudgetCost()">💾 Save</button>
-          </div>
-        </div>
-      </div>
-
       <!-- ════ RESOURCE MANAGEMENT ════ -->
       <div id="view-resource" class="view">
 
@@ -1810,7 +1708,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
 <script src="views/device.js"></script>
 <script src="views/bulk_import.js"></script>
 <script src="views/resource.js"></script>
-<script src="views/cost.js"></script>
 <style>
   #resource-detail-drawer.open { transform: translateX(0); }
   .badge-purple { background:#E9D5FF; color:#6B21A8; }
@@ -2009,5 +1906,35 @@ document.addEventListener('click', e => {
 });
 </script>
 <input type="file" id="bulk-import-input" accept=".xlsx,.xls" style="display:none" onchange="handleBulkImport(event)">
+
+      <!-- Cost: Infra Input Modal -->
+      <div id="infra-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
+        <div class="card" style="width:500px;max-width:95vw;padding:24px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <span style="font-size:15px;font-weight:700">Add / Edit Infra Cost</span>
+            <button class="btn-sm" onclick="closeInfraModal()" style="padding:4px 10px">✕</button>
+          </div>
+          <div id="infra-form"></div>
+          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
+            <button class="btn-ghost" onclick="closeInfraModal()">Cancel</button>
+            <button class="btn-primary" onclick="saveInfraCost()">💾 Save</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cost: Budget Modal -->
+      <div id="budget-cost-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
+        <div class="card" style="width:480px;max-width:95vw;max-height:80vh;overflow-y:auto;padding:24px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <span style="font-size:15px;font-weight:700">📊 Set Annual Budget</span>
+            <button class="btn-sm" onclick="closeBudgetCostModal()" style="padding:4px 10px">✕</button>
+          </div>
+          <div id="budget-cost-form"></div>
+          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
+            <button class="btn-ghost" onclick="closeBudgetCostModal()">Cancel</button>
+            <button class="btn-primary" onclick="saveBudgetCost()">💾 Save</button>
+          </div>
+        </div>
+      </div>
 </body>
 </html>
