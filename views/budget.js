@@ -348,19 +348,21 @@ function _renderForecastTable(allProjects, infraCosts, licByProj) {
     const startDate = new Date(memo.date || memo.createdAt);
     const slItems = memo.slItems || [];
     if(!slItems.length) {
-      // Fallback: distribute total evenly over 12 months if no slItems
-      const total = Number(memo.total) || 0;
+      // Fallback for old memos: distribute memo.total over 12 months
+      const totalAmt = Number(memo.total) || 0;
       const mo = 12;
-      const monthly = total / mo;
-      for(let i = 0; i < mo; i++) {
-        const d = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
-        const key = monthKey(d);
-        if(!actualByProjMonth[proj]) actualByProjMonth[proj] = {};
-        if(!actualByProjMonth[proj][key]) actualByProjMonth[proj][key] = { total: 0, memos: [] };
-        actualByProjMonth[proj][key].total += monthly;
-        const existing = actualByProjMonth[proj][key].memos.find(x => x.memoNo === memo.memoNo);
-        if(existing) existing.monthly += monthly;
-        else actualByProjMonth[proj][key].memos.push({ memoNo: memo.memoNo, name: 'SL', monthly });
+      const monthly = totalAmt / mo;
+      if(monthly > 0) {
+        for(let i = 0; i < mo; i++) {
+          const d = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
+          const key = monthKey(d);
+          if(!actualByProjMonth[proj]) actualByProjMonth[proj] = {};
+          if(!actualByProjMonth[proj][key]) actualByProjMonth[proj][key] = { total: 0, memos: [] };
+          actualByProjMonth[proj][key].total += monthly;
+          const existing = actualByProjMonth[proj][key].memos.find(x => x.memoNo === memo.memoNo);
+          if(existing) existing.monthly += monthly;
+          else actualByProjMonth[proj][key].memos.push({ memoNo: memo.memoNo, name: 'SL (ไม่มีรายละเอียด — memo เก่า)', monthly });
+        }
       }
       return;
     }
@@ -457,7 +459,7 @@ function showMemoBreakdown(proj, monthKey) {
       const endMo = new Date(startDate.getFullYear(), startDate.getMonth()+12, 1);
       const target = new Date(yr, mo-1, 1);
       if(target >= startDate && target < endMo) {
-        items.push({ memoNo: memo.memoNo, name: 'SL (รวม)', monthly: (Number(memo.total)||0)/12 });
+        items.push({ memoNo: memo.memoNo, name: 'SL รวม (memo เก่า — ไม่มีรายละเอียด)', monthly: (Number(memo.total)||0)/12 });
       }
       return;
     }
