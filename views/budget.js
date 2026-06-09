@@ -82,7 +82,29 @@ function renderBudget() {
 // SUB-TAB 1: OVERVIEW
 // ══════════════════════════════════════════
 function renderBudgetOverview() {
-  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
+  const rangeVal  = val('#ov-range') || '12';
+  const projVal   = val('#ov-project') || 'all';
+  const typeVal   = val('#ov-type') || 'all';
+
+  // Populate project dropdown once
+  const projSel = document.getElementById('ov-project');
+  if(projSel && projSel.options.length <= 1) {
+    const allP = [...new Set(loadMemos().filter(m=>memoStatusKey(m)==='completed').map(m=>m.project||'ไม่ระบุ'))].sort();
+    allP.forEach(p => { const o = document.createElement('option'); o.value = o.textContent = p; projSel.appendChild(o); });
+  }
+
+  let approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
+
+  // Apply range filter
+  if(rangeVal !== 'all') {
+    const months = parseInt(rangeVal);
+    const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - months);
+    approved = approved.filter(m => new Date(m.updatedAt||m.createdAt) >= cutoff);
+  }
+  // Apply project filter
+  if(projVal !== 'all') approved = approved.filter(m => (m.project||'ไม่ระบุ') === projVal);
+  // Apply type filter
+  if(typeVal !== 'all') approved = approved.filter(m => m.type === typeVal);
 
   // ── KPIs ──
   const total    = approved.reduce((s,m) => s+(Number(m.total)||0), 0);
