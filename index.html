@@ -1230,6 +1230,27 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <!-- ── SUB-TAB: OVERVIEW ── -->
         <div id="bgt-tab-overview" class="cost-tab-panel">
 
+          <!-- Filter row -->
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+            <select id="ov-range" onchange="renderBudgetOverview()" style="font-size:12px;padding:5px 10px">
+              <option value="3">3 เดือน</option>
+              <option value="6">6 เดือน</option>
+              <option value="12" selected>12 เดือน</option>
+              <option value="all">ทั้งหมด</option>
+            </select>
+            <select id="ov-project" onchange="renderBudgetOverview()" style="font-size:12px;padding:5px 10px">
+              <option value="all">ทุกโปรเจค</option>
+            </select>
+            <select id="ov-type" onchange="renderBudgetOverview()" style="font-size:12px;padding:5px 10px">
+              <option value="all">ทุกประเภท</option>
+              <option value="sl">SL</option>
+              <option value="hw">HW</option>
+              <option value="int">INT</option>
+              <option value="ent">ENT</option>
+              <option value="dep">DEP</option>
+            </select>
+          </div>
+
           <div class="metric-row" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
             <div class="metric-card"><div class="metric-label">Total Spend</div><div class="metric-val" id="bgt-kpi-total" style="color:var(--blue)">฿0</div><div class="metric-sub">ทุกประเภท</div></div>
             <div class="metric-card"><div class="metric-label">SL + Infra</div><div class="metric-val" id="bgt-kpi-sl-infra" style="color:var(--green)">฿0</div><div class="metric-sub">License + OPEX</div></div>
