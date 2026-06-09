@@ -29,11 +29,96 @@ const BGT_TYPE_LABELS = { sl:'Software License', hw:'Hardware', int:'Team Activi
 const BGT_PROJ_COLORS = ['#185FA5','#3B6D11','#854F0B','#3C3489','#A32D2D','#5F5E5A','#0F6E56','#8B4513'];
 const INFRA_KEY = 'orbit-pmo-infra-v1';
 
-// ── Infra Storage ──
+// ── Infra Storage (Supabase + localStorage fallback) ──
+// DB shape: rows of { id, project, program, monthly_cost }
+// JS shape: { project: { program: monthlyCost } }   (flat object, same as before)
+
+let _infraCache = null;
+
+function infraToRows(costsObj) {
+  // Convert { proj: { prog: amount } } → array of row objects for Supabase
+  const rows = [];
+  Object.entries(costsObj).forEach(([project, programs]) => {
+    Object.entries(programs).forEach(([program, monthly_cost]) => {
+      rows.push({ id: `${project}__${program}`, project, program, monthly_cost: Number(monthly_cost) || 0 });
+    });
+  });
+  return rows;
+}
+function rowsToInfra(rows) {
+  // Convert DB rows → { proj: { prog: amount } }
+  const obj = {};
+  (rows || []).forEach(r => {
+    if (!obj[r.project]) obj[r.project] = {};
+    obj[r.project][r.program] = Number(r.monthly_cost) || 0;
+  });
+  return obj;
+}
+
+async function loadInfraCostsAsync() {
+  if (await checkSupa()) {
+    try {
+      const rows = await supaFetch('infra_costs', 'GET', null, '?order=project.asc');
+      const obj = rowsToInfra(rows);
+      _infraCache = obj;
+      try { localStorage.setItem(INFRA_KEY, JSON.stringify(obj)); } catch(e) {}
+      return obj;
+    } catch(e) {
+      console.warn('Supabase infra_costs read failed, fallback', e.message);
+    }
+  }
+  return loadInfraCosts();
+}
+
+async function storeInfraCostsAsync(costsObj) {
+  // Always update localStorage immediately
+  storeInfraCosts(costsObj);
+  _infraCache = costsObj;
+
+  if (!(await checkSupa())) return;
+  try {
+    // Upsert all current rows
+    const rows = infraToRows(costsObj);
+    if (rows.length) {
+      await supaFetch('infra_costs', 'POST', rows, '?on_conflict=id');
+    }
+    // Delete rows that no longer exist
+    const existingIds = rows.map(r => r.id);
+    const allRows = await supaFetch('infra_costs', 'GET', null, '?select=id');
+    const toDelete = (allRows || []).filter(r => !existingIds.includes(r.id));
+    for (const row of toDelete) {
+      await supaFetch('infra_costs', 'DELETE', null, '?id=eq.' + encodeURIComponent(row.id));
+    }
+    _infraCache = null; // force fresh read next time
+  } catch(e) {
+    console.warn('Supabase infra_costs save failed', e.message);
+  }
+}
+
+// ── Sync localStorage → Supabase (one-time migration) ──
+async function syncInfraToSupabase() {
+  if (!(await checkSupa())) return { ok: false };
+  const local = loadInfraCosts();
+  if (!Object.keys(local).length) return { ok: true, pushed: 0 };
+  const rows = infraToRows(local);
+  let pushed = 0;
+  for (const row of rows) {
+    try {
+      await supaFetch('infra_costs', 'POST', row, '?on_conflict=id');
+      pushed++;
+    } catch(e) { console.warn('Sync failed for infra row', row.id, e.message); }
+  }
+  _infraCache = null;
+  return { ok: true, pushed };
+}
+
+// ── Sync localStorage fallback ──
 function loadInfraCosts() {
-  try { return JSON.parse(localStorage.getItem(INFRA_KEY)||'{}') || {}; } catch(e) { return {}; }
+  if (_infraCache !== null) return _infraCache;
+  try { return JSON.parse(localStorage.getItem(INFRA_KEY) || '{}') || {}; } catch(e) { return {}; }
 }
 function storeInfraCosts(d) {
+  _infraCache = d;
   try { localStorage.setItem(INFRA_KEY, JSON.stringify(d)); } catch(e) {}
 }
 
@@ -276,7 +361,11 @@ function _renderOvProjBarChart(allMemos) {
 // SUB-TAB 2: SL + INFRA
 // ══════════════════════════════════════════
 function renderBudgetSLInfra() {
-  const infraCosts = loadInfraCosts();
+  // Load fresh from Supabase then render
+  loadInfraCostsAsync().then(infraCosts => _renderBudgetSLInfraWith(infraCosts)).catch(() => _renderBudgetSLInfraWith(loadInfraCosts()));
+}
+
+function _renderBudgetSLInfraWith(infraCosts) {
   const licByProj  = getLicenseCostByProject();
 
   const allProjects = [...new Set([
@@ -721,7 +810,7 @@ function deleteInfraProgram(prog) {
   if(!confirm(`ลบ "${prog}" ออกจากทุกโครงการ?`)) return;
   const costs = loadInfraCosts();
   Object.keys(costs).forEach(proj => { delete costs[proj][prog]; });
-  storeInfraCosts(costs);
+  storeInfraCostsAsync(costs).catch(e => console.warn('Supabase infra delete failed', e));
   renderBudgetSLInfra();
 }
 
@@ -749,7 +838,7 @@ function saveInfraCost() {
     else delete costs[project][program];
   }
 
-  storeInfraCosts(costs);
+  storeInfraCostsAsync(costs).catch(e => console.warn('Supabase infra save failed', e));
   closeInfraModal();
   renderBudgetSLInfra();
 }
@@ -779,7 +868,7 @@ function handleInfraBulkUpload(event) {
         added++;
       });
 
-      storeInfraCosts(costs);
+      storeInfraCostsAsync(costs).catch(e => console.warn('Supabase infra bulk save failed', e));
       renderBudgetSLInfra();
       alert(`✓ Import Infra สำเร็จ — อัปเดต ${added} รายการ`);
     } catch(err) {
