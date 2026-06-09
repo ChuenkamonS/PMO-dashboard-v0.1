@@ -332,11 +332,11 @@ function parseThaiDate(str) {
 
 // ── Forecast vs Actual ──
 function _renderForecastTable(allProjects, infraCosts, licByProj) {
-  const body = document.getElementById('sl-forecast-body');
-  const thead = document.getElementById('sl-forecast-thead');
+  const body   = document.getElementById('sl-forecast-body');
+  const thead  = document.getElementById('sl-forecast-thead');
   if(!body || !thead) return;
 
-  // Populate project dropdown
+  // Project dropdown
   const projSel = document.getElementById('sl-forecast-proj');
   if(projSel && projSel.options.length <= 1) {
     allProjects.forEach(p => {
@@ -348,146 +348,153 @@ function _renderForecastTable(allProjects, infraCosts, licByProj) {
   const selProj = projSel?.value || 'all';
   const showProjects = selProj === 'all' ? allProjects : [selProj];
 
-  // Month range
+  // Month range: past N + 3 future
   const monthCount = parseInt(document.getElementById('sl-forecast-months')?.value || '6');
   const now = new Date();
   const months = [];
   for(let i = monthCount - 1; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    months.push(d);
+    months.push(new Date(now.getFullYear(), now.getMonth() - i, 1));
   }
-  // +3 future months
   for(let i = 1; i <= 3; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    months.push(d);
+    months.push(new Date(now.getFullYear(), now.getMonth() + i, 1));
   }
 
-  const isFuture = m => m > now;
-  const monthKey = m => `${m.getFullYear()}-${String(m.getMonth()+1).padStart(2,'0')}`;
-  const monthLabel = m => m.toLocaleString('th-TH', { month:'short', year:'2-digit' });
+  const isFuture  = m => m > now;
+  const monthKey  = m => `${m.getFullYear()}-${String(m.getMonth()+1).padStart(2,'0')}`;
+  const monthLbl  = m => m.toLocaleString('th-TH', { month:'short', year:'2-digit' });
 
-  // Build actual per project per month from SL memos (distributed)
-  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed' && m.type === 'sl');
-  const actualByProjMonth = {}; // { proj: { 'YYYY-MM': { total, memos: [{memoNo, items}] } } }
+  // Build actual per project/program per month
+  const actualByProjProg = {}; // { proj: { prog: { 'YYYY-MM': amount } } }
+  const approved = loadMemos().filter(m => memoStatusKey(m)==='completed' && m.type==='sl');
+
   approved.forEach(memo => {
     const proj = memo.project || '(ไม่ระบุ)';
     const startDate = parseThaiDate(memo.date) || parseThaiDate(memo.createdAt) || new Date();
+    const startMo = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
     const slItems = memo.slItems || [];
-    if(!slItems.length) {
-      // Fallback for old memos: distribute memo.total over 12 months
-      const totalAmt = Number(memo.total) || 0;
+    const parsedItems = !slItems.length
+      ? _parseSLSectionHTML((memo.sections||[]).find(s=>s.title?.includes('Software'))?.html || '')
+      : slItems;
+
+    if(!parsedItems.length) {
       const mo = 12;
-      const monthly = totalAmt / mo;
-      // Try parse items from HTML sections
-      const slSection = (memo.sections||[]).find(s => s.title && s.title.includes('Software'));
-      const parsedItems = slSection && typeof document !== 'undefined' ? _parseSLSectionHTML(slSection.html) : [];
-      const startMoNorm = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
-      if(parsedItems.length) {
-        parsedItems.forEach(item => {
-          const itemMonthly = (item.price||0) * (item.qty||1);
-          const itemMo = item.months || 12;
-          for(let i = 0; i < itemMo; i++) {
-            const d = new Date(startMoNorm.getFullYear(), startMoNorm.getMonth() + i, 1);
-            const key = monthKey(d);
-            if(!actualByProjMonth[proj]) actualByProjMonth[proj] = {};
-            if(!actualByProjMonth[proj][key]) actualByProjMonth[proj][key] = { total: 0, memos: [] };
-            actualByProjMonth[proj][key].total += itemMonthly;
-            const existing = actualByProjMonth[proj][key].memos.find(x => x.memoNo === memo.memoNo && x.name === item.name);
-            if(existing) existing.monthly += itemMonthly;
-            else actualByProjMonth[proj][key].memos.push({ memoNo: memo.memoNo, name: item.name, monthly: itemMonthly });
-          }
-        });
-      } else if(monthly > 0) {
+      const monthly = (Number(memo.total)||0) / mo;
+      if(monthly > 0) {
+        const prog = 'SL รวม';
         for(let i = 0; i < mo; i++) {
-          const d = new Date(startMoNorm.getFullYear(), startMoNorm.getMonth() + i, 1);
+          const d = new Date(startMo.getFullYear(), startMo.getMonth() + i, 1);
           const key = monthKey(d);
-          if(!actualByProjMonth[proj]) actualByProjMonth[proj] = {};
-          if(!actualByProjMonth[proj][key]) actualByProjMonth[proj][key] = { total: 0, memos: [] };
-          actualByProjMonth[proj][key].total += monthly;
-          const existing = actualByProjMonth[proj][key].memos.find(x => x.memoNo === memo.memoNo);
-          if(existing) existing.monthly += monthly;
-          else actualByProjMonth[proj][key].memos.push({ memoNo: memo.memoNo, name: 'SL รวม', monthly });
+          if(!actualByProjProg[proj]) actualByProjProg[proj] = {};
+          if(!actualByProjProg[proj][prog]) actualByProjProg[proj][prog] = {};
+          actualByProjProg[proj][prog][key] = (actualByProjProg[proj][prog][key]||0) + monthly;
         }
       }
       return;
     }
-    slItems.forEach(item => {
-      const monthly = (item.price || 0) * (item.qty || 1);
-      const mo = item.months || 12;
+    parsedItems.forEach(item => {
+      const prog = item.name || 'SL';
+      const mo   = item.months || 12;
+      const monthly = (item.price||0) * (item.qty||1);
       for(let i = 0; i < mo; i++) {
-        const d = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
+        const d = new Date(startMo.getFullYear(), startMo.getMonth() + i, 1);
         const key = monthKey(d);
-        if(!actualByProjMonth[proj]) actualByProjMonth[proj] = {};
-        if(!actualByProjMonth[proj][key]) actualByProjMonth[proj][key] = { total: 0, memos: [] };
-        actualByProjMonth[proj][key].total += monthly;
-        const existing = actualByProjMonth[proj][key].memos.find(x => x.memoNo === memo.memoNo && x.name === item.name);
-        if(existing) existing.monthly += monthly;
-        else actualByProjMonth[proj][key].memos.push({ memoNo: memo.memoNo, name: item.name || '-', price: item.price, qty: item.qty || 1, monthly });
+        if(!actualByProjProg[proj]) actualByProjProg[proj] = {};
+        if(!actualByProjProg[proj][prog]) actualByProjProg[proj][prog] = {};
+        actualByProjProg[proj][prog][key] = (actualByProjProg[proj][prog][key]||0) + monthly;
       }
     });
   });
 
   // Build thead
-  const thS = 'padding:7px 10px;font-size:10px;font-weight:600;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap;color:var(--text-3)';
+  const thBg = 'background:var(--bg)';
+  const thS  = `padding:7px 8px;font-size:10px;font-weight:600;color:var(--text-3);border-bottom:1px solid var(--border);text-align:right;white-space:nowrap`;
+  const thFS = `padding:7px 8px;font-size:10px;font-weight:600;color:#0C447C;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap;background:#EEF5FF`;
   thead.innerHTML = `<tr>
     <th style="${thS};text-align:left;min-width:90px">Project</th>
     <th style="${thS};text-align:left;min-width:80px">Program</th>
-    ${months.map(m => `<th style="${thS};${isFuture(m)?'background:#EEF5FF;color:#185FA5':''}">${esc(monthLabel(m))}${isFuture(m)?'<br><span style="font-size:9px">F</span>':''}</th>`).join('')}
-    <th style="${thS}">Total</th>
+    <th style="${thS};text-align:center;min-width:60px">Type</th>
+    ${months.map(m => `<th style="${isFuture(m) ? thFS : thS}">${esc(monthLbl(m))}${isFuture(m) ? '<br><span style="font-size:9px;opacity:.7">F</span>' : ''}</th>`).join('')}
+    <th style="${thS};color:var(--blue)">Total</th>
   </tr>`;
 
-  // Build rows per project
-  const tdS = 'padding:6px 10px;border-bottom:1px solid var(--border);font-size:12px;text-align:right;white-space:nowrap';
+  const tdS  = 'padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;text-align:right';
+  const tdFS = 'padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;text-align:right;background:#EEF5FF;color:#185FA5';
+  const subS = 'padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600;text-align:right;background:var(--bg)';
+  const subFS= 'padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600;text-align:right;background:#EEF5FF;color:#185FA5';
+
   let rows = '';
-
   showProjects.forEach(proj => {
-    const licCost = licByProj[proj] || 0;
     const infraProg = infraCosts[proj] || {};
-    const infraTotal = Object.values(infraProg).reduce((s,v)=>s+v,0);
+    const licProgs  = actualByProjProg[proj] || {};
+    const allProgs  = [...new Set([...Object.keys(licProgs), ...Object.keys(infraProg)])];
 
-    // Compute forecast baseline = avg of past months with data
-    const pastActuals = months.filter(m => !isFuture(m)).map(m => {
+    if(!allProgs.length) return;
+
+    // Forecast baseline per project = avg of past months
+    const pastTotals = months.filter(m => !isFuture(m)).map(m => {
       const key = monthKey(m);
-      return (actualByProjMonth[proj]?.[key]?.total || 0) + Object.values(infraProg).reduce((s,v)=>s+v,0);
-    }).filter(v => v > 0);
-    const forecastBaseline = pastActuals.length ? pastActuals.reduce((s,v)=>s+v,0)/pastActuals.length : licCost + infraTotal;
+      const licTotal = Object.values(licProgs).reduce((s,d)=>s+(d[key]||0),0);
+      const infTotal = Object.values(infraProg).reduce((s,v)=>s+v,0);
+      return licTotal + infTotal;
+    }).filter(v=>v>0);
+    const forecastBase = pastTotals.length ? pastTotals.reduce((s,v)=>s+v,0)/pastTotals.length
+      : Object.values(licProgs).reduce((s,d)=>s+Object.values(d).reduce((ss,v)=>ss+v,0)/Math.max(Object.keys(d).length,1),0)
+        + Object.values(infraProg).reduce((s,v)=>s+v,0);
+
+    let projTotal = 0;
+    const projMonthTotals = months.map(() => 0);
 
     // License rows
-    if(licCost > 0) {
-      const rowTotals = months.map(m => {
-        if(isFuture(m)) return forecastBaseline;
-        return actualByProjMonth[proj]?.[monthKey(m)]?.total || 0;
-      });
-      const total = rowTotals.reduce((s,v)=>s+v,0);
+    Object.entries(licProgs).forEach(([prog, monthData]) => {
+      let rowTotal = 0;
+      const cells = months.map((m, mi) => {
+        const key = monthKey(m);
+        if(isFuture(m)) {
+          const fv = forecastBase / Math.max(allProgs.length, 1);
+          rowTotal += fv; projMonthTotals[mi] += fv; projTotal += fv;
+          return `<td style="${tdFS}">${money(Math.round(fv))}</td>`;
+        }
+        const v = monthData[key]||0;
+        rowTotal += v; projMonthTotals[mi] += v; projTotal += v;
+        if(v > 0) return `<td style="${tdS};cursor:pointer;color:var(--blue);text-decoration:underline;text-decoration-color:var(--blue)" onclick="showMemoBreakdown('${esc(proj)}','${esc(key)}')">${money(Math.round(v))}</td>`;
+        return `<td style="${tdS};color:var(--text-3)">—</td>`;
+      }).join('');
       rows += `<tr>
         <td style="${tdS};text-align:left;font-weight:500">${esc(proj)}</td>
-        <td style="${tdS};text-align:left;color:var(--text-2)">License + Infra</td>
-        ${months.map((m,i) => {
-          const v = rowTotals[i];
-          const key = monthKey(m);
-          const hasActual = !isFuture(m) && v > 0;
-          const bgStyle = isFuture(m) ? 'background:#EEF5FF;color:#185FA5' : '';
-          const clickStyle = hasActual ? 'cursor:pointer;text-decoration:underline;text-decoration-color:#185FA5' : '';
-          const clickAttr = hasActual ? `onclick="showMemoBreakdown('${esc(proj)}','${esc(key)}')"` : '';
-          return `<td style="${tdS};${bgStyle};${clickStyle}" ${clickAttr}>${money(v)}</td>`;
-        }).join('')}
-        <td style="${tdS};font-weight:600;color:var(--blue)">${money(total)}</td>
-      </tr>`;
-    }
-
-    // Infra rows per program
-    Object.entries(infraProg).forEach(([prog, cost]) => {
-      const total = cost * months.length;
-      rows += `<tr>
-        <td style="${tdS};text-align:left;color:var(--text-3);font-size:11px">${esc(proj)}</td>
-        <td style="${tdS};text-align:left;color:var(--text-3);font-size:11px">${esc(prog)} <span style="font-size:9px;background:#FAEEDA;color:#633806;padding:1px 5px;border-radius:3px">Infra</span></td>
-        ${months.map(m => `<td style="${tdS};${isFuture(m)?'background:#EEF5FF;color:#185FA5':'color:var(--text-2)'}">${money(cost)}</td>`).join('')}
-        <td style="${tdS};font-weight:600;color:var(--amber)">${money(total)}</td>
+        <td style="${tdS};text-align:left">${esc(prog)}</td>
+        <td style="${tdS};text-align:center"><span style="font-size:10px;background:#E6F1FB;color:#0C447C;padding:1px 6px;border-radius:3px">License</span></td>
+        ${cells}
+        <td style="${tdS};font-weight:600;color:var(--blue)">${money(Math.round(rowTotal))}</td>
       </tr>`;
     });
+
+    // Infra rows
+    Object.entries(infraProg).forEach(([prog, cost]) => {
+      let rowTotal = 0;
+      const cells = months.map((m, mi) => {
+        rowTotal += cost; projMonthTotals[mi] += cost; projTotal += cost;
+        return `<td style="${isFuture(m) ? tdFS : tdS}">${money(cost)}</td>`;
+      }).join('');
+      rows += `<tr>
+        <td style="${tdS};text-align:left;color:var(--text-3);font-size:11px">${esc(proj)}</td>
+        <td style="${tdS};text-align:left;color:var(--text-3);font-size:11px">${esc(prog)}</td>
+        <td style="${tdS};text-align:center"><span style="font-size:10px;background:#FAEEDA;color:#633806;padding:1px 6px;border-radius:3px">Infra</span></td>
+        ${cells}
+        <td style="${tdS};font-weight:600;color:var(--amber)">${money(Math.round(rowTotal))}</td>
+      </tr>`;
+    });
+
+    // Subtotal row
+    rows += `<tr style="background:var(--bg)">
+      <td style="${subS};text-align:left" colspan="2">${esc(proj)} — Subtotal</td>
+      <td style="${subS}"></td>
+      ${projMonthTotals.map((v, mi) => `<td style="${isFuture(months[mi]) ? subFS : subS}">${money(Math.round(v))}</td>`).join('')}
+      <td style="${subS};color:var(--blue)">${money(Math.round(projTotal))}</td>
+    </tr>
+    <tr style="height:6px"><td colspan="${months.length+4}" style="background:var(--color-background-tertiary,#F4F3EF)"></td></tr>`;
   });
 
-  body.innerHTML = rows || `<tr><td colspan="${months.length+3}" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล</td></tr>`;
+  body.innerHTML = rows || `<tr><td colspan="${months.length+4}" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล</td></tr>`;
 }
 
 
