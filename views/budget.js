@@ -1,3 +1,23 @@
+// ── SL+Infra sidebar nav ──
+function switchSLNav(panel, btn) {
+  ['cost','forecast','infra'].forEach(p => {
+    const panelEl = document.getElementById('sl-panel-' + p);
+    const navEl   = document.getElementById('sl-nav-' + p);
+    if(panelEl) panelEl.style.display = p === panel ? '' : 'none';
+    if(navEl) {
+      navEl.style.borderLeft = p === panel ? '2px solid var(--blue)' : '2px solid transparent';
+      navEl.style.background = p === panel ? 'var(--blue-50)' : '';
+      const span = navEl.querySelector('span');
+      if(span) {
+        span.style.color      = p === panel ? 'var(--blue)' : 'var(--text-2)';
+        span.style.fontWeight = p === panel ? '600' : '400';
+      }
+      const svg = navEl.querySelector('svg');
+      if(svg) svg.setAttribute('stroke', p === panel ? '#185FA5' : 'currentColor');
+    }
+  });
+}
+
 // ─────────────────────────────────────────
 // views/budget.js — Budget & Spend (merged)
 // Sub-tabs: Overview | SL+Infra | Others
@@ -288,6 +308,17 @@ function renderBudgetSLInfra() {
 function _renderForecastTable(allProjects, infraCosts, licByProj) {
   const body = document.getElementById('sl-forecast-body');
   if(!body) return;
+  // Populate project dropdown
+  const projSel = document.getElementById('sl-forecast-proj');
+  if(projSel && projSel.options.length <= 1) {
+    allProjects.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = opt.textContent = p;
+      projSel.appendChild(opt);
+    });
+  }
+  const selProj = projSel?.value || 'all';
+  const filteredProjects = selProj === 'all' ? allProjects : [selProj];
 
   const approved = loadMemos().filter(m => memoStatusKey(m)==='completed' && m.type==='sl');
   const now = new Date();
@@ -304,7 +335,7 @@ function _renderForecastTable(allProjects, infraCosts, licByProj) {
 
   // Forecast = avg of past months per project (license + infra)
   const rows = [];
-  allProjects.forEach(proj => {
+  filteredProjects.forEach(proj => {
     const licMo  = licByProj[proj] || 0;
     const infraMo = Object.values(infraCosts[proj]||{}).reduce((s,v)=>s+v,0);
     const baseline = licMo + infraMo;
