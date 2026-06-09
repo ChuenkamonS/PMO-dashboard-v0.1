@@ -355,7 +355,7 @@ function _renderForecastTable(allProjects, infraCosts, licByProj) {
   for(let i = monthCount - 1; i >= 0; i--) {
     months.push(new Date(now.getFullYear(), now.getMonth() - i, 1));
   }
-  for(let i = 1; i <= 3; i++) {
+  for(let i = 1; i <= 6; i++) {
     months.push(new Date(now.getFullYear(), now.getMonth() + i, 1));
   }
 
