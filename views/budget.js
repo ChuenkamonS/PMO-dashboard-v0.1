@@ -1,6 +1,6 @@
 // ── SL+Infra sidebar nav ──
 function switchSLNav(panel, btn) {
-  ['cost','forecast','infra'].forEach(p => {
+  ['cost','forecast','infra','bva'].forEach(p => {
     const panelEl = document.getElementById('sl-panel-' + p);
     const navEl   = document.getElementById('sl-nav-' + p);
     if(panelEl) panelEl.style.display = p === panel ? '' : 'none';
@@ -324,6 +324,9 @@ function renderBudgetSLInfra() {
 
   // ── Infra Matrix ──
   _renderInfraMatrix(infraCosts);
+
+  // ── Budget vs Actual ──
+  _renderBudgetVsActual(allProjects, infraCosts, licByProj);
 }
 
 
@@ -785,4 +788,129 @@ function handleInfraBulkUpload(event) {
   };
   reader.readAsBinaryString(file);
   event.target.value = '';
+}
+
+// ── Budget vs Actual ──
+function _renderBudgetVsActual(allProjects, infraCosts, licByProj) {
+  const summary = document.getElementById('sl-bva-summary');
+  const body    = document.getElementById('sl-bva-body');
+  if(!body) return;
+
+  const rangeVal  = parseInt(document.getElementById('sl-bva-range')?.value || '6');
+  const now       = new Date();
+  const cutoff    = new Date(now.getFullYear(), now.getMonth() - rangeVal, 1);
+
+  const monthKey  = m => `${m.getFullYear()}-${String(m.getMonth()+1).padStart(2,'0')}`;
+  const months    = [];
+  for(let i = rangeVal - 1; i >= 0; i--) months.push(new Date(now.getFullYear(), now.getMonth() - i, 1));
+
+  // Build actual per project from SL memos
+  const approved = loadMemos().filter(m => memoStatusKey(m)==='completed' && m.type==='sl');
+  const actualByProj = {};
+  approved.forEach(memo => {
+    const proj = memo.project || '(ไม่ระบุ)';
+    const startDate = parseThaiDate(memo.date) || parseThaiDate(memo.createdAt) || new Date();
+    const startMo = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    const slItems = memo.slItems || [];
+    const parsedItems = !slItems.length
+      ? _parseSLSectionHTML((memo.sections||[]).find(s=>s.title?.includes('Software'))?.html||'')
+      : slItems;
+
+    const processItem = (monthly, moCount) => {
+      for(let i = 0; i < moCount; i++) {
+        const d = new Date(startMo.getFullYear(), startMo.getMonth()+i, 1);
+        if(d >= cutoff && d <= now) {
+          if(!actualByProj[proj]) actualByProj[proj] = 0;
+          actualByProj[proj] += monthly;
+        }
+      }
+    };
+    if(!parsedItems.length) { processItem((Number(memo.total)||0)/12, 12); }
+    else parsedItems.forEach(item => processItem((item.price||0)*(item.qty||1), item.months||12));
+  });
+
+  // Budget per project = forecast avg × rangeVal months + infra × rangeVal
+  const projData = allProjects.map(proj => {
+    const licProgs  = {};
+    approved.forEach(memo => {
+      if((memo.project||'(ไม่ระบุ)') !== proj) return;
+      const startDate = parseThaiDate(memo.date) || parseThaiDate(memo.createdAt) || new Date();
+      const startMo = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+      const slItems = memo.slItems || [];
+      const parsedItems = !slItems.length
+        ? _parseSLSectionHTML((memo.sections||[]).find(s=>s.title?.includes('Software'))?.html||'')
+        : slItems;
+      parsedItems.forEach(item => {
+        const prog = item.name || 'SL';
+        const mo   = item.months || 12;
+        const monthly = (item.price||0)*(item.qty||1);
+        for(let i = 0; i < mo; i++) {
+          const d = new Date(startMo.getFullYear(), startMo.getMonth()+i, 1);
+          const key = monthKey(d);
+          if(!licProgs[prog]) licProgs[prog] = {};
+          licProgs[prog][key] = (licProgs[prog][key]||0) + monthly;
+        }
+      });
+    });
+
+    // Forecast per prog = avg past actual
+    let licForecast = 0;
+    Object.values(licProgs).forEach(monthData => {
+      const past = Object.values(monthData).filter(v=>v>0);
+      licForecast += past.length ? past.reduce((s,v)=>s+v,0)/past.length : 0;
+    });
+
+    const infraMo = Object.values(infraCosts[proj]||{}).reduce((s,v)=>s+v,0);
+    const budget  = (licForecast + infraMo) * rangeVal;
+    const actual  = (actualByProj[proj]||0) + infraMo * rangeVal;
+    const pct     = budget > 0 ? Math.round(actual/budget*100) : 0;
+    const color   = pct > 100 ? 'var(--red)' : pct >= 90 ? 'var(--amber)' : 'var(--green)';
+    const barW    = Math.min(pct, 100);
+
+    return { proj, budget, actual, remaining: budget-actual, pct, color, barW };
+  }).filter(d => d.budget > 0 || d.actual > 0);
+
+  const totalBudget  = projData.reduce((s,d)=>s+d.budget,0);
+  const totalActual  = projData.reduce((s,d)=>s+d.actual,0);
+  const totalPct     = totalBudget > 0 ? Math.round(totalActual/totalBudget*100) : 0;
+  const totalColor   = totalPct > 100 ? 'var(--red)' : totalPct >= 90 ? 'var(--amber)' : 'var(--green)';
+
+  // Summary cards
+  if(summary) summary.innerHTML = `
+    <div style="background:var(--bg);border-radius:var(--r-sm);padding:10px 12px">
+      <div style="font-size:11px;color:var(--text-3);margin-bottom:3px">Budget (Forecast)</div>
+      <div style="font-size:18px;font-weight:600">${money(Math.round(totalBudget))}</div>
+      <div style="font-size:11px;color:var(--text-3)">${rangeVal} เดือน รวม</div>
+    </div>
+    <div style="background:var(--bg);border-radius:var(--r-sm);padding:10px 12px">
+      <div style="font-size:11px;color:var(--text-3);margin-bottom:3px">Actual Spend</div>
+      <div style="font-size:18px;font-weight:600;color:var(--blue)">${money(Math.round(totalActual))}</div>
+      <div style="font-size:11px;color:var(--text-3)">SL memo + Infra</div>
+    </div>
+    <div style="background:${totalPct>100?'var(--red-50)':totalPct>=90?'var(--amber-50)':'var(--green-50)'};border-radius:var(--r-sm);padding:10px 12px">
+      <div style="font-size:11px;color:${totalColor};margin-bottom:3px">Remaining</div>
+      <div style="font-size:18px;font-weight:600;color:${totalColor}">${money(Math.round(totalBudget-totalActual))}</div>
+      <div style="font-size:11px;color:${totalColor}">${totalPct}% utilized</div>
+    </div>`;
+
+  // Table rows
+  if(!projData.length) {
+    body.innerHTML = `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูลเพียงพอสำหรับ Budget vs Actual</td></tr>`;
+    return;
+  }
+
+  body.innerHTML = projData.map(d => `<tr>
+    <td style="padding:9px 14px;border-bottom:1px solid var(--border);font-weight:500">${esc(d.proj)}</td>
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border);text-align:right">${money(Math.round(d.budget))}</td>
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border);text-align:right;color:var(--blue);font-weight:500">${money(Math.round(d.actual))}</td>
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border);text-align:right;color:${d.color}">${d.remaining >= 0 ? '' : '-'}${money(Math.abs(Math.round(d.remaining)))}</td>
+    <td style="padding:9px 14px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="flex:1;background:var(--border);border-radius:4px;height:6px;overflow:hidden">
+          <div style="width:${d.barW}%;height:100%;background:${d.color};border-radius:4px"></div>
+        </div>
+        <span style="font-size:11px;font-weight:500;color:${d.color};min-width:36px">${d.pct}%</span>
+      </div>
+    </td>
+  </tr>`).join('');
 }
