@@ -378,8 +378,26 @@ function _renderForecastTable(allProjects, infraCosts, licByProj) {
       const totalAmt = Number(memo.total) || 0;
       const mo = 12;
       const monthly = totalAmt / mo;
+      // Try parse items from HTML sections
+      const slSection = (memo.sections||[]).find(s => s.title && s.title.includes('Software'));
+      const parsedItems = slSection && typeof document !== 'undefined' ? _parseSLSectionHTML(slSection.html) : [];
       const startMoNorm = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
-      if(monthly > 0) {
+      if(parsedItems.length) {
+        parsedItems.forEach(item => {
+          const itemMonthly = (item.price||0) * (item.qty||1);
+          const itemMo = item.months || 12;
+          for(let i = 0; i < itemMo; i++) {
+            const d = new Date(startMoNorm.getFullYear(), startMoNorm.getMonth() + i, 1);
+            const key = monthKey(d);
+            if(!actualByProjMonth[proj]) actualByProjMonth[proj] = {};
+            if(!actualByProjMonth[proj][key]) actualByProjMonth[proj][key] = { total: 0, memos: [] };
+            actualByProjMonth[proj][key].total += itemMonthly;
+            const existing = actualByProjMonth[proj][key].memos.find(x => x.memoNo === memo.memoNo && x.name === item.name);
+            if(existing) existing.monthly += itemMonthly;
+            else actualByProjMonth[proj][key].memos.push({ memoNo: memo.memoNo, name: item.name, monthly: itemMonthly });
+          }
+        });
+      } else if(monthly > 0) {
         for(let i = 0; i < mo; i++) {
           const d = new Date(startMoNorm.getFullYear(), startMoNorm.getMonth() + i, 1);
           const key = monthKey(d);
@@ -388,7 +406,7 @@ function _renderForecastTable(allProjects, infraCosts, licByProj) {
           actualByProjMonth[proj][key].total += monthly;
           const existing = actualByProjMonth[proj][key].memos.find(x => x.memoNo === memo.memoNo);
           if(existing) existing.monthly += monthly;
-          else actualByProjMonth[proj][key].memos.push({ memoNo: memo.memoNo, name: 'SL (ไม่มีรายละเอียด — memo เก่า)', monthly });
+          else actualByProjMonth[proj][key].memos.push({ memoNo: memo.memoNo, name: 'SL รวม', monthly });
         }
       }
       return;
@@ -472,6 +490,27 @@ function _renderForecastTable(allProjects, infraCosts, licByProj) {
   body.innerHTML = rows || `<tr><td colspan="${months.length+3}" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล</td></tr>`;
 }
 
+
+// ── Parse SL section HTML to extract items ──
+function _parseSLSectionHTML(html) {
+  try {
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    const rows = div.querySelectorAll('tbody tr');
+    const items = [];
+    rows.forEach(row => {
+      const cells = row.querySelectorAll('td');
+      if(cells.length < 5) return;
+      const name  = cells[1]?.textContent?.trim();
+      const price = parseFloat((cells[2]?.textContent||'').replace(/[^0-9.]/g,''))||0;
+      const months= parseInt((cells[3]?.textContent||'').replace(/[^0-9]/g,''))||12;
+      const qty   = parseInt((cells[4]?.textContent||'').replace(/[^0-9]/g,''))||1;
+      if(name && price) items.push({ name, price, months, qty });
+    });
+    return items;
+  } catch(e) { return []; }
+}
+
 // ── Memo breakdown popup ──
 function showMemoBreakdown(proj, monthKey) {
   const approved = loadMemos().filter(m => memoStatusKey(m)==='completed' && m.type==='sl' && (m.project||'(ไม่ระบุ)')=== proj);
@@ -483,11 +522,21 @@ function showMemoBreakdown(proj, monthKey) {
     const startDate = parseThaiDate(memo.date) || parseThaiDate(memo.createdAt) || new Date();
     const slItems = memo.slItems || [];
     if(!slItems.length) {
-      const endMo = new Date(startDate.getFullYear(), startDate.getMonth()+12, 1);
+      // Try parse from sections HTML
+      const slSection = (memo.sections||[]).find(s => s.title && s.title.includes('Software'));
+      const parsedItems = slSection ? _parseSLSectionHTML(slSection.html) : [];
+      const moCount = parsedItems.length ? (parsedItems[0].months||12) : 12;
+      const endMo = new Date(startDate.getFullYear(), startDate.getMonth() + moCount, 1);
       const target = new Date(yr, mo-1, 1);
       const startMo = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
       if(target >= startMo && target < endMo) {
-        items.push({ memoNo: memo.memoNo, name: 'SL รวม (memo เก่า — ไม่มีรายละเอียด)', monthly: (Number(memo.total)||0)/12 });
+        if(parsedItems.length) {
+          parsedItems.forEach(item => {
+            items.push({ memoNo: memo.memoNo, name: item.name, price: item.price, qty: item.qty, monthly: item.price * item.qty });
+          });
+        } else {
+          items.push({ memoNo: memo.memoNo, name: 'SL รวม', monthly: (Number(memo.total)||0)/moCount });
+        }
       }
       return;
     }
