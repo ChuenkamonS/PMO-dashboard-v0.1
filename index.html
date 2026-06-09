@@ -1259,55 +1259,95 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <!-- ── SUB-TAB: SL + INFRA ── -->
         <div id="bgt-tab-sl-infra" class="cost-tab-panel" style="display:none">
 
-          <div class="metric-row" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
-            <div class="metric-card"><div class="metric-label">Total Monthly Cost</div><div class="metric-val" id="sl-kpi-total" style="color:var(--blue)">฿0</div><div class="metric-sub">License + Infra</div></div>
-            <div class="metric-card"><div class="metric-label">License Cost</div><div class="metric-val" id="sl-kpi-license" style="color:var(--green)">฿0</div><div class="metric-sub">จาก License Monitor</div></div>
-            <div class="metric-card"><div class="metric-label">Infra Cost (OPEX)</div><div class="metric-val" id="sl-kpi-infra" style="color:var(--amber)">฿0</div><div class="metric-sub">AWS, DataDog ฯลฯ</div></div>
-          </div>
-
-          <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
-            <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-              <span style="font-size:12px;font-weight:600">Forecast vs Actual</span>
-              <span style="font-size:11px;color:var(--text-3)">Forecast = avg ย้อนหลัง → 6 เดือนหน้า</span>
+          <!-- KPI row -->
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:12px">
+            <div style="padding:12px 16px;border-right:1px solid var(--border)">
+              <div style="font-size:11px;color:var(--text-3);margin-bottom:3px">Total Monthly</div>
+              <div style="font-size:18px;font-weight:600;color:var(--text)" id="sl-kpi-total">฿0</div>
+              <div style="font-size:11px;color:var(--text-3)">License + Infra</div>
             </div>
-            <div style="overflow-x:auto">
-              <table class="hist-table">
-                <thead><tr>
-                  <th>Project</th><th>เดือน</th><th>Forecast (฿)</th><th>Actual (฿)</th><th>Variance</th><th>Perf Test</th>
-                </tr></thead>
-                <tbody id="sl-forecast-body"></tbody>
-              </table>
+            <div style="padding:12px 16px;border-right:1px solid var(--border)">
+              <div style="font-size:11px;color:var(--text-3);margin-bottom:3px">License</div>
+              <div style="font-size:18px;font-weight:600;color:var(--blue)" id="sl-kpi-license">฿0</div>
+            </div>
+            <div style="padding:12px 16px">
+              <div style="font-size:11px;color:var(--text-3);margin-bottom:3px">Infra</div>
+              <div style="font-size:18px;font-weight:600;color:var(--amber)" id="sl-kpi-infra">฿0</div>
             </div>
           </div>
 
-          <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
-            <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
-              <span style="font-size:12px;font-weight:600">Cost by Project (Monthly)</span>
-            </div>
-            <table class="hist-table">
-              <thead><tr>
-                <th style="padding-left:14px">Project</th><th>License (฿)</th><th>Infra (฿)</th><th>Total/Mo (฿)</th>
-              </tr></thead>
-              <tbody id="sl-proj-body"></tbody>
-            </table>
-          </div>
+          <!-- Sidebar nav + content -->
+          <div style="display:grid;grid-template-columns:160px 1fr;border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
 
-          <div class="card" style="padding:0;overflow:hidden">
-            <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-              <span style="font-size:12px;font-weight:600">Infra Cost by Program × Project</span>
-              <div style="display:flex;gap:8px">
-                <label style="cursor:pointer">
-                  <input type="file" id="infra-bulk-input" accept=".xlsx,.xls" style="display:none" onchange="handleInfraBulkUpload(event)">
-                  <span class="btn-sm" style="font-size:11px;padding:4px 10px;display:inline-block">⬆ Bulk Upload</span>
-                </label>
-                <button class="btn-primary" onclick="openInfraModal()" style="font-size:11px;padding:4px 12px">+ Add Infra Cost</button>
+            <!-- Left nav -->
+            <div style="border-right:1px solid var(--border);background:var(--bg)">
+              <div id="sl-nav-cost" class="sl-nav-item active" onclick="switchSLNav('cost',this)"
+                style="padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid var(--blue);background:var(--blue-50)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#185FA5" stroke-width="2"><path d="M3 3h18v4H3z"/><path d="M3 11h18v4H3z"/><path d="M3 19h18v2H3z"/></svg>
+                <span style="font-size:12px;font-weight:600;color:var(--blue)">Cost by Project</span>
+              </div>
+              <div id="sl-nav-forecast" class="sl-nav-item" onclick="switchSLNav('forecast',this)"
+                style="padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid transparent">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                <span style="font-size:12px;color:var(--text-2)">Forecast</span>
+              </div>
+              <div id="sl-nav-infra" class="sl-nav-item" onclick="switchSLNav('infra',this)"
+                style="padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid transparent">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6" y2="6"/><line x1="6" y1="18" x2="6" y2="18"/></svg>
+                <span style="font-size:12px;color:var(--text-2)">Infra Cost</span>
               </div>
             </div>
-            <div style="overflow-x:auto">
-              <table class="hist-table"><thead id="sl-infra-thead"></thead><tbody id="sl-infra-body"></tbody></table>
+
+            <!-- Content panels -->
+            <div>
+
+              <!-- Cost by Project -->
+              <div id="sl-panel-cost" style="padding:0">
+                <table class="hist-table">
+                  <thead><tr>
+                    <th style="padding-left:16px">Project</th>
+                    <th>License (฿)</th>
+                    <th>Infra (฿)</th>
+                    <th>Total/Mo (฿)</th>
+                  </tr></thead>
+                  <tbody id="sl-proj-body"></tbody>
+                </table>
+              </div>
+
+              <!-- Forecast vs Actual -->
+              <div id="sl-panel-forecast" style="display:none;padding:0">
+                <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+                  <span style="font-size:11px;color:var(--text-3)">Forecast = avg actual ย้อนหลัง (จาก SL memo) → 6 เดือนหน้า</span>
+                  <select id="sl-forecast-proj" onchange="renderBudgetSLInfra()" style="font-size:11px;padding:3px 8px">
+                    <option value="all">ทุกโปรเจค</option>
+                  </select>
+                </div>
+                <div style="overflow-x:auto">
+                  <table class="hist-table">
+                    <thead><tr>
+                      <th>Project</th><th>เดือน</th><th>Forecast (฿)</th><th>Actual (฿)</th><th>Variance</th><th>Perf Test</th>
+                    </tr></thead>
+                    <tbody id="sl-forecast-body"></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- Infra Cost Matrix -->
+              <div id="sl-panel-infra" style="display:none;padding:0">
+                <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:flex-end;gap:8px">
+                  <label style="cursor:pointer">
+                    <input type="file" id="infra-bulk-input" accept=".xlsx,.xls" style="display:none" onchange="handleInfraBulkUpload(event)">
+                    <span class="btn-sm" style="font-size:11px;padding:4px 10px;display:inline-block">⬆ Bulk Upload</span>
+                  </label>
+                  <button class="btn-primary" onclick="openInfraModal()" style="font-size:11px;padding:4px 12px">+ Add Infra Cost</button>
+                </div>
+                <div style="overflow-x:auto">
+                  <table class="hist-table"><thead id="sl-infra-thead"></thead><tbody id="sl-infra-body"></tbody></table>
+                </div>
+              </div>
+
             </div>
           </div>
-
         </div>
 
         <!-- ── SUB-TAB: OTHERS (Phase 2) ── -->
