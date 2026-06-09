@@ -268,6 +268,7 @@ function collectMemoData() {
       return { no:i+1, name:inp[0]?.value.trim()||'-', price, months, qty, subtotal:price*months*qty };
     });
     data.total = rows.reduce((s,r)=>s+r.subtotal, 0);
+    data.slItems = rows.map(r => ({ name:r.name, price:r.price, months:r.months, qty:r.qty }));
     data.amountWords = val('#fs-sl .form-grid .fg:nth-child(2) input');
     data.sections.push({ title:'รายการ Software', html:table(['#','ชื่อ Software','฿/เดือน','เดือน','จำนวน','รวม'], rows.map(r=>[r.no,r.name,money(r.price),r.months,r.qty,money(r.subtotal)]), [2,5]) });
     const acctCols = getAcctCols();
