@@ -307,7 +307,9 @@ function renderBudgetSLInfra() {
 // ── Forecast vs Actual ──
 function _renderForecastTable(allProjects, infraCosts, licByProj) {
   const body = document.getElementById('sl-forecast-body');
-  if(!body) return;
+  const thead = document.getElementById('sl-forecast-thead');
+  if(!body || !thead) return;
+
   // Populate project dropdown
   const projSel = document.getElementById('sl-forecast-proj');
   if(projSel && projSel.options.length <= 1) {
@@ -318,96 +320,179 @@ function _renderForecastTable(allProjects, infraCosts, licByProj) {
     });
   }
   const selProj = projSel?.value || 'all';
-  const filteredProjects = selProj === 'all' ? allProjects : [selProj];
+  const showProjects = selProj === 'all' ? allProjects : [selProj];
 
-  const approved = loadMemos().filter(m => memoStatusKey(m)==='completed' && m.type==='sl');
+  // Month range
+  const monthCount = parseInt(document.getElementById('sl-forecast-months')?.value || '6');
   const now = new Date();
+  const months = [];
+  for(let i = monthCount - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push(d);
+  }
+  // +3 future months
+  for(let i = 1; i <= 3; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    months.push(d);
+  }
 
-  // Build monthly actual per project (from SL memos)
-  const monthlyActual = {}; // { proj: { 'YYYY-MM': amount } }
-  approved.forEach(m => {
-    const d = new Date(m.updatedAt||m.createdAt);
-    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-    const proj = m.project||'ไม่ระบุ';
-    if(!monthlyActual[proj]) monthlyActual[proj] = {};
-    monthlyActual[proj][key] = (monthlyActual[proj][key]||0) + (Number(m.total)||0);
-  });
+  const isFuture = m => m > now;
+  const monthKey = m => `${m.getFullYear()}-${String(m.getMonth()+1).padStart(2,'0')}`;
+  const monthLabel = m => m.toLocaleString('th-TH', { month:'short', year:'2-digit' });
 
-  // Forecast = avg of past months per project (license + infra)
-  const rows = [];
-  filteredProjects.forEach(proj => {
-    const licMo  = licByProj[proj] || 0;
-    const infraMo = Object.values(infraCosts[proj]||{}).reduce((s,v)=>s+v,0);
-    const baseline = licMo + infraMo;
-
-    // Past 6 months actual
-    const past = [];
-    for(let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
-      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      const actual = (monthlyActual[proj]?.[key]||0) + infraMo;
-      past.push({ key, label: d.toLocaleString('th-TH',{month:'short',year:'2-digit'}), actual });
+  // Build actual per project per month from SL memos (distributed)
+  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed' && m.type === 'sl');
+  const actualByProjMonth = {}; // { proj: { 'YYYY-MM': { total, memos: [{memoNo, items}] } } }
+  approved.forEach(memo => {
+    const proj = memo.project || '(ไม่ระบุ)';
+    const startDate = new Date(memo.date || memo.createdAt);
+    const slItems = memo.slItems || [];
+    if(!slItems.length) {
+      // Fallback: distribute total evenly over 12 months if no slItems
+      const total = Number(memo.total) || 0;
+      const mo = 12;
+      const monthly = total / mo;
+      for(let i = 0; i < mo; i++) {
+        const d = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
+        const key = monthKey(d);
+        if(!actualByProjMonth[proj]) actualByProjMonth[proj] = {};
+        if(!actualByProjMonth[proj][key]) actualByProjMonth[proj][key] = { total: 0, memos: [] };
+        actualByProjMonth[proj][key].total += monthly;
+        const existing = actualByProjMonth[proj][key].memos.find(x => x.memoNo === memo.memoNo);
+        if(existing) existing.monthly += monthly;
+        else actualByProjMonth[proj][key].memos.push({ memoNo: memo.memoNo, name: 'SL', monthly });
+      }
+      return;
     }
-    const avg = past.reduce((s,p)=>s+p.actual,0) / (past.filter(p=>p.actual>0).length||1);
-    const forecast = avg || baseline;
-
-    // Next 6 months (forecast only)
-    for(let i = 1; i <= 6; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth()+i, 1);
-      const label = d.toLocaleString('th-TH',{month:'short',year:'2-digit'});
-      rows.push({ proj, label, forecast, actual: null, isFuture: true });
-    }
-    // Past months
-    past.forEach(p => {
-      rows.push({ proj, label: p.label, forecast, actual: p.actual || null, isFuture: false });
+    slItems.forEach(item => {
+      const monthly = (item.price || 0) * (item.qty || 1);
+      const mo = item.months || 12;
+      for(let i = 0; i < mo; i++) {
+        const d = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
+        const key = monthKey(d);
+        if(!actualByProjMonth[proj]) actualByProjMonth[proj] = {};
+        if(!actualByProjMonth[proj][key]) actualByProjMonth[proj][key] = { total: 0, memos: [] };
+        actualByProjMonth[proj][key].total += monthly;
+        const existing = actualByProjMonth[proj][key].memos.find(x => x.memoNo === memo.memoNo && x.name === item.name);
+        if(existing) existing.monthly += monthly;
+        else actualByProjMonth[proj][key].memos.push({ memoNo: memo.memoNo, name: item.name || '-', price: item.price, qty: item.qty || 1, monthly });
+      }
     });
   });
 
-  // Sort: past first (by project then month)
-  const pastRows   = rows.filter(r => !r.isFuture);
-  const futureRows = rows.filter(r => r.isFuture);
+  // Build thead
+  const thS = 'padding:7px 10px;font-size:10px;font-weight:600;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap;color:var(--text-3)';
+  thead.innerHTML = `<tr>
+    <th style="${thS};text-align:left;min-width:90px">Project</th>
+    <th style="${thS};text-align:left;min-width:80px">Program</th>
+    ${months.map(m => `<th style="${thS};${isFuture(m)?'background:#EEF5FF;color:#185FA5':''}">${esc(monthLabel(m))}${isFuture(m)?'<br><span style="font-size:9px">F</span>':''}</th>`).join('')}
+    <th style="${thS}">Total</th>
+  </tr>`;
 
-  if(!pastRows.length && !futureRows.length) {
-    body.innerHTML = `<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูลเพียงพอสำหรับ Forecast</td></tr>`;
-    return;
-  }
+  // Build rows per project
+  const tdS = 'padding:6px 10px;border-bottom:1px solid var(--border);font-size:12px;text-align:right;white-space:nowrap';
+  let rows = '';
 
-  const buildRow = r => {
-    const variance = r.actual !== null ? r.actual - r.forecast : null;
-    const varClass = variance === null ? '' : variance > 0 ? 'color:#A32D2D' : 'color:#3B6D11';
-    const varTxt   = variance === null ? '—' : (variance > 0 ? '+' : '') + money(variance);
-    return `<tr style="${r.isFuture ? 'background:var(--blue-50,#EEF5FF)' : ''}">
-      <td style="padding-left:14px;font-weight:500">${esc(r.proj)}</td>
-      <td>${esc(r.label)}${r.isFuture ? ' <span style="font-size:9px;color:var(--blue);font-weight:600">F</span>' : ''}</td>
-      <td class="mono">${money(r.forecast)}</td>
-      <td class="mono">${r.actual !== null ? money(r.actual) : '—'}</td>
-      <td class="mono" style="${varClass}">${varTxt}</td>
-      <td style="text-align:center">
-        <label style="display:flex;align-items:center;justify-content:center;gap:4px;font-size:11px;cursor:pointer">
-          <input type="checkbox" onchange="togglePerfTest('${esc(r.proj)}','${esc(r.label)}',this.checked)"
-            ${_isPerfTest(r.proj, r.label) ? 'checked' : ''}>
-          Perf
-        </label>
-      </td>
-    </tr>`;
-  };
+  showProjects.forEach(proj => {
+    const licCost = licByProj[proj] || 0;
+    const infraProg = infraCosts[proj] || {};
+    const infraTotal = Object.values(infraProg).reduce((s,v)=>s+v,0);
 
-  body.innerHTML = [...pastRows, ...futureRows].map(buildRow).join('');
+    // Compute forecast baseline = avg of past months with data
+    const pastActuals = months.filter(m => !isFuture(m)).map(m => {
+      const key = monthKey(m);
+      return (actualByProjMonth[proj]?.[key]?.total || 0) + Object.values(infraProg).reduce((s,v)=>s+v,0);
+    }).filter(v => v > 0);
+    const forecastBaseline = pastActuals.length ? pastActuals.reduce((s,v)=>s+v,0)/pastActuals.length : licCost + infraTotal;
+
+    // License rows
+    if(licCost > 0) {
+      const rowTotals = months.map(m => {
+        if(isFuture(m)) return forecastBaseline;
+        return actualByProjMonth[proj]?.[monthKey(m)]?.total || 0;
+      });
+      const total = rowTotals.reduce((s,v)=>s+v,0);
+      rows += `<tr>
+        <td style="${tdS};text-align:left;font-weight:500">${esc(proj)}</td>
+        <td style="${tdS};text-align:left;color:var(--text-2)">License + Infra</td>
+        ${months.map((m,i) => {
+          const v = rowTotals[i];
+          const key = monthKey(m);
+          const hasActual = !isFuture(m) && v > 0;
+          const bgStyle = isFuture(m) ? 'background:#EEF5FF;color:#185FA5' : '';
+          const clickStyle = hasActual ? 'cursor:pointer;text-decoration:underline;text-decoration-color:#185FA5' : '';
+          const clickAttr = hasActual ? `onclick="showMemoBreakdown('${esc(proj)}','${esc(key)}')"` : '';
+          return `<td style="${tdS};${bgStyle};${clickStyle}" ${clickAttr}>${money(v)}</td>`;
+        }).join('')}
+        <td style="${tdS};font-weight:600;color:var(--blue)">${money(total)}</td>
+      </tr>`;
+    }
+
+    // Infra rows per program
+    Object.entries(infraProg).forEach(([prog, cost]) => {
+      const total = cost * months.length;
+      rows += `<tr>
+        <td style="${tdS};text-align:left;color:var(--text-3);font-size:11px">${esc(proj)}</td>
+        <td style="${tdS};text-align:left;color:var(--text-3);font-size:11px">${esc(prog)} <span style="font-size:9px;background:#FAEEDA;color:#633806;padding:1px 5px;border-radius:3px">Infra</span></td>
+        ${months.map(m => `<td style="${tdS};${isFuture(m)?'background:#EEF5FF;color:#185FA5':'color:var(--text-2)'}">${money(cost)}</td>`).join('')}
+        <td style="${tdS};font-weight:600;color:var(--amber)">${money(total)}</td>
+      </tr>`;
+    });
+  });
+
+  body.innerHTML = rows || `<tr><td colspan="${months.length+3}" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล</td></tr>`;
 }
 
-// ── Perf Test flag storage ──
-function _isPerfTest(proj, month) {
-  try { const d = JSON.parse(localStorage.getItem('orbit-pmo-perf-flags')||'{}'); return !!(d[proj]?.[month]); }
-  catch(e) { return false; }
+// ── Memo breakdown popup ──
+function showMemoBreakdown(proj, monthKey) {
+  const approved = loadMemos().filter(m => memoStatusKey(m)==='completed' && m.type==='sl' && (m.project||'(ไม่ระบุ)')=== proj);
+  const [yr, mo] = monthKey.split('-').map(Number);
+  const label = new Date(yr, mo-1, 1).toLocaleString('th-TH',{month:'long',year:'2-digit'});
+
+  const items = [];
+  approved.forEach(memo => {
+    const startDate = new Date(memo.date || memo.createdAt);
+    const slItems = memo.slItems || [];
+    if(!slItems.length) {
+      const endMo = new Date(startDate.getFullYear(), startDate.getMonth()+12, 1);
+      const target = new Date(yr, mo-1, 1);
+      if(target >= startDate && target < endMo) {
+        items.push({ memoNo: memo.memoNo, name: 'SL (รวม)', monthly: (Number(memo.total)||0)/12 });
+      }
+      return;
+    }
+    slItems.forEach(item => {
+      const endMo = new Date(startDate.getFullYear(), startDate.getMonth()+(item.months||12), 1);
+      const target = new Date(yr, mo-1, 1);
+      if(target >= startDate && target < endMo) {
+        items.push({ memoNo: memo.memoNo, name: item.name||'-', price: item.price, qty: item.qty||1, monthly: (item.price||0)*(item.qty||1) });
+      }
+    });
+  });
+
+  const panel = document.getElementById('sl-memo-breakdown');
+  const title = document.getElementById('sl-breakdown-title');
+  if(!panel || !title) return;
+
+  title.textContent = `${proj} · ${label}`;
+  const tbody = document.getElementById('sl-breakdown-body');
+  const total = items.reduce((s,i)=>s+i.monthly,0);
+
+  tbody.innerHTML = !items.length
+    ? `<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--text-3)">ไม่มี SL memo ในเดือนนี้</td></tr>`
+    : items.map(i => `<tr>
+        <td style="padding:7px 12px;border-bottom:1px solid var(--border);color:var(--blue);font-weight:500">${esc(i.memoNo)}</td>
+        <td style="padding:7px 12px;border-bottom:1px solid var(--border)">${esc(i.name)}</td>
+        <td style="padding:7px 12px;border-bottom:1px solid var(--border);text-align:right">${i.price ? money(i.price) : '—'}</td>
+        <td style="padding:7px 12px;border-bottom:1px solid var(--border);text-align:right">${i.qty || '—'}</td>
+        <td style="padding:7px 12px;border-bottom:1px solid var(--border);text-align:right;font-weight:500">${money(i.monthly)}</td>
+      </tr>`).join('')
+    + `<tr style="background:var(--bg)"><td colspan="4" style="padding:7px 12px;font-weight:600">Total</td><td style="padding:7px 12px;text-align:right;font-weight:600;color:var(--blue)">${money(total)}</td></tr>`;
+
+  panel.style.display = '';
+  panel.scrollIntoView({ behavior:'smooth', block:'nearest' });
 }
-function togglePerfTest(proj, month, checked) {
-  try {
-    const d = JSON.parse(localStorage.getItem('orbit-pmo-perf-flags')||'{}');
-    if(!d[proj]) d[proj] = {};
-    if(checked) d[proj][month] = true; else delete d[proj][month];
-    localStorage.setItem('orbit-pmo-perf-flags', JSON.stringify(d));
-  } catch(e) {}
-}
+
 
 // ── Infra Matrix ──
 function _renderInfraMatrix(infraCosts) {
