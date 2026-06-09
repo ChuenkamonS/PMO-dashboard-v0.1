@@ -32,11 +32,22 @@ function getLicenseCostByProject() {
 let _bgtCurrentTab = 'overview';
 function switchBudgetTab(tab, btn) {
   _bgtCurrentTab = tab;
-  document.querySelectorAll('#view-budget .cost-tab-panel').forEach(p => p.style.display = 'none');
-  document.querySelectorAll('#view-budget .cost-stab').forEach(b => b.classList.remove('active'));
+  // Hide all budget sub-tab panels
+  ['overview','sl-infra','others'].forEach(t => {
+    const p = document.getElementById('bgt-tab-' + t);
+    if(p) p.style.display = 'none';
+  });
+  // Remove active from all budget tab buttons
+  document.querySelectorAll('#view-budget .cost-stab').forEach(b => {
+    b.classList.remove('active');
+    b.style.background = '';
+    b.style.color = '';
+  });
+  // Show selected panel
   const panel = document.getElementById('bgt-tab-' + tab);
   if(panel) panel.style.display = '';
   if(btn) btn.classList.add('active');
+  // Render content
   if(tab === 'overview')  renderBudgetOverview();
   if(tab === 'sl-infra')  renderBudgetSLInfra();
 }
