@@ -1317,6 +1317,11 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6" y2="6"/><line x1="6" y1="18" x2="6" y2="18"/></svg>
                 <span style="font-size:12px;color:var(--text-2)">Infra Cost</span>
               </div>
+              <div id="sl-nav-bva" class="sl-nav-item" onclick="switchSLNav('bva',this)"
+                style="padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid transparent">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                <span style="font-size:12px;color:var(--text-2)">Budget vs Actual</span>
+              </div>
             </div>
 
             <!-- Content panels -->
@@ -1384,6 +1389,36 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 </div>
                 <div style="overflow-x:auto">
                   <table class="hist-table"><thead id="sl-infra-thead"></thead><tbody id="sl-infra-body"></tbody></table>
+                </div>
+              </div>
+
+              <!-- Budget vs Actual panel -->
+              <div id="sl-panel-bva" style="display:none;padding:0">
+                <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+                  <span style="font-size:11px;color:var(--text-3)">Budget = Forecast avg · Actual = SL memo spend ในช่วงที่เลือก</span>
+                  <select id="sl-bva-range" onchange="renderBudgetSLInfra()" style="font-size:11px;padding:3px 8px">
+                    <option value="3">3 เดือน</option>
+                    <option value="6" selected>6 เดือน</option>
+                    <option value="12">12 เดือน</option>
+                  </select>
+                </div>
+                <!-- Summary cards -->
+                <div id="sl-bva-summary" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)"></div>
+                <!-- Per project table -->
+                <table class="hist-table">
+                  <thead><tr>
+                    <th style="padding-left:14px">Project</th>
+                    <th style="text-align:right">Budget (฿)</th>
+                    <th style="text-align:right">Actual (฿)</th>
+                    <th style="text-align:right">Remaining (฿)</th>
+                    <th>Utilization</th>
+                  </tr></thead>
+                  <tbody id="sl-bva-body"></tbody>
+                </table>
+                <div style="padding:8px 14px;background:var(--bg);font-size:11px;color:var(--text-3);display:flex;gap:16px">
+                  <span style="color:var(--green)">● &lt;90% On track</span>
+                  <span style="color:var(--amber)">● 90–100% Near limit</span>
+                  <span style="color:var(--red)">● &gt;100% Over budget</span>
                 </div>
               </div>
 
