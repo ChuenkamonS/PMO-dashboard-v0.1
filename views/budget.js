@@ -150,7 +150,7 @@ function _drawTrendChart(canvasId, allMemos, projSet, typeSet) {
       const avg = (data[i-1]+data[i-2]+data[i-3])/3;
       return avg > 0 && v > avg * 1.5;
     });
-    const color = BGT_PROJ_COLORS[pi % PROJ_COLORS.length];
+    const color = BGT_PROJ_COLORS[pi % BGT_PROJ_COLORS.length];
     return {
       label: proj, data, borderColor: color, backgroundColor: color+'22',
       borderWidth: 2, tension: 0.3, fill: false,
