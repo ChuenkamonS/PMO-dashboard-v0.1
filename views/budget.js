@@ -378,9 +378,10 @@ function _renderForecastTable(allProjects, infraCosts, licByProj) {
       const totalAmt = Number(memo.total) || 0;
       const mo = 12;
       const monthly = totalAmt / mo;
+      const startMoNorm = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
       if(monthly > 0) {
         for(let i = 0; i < mo; i++) {
-          const d = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
+          const d = new Date(startMoNorm.getFullYear(), startMoNorm.getMonth() + i, 1);
           const key = monthKey(d);
           if(!actualByProjMonth[proj]) actualByProjMonth[proj] = {};
           if(!actualByProjMonth[proj][key]) actualByProjMonth[proj][key] = { total: 0, memos: [] };
@@ -484,7 +485,8 @@ function showMemoBreakdown(proj, monthKey) {
     if(!slItems.length) {
       const endMo = new Date(startDate.getFullYear(), startDate.getMonth()+12, 1);
       const target = new Date(yr, mo-1, 1);
-      if(target >= startDate && target < endMo) {
+      const startMo = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+      if(target >= startMo && target < endMo) {
         items.push({ memoNo: memo.memoNo, name: 'SL รวม (memo เก่า — ไม่มีรายละเอียด)', monthly: (Number(memo.total)||0)/12 });
       }
       return;
@@ -492,7 +494,8 @@ function showMemoBreakdown(proj, monthKey) {
     slItems.forEach(item => {
       const endMo = new Date(startDate.getFullYear(), startDate.getMonth()+(item.months||12), 1);
       const target = new Date(yr, mo-1, 1);
-      if(target >= startDate && target < endMo) {
+      const startMo2 = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+      if(target >= startMo2 && target < endMo) {
         items.push({ memoNo: memo.memoNo, name: item.name||'-', price: item.price, qty: item.qty||1, monthly: (item.price||0)*(item.qty||1) });
       }
     });
