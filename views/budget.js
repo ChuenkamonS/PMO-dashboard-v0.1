@@ -304,6 +304,32 @@ function renderBudgetSLInfra() {
   _renderInfraMatrix(infraCosts);
 }
 
+
+// ── Parse Thai date string to JS Date ──
+function parseThaiDate(str) {
+  if(!str) return null;
+  // Try ISO first
+  const d = new Date(str);
+  if(!isNaN(d)) return d;
+  // Thai format: "27 พฤษภาคม 2569" or "26/05/69"
+  const THAI_MONTHS = {'มกราคม':0,'กุมภาพันธ์':1,'มีนาคม':2,'เมษายน':3,'พฤษภาคม':4,'มิถุนายน':5,'กรกฎาคม':6,'สิงหาคม':7,'กันยายน':8,'ตุลาคม':9,'พฤศจิกายน':10,'ธันวาคม':11};
+  const m1 = str.match(/^(\d{1,2})\s+(\S+)\s+(\d{4})$/);
+  if(m1) {
+    const mo = THAI_MONTHS[m1[2]];
+    const yr = parseInt(m1[3]) - 543; // Buddhist Era to CE
+    if(mo !== undefined && yr > 1900) return new Date(yr, mo, parseInt(m1[1]));
+  }
+  // dd/mm/yy or dd/mm/yyyy
+  const m2 = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if(m2) {
+    let yr = parseInt(m2[3]);
+    if(yr < 100) yr += 2500; // treat as Buddhist Era short
+    if(yr > 2100) yr -= 543;
+    return new Date(yr, parseInt(m2[2])-1, parseInt(m2[1]));
+  }
+  return null;
+}
+
 // ── Forecast vs Actual ──
 function _renderForecastTable(allProjects, infraCosts, licByProj) {
   const body = document.getElementById('sl-forecast-body');
@@ -345,7 +371,7 @@ function _renderForecastTable(allProjects, infraCosts, licByProj) {
   const actualByProjMonth = {}; // { proj: { 'YYYY-MM': { total, memos: [{memoNo, items}] } } }
   approved.forEach(memo => {
     const proj = memo.project || '(ไม่ระบุ)';
-    const startDate = new Date(memo.date || memo.createdAt);
+    const startDate = parseThaiDate(memo.date) || parseThaiDate(memo.createdAt) || new Date();
     const slItems = memo.slItems || [];
     if(!slItems.length) {
       // Fallback for old memos: distribute memo.total over 12 months
@@ -453,7 +479,7 @@ function showMemoBreakdown(proj, monthKey) {
 
   const items = [];
   approved.forEach(memo => {
-    const startDate = new Date(memo.date || memo.createdAt);
+    const startDate = parseThaiDate(memo.date) || parseThaiDate(memo.createdAt) || new Date();
     const slItems = memo.slItems || [];
     if(!slItems.length) {
       const endMo = new Date(startDate.getFullYear(), startDate.getMonth()+12, 1);
