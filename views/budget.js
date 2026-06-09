@@ -446,13 +446,17 @@ function _renderForecastTable(allProjects, infraCosts, licByProj) {
 
     // License rows
     Object.entries(licProgs).forEach(([prog, monthData]) => {
+      // Forecast per program = avg of its own past actual months
+      const pastVals = months.filter(m => !isFuture(m)).map(m => monthData[monthKey(m)]||0).filter(v=>v>0);
+      const progForecast = pastVals.length ? pastVals.reduce((s,v)=>s+v,0)/pastVals.length : 0;
+
       let rowTotal = 0;
       const cells = months.map((m, mi) => {
         const key = monthKey(m);
         if(isFuture(m)) {
-          const fv = forecastBase / Math.max(allProgs.length, 1);
+          const fv = progForecast;
           rowTotal += fv; projMonthTotals[mi] += fv; projTotal += fv;
-          return `<td style="${tdFS}">${money(Math.round(fv))}</td>`;
+          return `<td style="${tdFS}">${fv > 0 ? money(Math.round(fv)) : '<span style=\"color:var(--text-3)\">—</span>'}</td>`;
         }
         const v = monthData[key]||0;
         rowTotal += v; projMonthTotals[mi] += v; projTotal += v;
