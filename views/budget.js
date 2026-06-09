@@ -4,10 +4,10 @@
 // ─────────────────────────────────────────
 
 // ── Constants ──
+const BGT_TYPE_COLORS = { sl:'#185FA5', hw:'#3B6D11', int:'#854F0B', ent:'#3C3489', dep:'#A32D2D' };
+const BGT_TYPE_LABELS = { sl:'Software License', hw:'Hardware', int:'Team Activity', ent:'Client Expense', dep:'Deployment' };
+const BGT_PROJ_COLORS = ['#185FA5','#3B6D11','#854F0B','#3C3489','#A32D2D','#5F5E5A','#0F6E56','#8B4513'];
 const INFRA_KEY = 'orbit-pmo-infra-v1';
-const TYPE_COLORS = { sl:'#185FA5', hw:'#3B6D11', int:'#854F0B', ent:'#3C3489', dep:'#A32D2D' };
-const TYPE_LABELS = { sl:'Software License', hw:'Hardware', int:'Team Activity', ent:'Client Expense', dep:'Deployment' };
-const PROJ_COLORS = ['#185FA5','#3B6D11','#854F0B','#3C3489','#A32D2D','#5F5E5A','#0F6E56','#8B4513'];
 
 // ── Infra Storage ──
 function loadInfraCosts() {
@@ -150,7 +150,7 @@ function _drawTrendChart(canvasId, allMemos, projSet, typeSet) {
       const avg = (data[i-1]+data[i-2]+data[i-3])/3;
       return avg > 0 && v > avg * 1.5;
     });
-    const color = PROJ_COLORS[pi % PROJ_COLORS.length];
+    const color = BGT_PROJ_COLORS[pi % PROJ_COLORS.length];
     return {
       label: proj, data, borderColor: color, backgroundColor: color+'22',
       borderWidth: 2, tension: 0.3, fill: false,
@@ -205,9 +205,9 @@ function _renderOvProjBarChart(allMemos) {
   const labels  = sorted.map(([p]) => p);
 
   const datasets = types.map(t => ({
-    label: TYPE_LABELS[t] || t.toUpperCase(),
+    label: BGT_TYPE_LABELS[t] || t.toUpperCase(),
     data: sorted.map(([,v]) => v[t]||0),
-    backgroundColor: TYPE_COLORS[t],
+    backgroundColor: BGT_TYPE_COLORS[t],
     borderRadius: 2,
     borderSkipped: false,
   }));
