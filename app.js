@@ -539,10 +539,14 @@ function initApp() {
   renderHistoryMemos();
   rebuildAcct();
   setInterval(() => fetch('https://memo-pdf-server.onrender.com/ping').catch(()=>{}), 4*60*1000);
-  // Load from Supabase on startup and refresh UI
-  loadMemosAsync().then(() => {
+
+  // Load all Supabase data on startup in parallel
+  Promise.all([
+    loadMemosAsync(),
+    typeof loadManualLicensesAsync === 'function' ? loadManualLicensesAsync() : Promise.resolve(),
+    typeof loadInfraCostsAsync     === 'function' ? loadInfraCostsAsync()     : Promise.resolve(),
+  ]).then(() => {
     renderPendingMemos();
     renderHistoryMemos();
-  
   }).catch(e => console.warn('Supabase init load failed', e));
 }
