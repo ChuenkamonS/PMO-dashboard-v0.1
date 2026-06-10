@@ -2,10 +2,31 @@
 // views/pending.js — Enhanced Pending Memo
 // ─────────────────────────────────────────
 
-// ── Budget Ceiling Storage ──
+// ── Budget Ceiling Storage (Supabase settings table + localStorage fallback) ──
 const BUDGET_KEY = 'orbit-pmo-budgets-v1';
 const DEFAULT_BUDGETS = { 'AOA-MP':500000, 'TTB':500000, 'Geo9':300000, 'Release 2.1':300000, 'Release 3':500000 };
 
+async function loadBudgetsAsync() {
+  if (await checkSupa()) {
+    try {
+      const row = await supaFetch('settings', 'GET', null, '?id=eq.budgets');
+      if (row && row[0]?.data) {
+        const b = row[0].data;
+        try { localStorage.setItem(BUDGET_KEY, JSON.stringify(b)); } catch(e) {}
+        return b;
+      }
+    } catch(e) { console.warn('loadBudgets Supabase failed', e.message); }
+  }
+  return loadBudgets();
+}
+async function saveBudgetsAsync(b) {
+  storeBudgets(b);
+  if (await checkSupa()) {
+    try {
+      await supaFetch('settings', 'POST', { id: 'budgets', data: b }, '?on_conflict=id');
+    } catch(e) { console.warn('saveBudgets Supabase failed', e.message); }
+  }
+}
 function loadBudgets() {
   try { const b = JSON.parse(localStorage.getItem(BUDGET_KEY)||'null'); return b || {...DEFAULT_BUDGETS}; }
   catch(e) { return {...DEFAULT_BUDGETS}; }
@@ -50,7 +71,6 @@ function switchPendingTab(tab) {
   _pendingTab = tab;
   document.querySelectorAll('.pend-tab-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.tab === tab);
-    // Reset inline background/color so CSS class takes over
     if(b.dataset.tab === tab) {
       b.style.background = '';
       b.style.color = '';
@@ -62,25 +82,44 @@ function switchPendingTab(tab) {
   renderPendingContent();
 }
 
+// ── Populate filter dropdowns dynamically from actual memo data ──
+function populatePendingFilters() {
+  const allMemos = loadMemos();
+  const projects = [...new Set(allMemos.map(m => m.project).filter(Boolean))].sort();
+
+  const projSel = document.getElementById('pend-filter-project');
+  if (projSel) {
+    const cur = projSel.value;
+    projSel.innerHTML = `<option value="all">ทุกโครงการ</option>` +
+      projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+    if ([...projSel.options].some(o => o.value === cur)) projSel.value = cur;
+  }
+  // Type dropdown is static (SL/HW/INT/ENT/DEP won't change) — no need to populate
+}
+
 // ── Main render ──
 function renderPendingMemos() {
   const list = document.getElementById('pending-list');
   if(!list) return;
+
+  populatePendingFilters();
+
   const allMemos  = loadMemos();
-  const pending   = allMemos.filter(m => !m.status || m.status === 'pending');
-  const submitted = allMemos.filter(m => ['pending','completed','rejected'].includes(m.status));
+  // awaiting = still needs a decision
+  const awaiting  = allMemos.filter(m => !m.status || m.status === 'pending');
+  // submitted = already decided (completed or rejected) — distinct from awaiting
+  const submitted = allMemos.filter(m => ['completed','rejected'].includes(m.status));
   const drafts    = allMemos.filter(m => m.status === 'draft');
+
   const el = id => document.getElementById(id);
-  if(el('pending-count'))        el('pending-count').textContent        = pending.length;
-  if(el('pending-my-submitted')) el('pending-my-submitted').textContent = submitted.filter(m => !m.status || m.status === 'pending').length;
+  if(el('pending-count'))        el('pending-count').textContent        = awaiting.length;
+  if(el('pending-my-submitted')) el('pending-my-submitted').textContent = submitted.length;
   if(el('pending-draft-count'))  el('pending-draft-count').textContent  = drafts.length;
+
   const badge = document.querySelector('#memo-sub .sb-badge');
-  if(badge) badge.textContent = pending.length;
-  const counts = {
-    awaiting:  pending.length,
-    submitted: submitted.length,
-    drafts:    drafts.length,
-  };
+  if(badge) badge.textContent = awaiting.length;
+
+  const counts = { awaiting: awaiting.length, submitted: submitted.length, drafts: drafts.length };
   Object.entries(counts).forEach(([tab, count]) => {
     const el = document.querySelector(`.pend-tab-btn[data-tab="${tab}"] .tab-count`);
     if(el) el.textContent = count > 0 ? count : '';
@@ -92,8 +131,11 @@ function renderPendingContent() {
   const list = document.getElementById('pending-list');
   if(!list) return;
   let memos = loadMemos();
+  // awaiting = pending decisions only
+  // submitted = completed or rejected (already decided) — NOT the same as awaiting
+  // drafts = drafts only
   if(_pendingTab==='awaiting')  memos = memos.filter(m => !m.status || m.status==='pending');
-  if(_pendingTab==='submitted') memos = memos.filter(m => ['pending','completed','rejected'].includes(m.status));
+  if(_pendingTab==='submitted') memos = memos.filter(m => ['completed','rejected'].includes(m.status));
   if(_pendingTab==='drafts')    memos = memos.filter(m => m.status==='draft');
   if(_pendingSearch) {
     const s = _pendingSearch.toLowerCase();
@@ -439,25 +481,29 @@ function closeDetailModal() { document.getElementById('detail-modal').style.disp
 
 // ── Budget Settings ──
 function openBudgetSettings() {
-  const b = loadBudgets();
-  const projects = ['AOA-MP','TTB','Geo9','Release 2.1','Release 3'];
-  document.getElementById('budget-settings-body').innerHTML = projects.map(p=>`
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-      <div style="width:110px;font-size:13px;font-weight:500">${esc(p)}</div>
-      <input type="number" class="budget-ceiling-input" data-project="${esc(p)}" value="${b[p]||0}"
-        style="flex:1;font-size:13px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm)">
-      <div style="font-size:11px;color:var(--text-3);white-space:nowrap">Used: ${money(getProjectUsed(p))}</div>
-    </div>`).join('');
-  document.getElementById('budget-settings-modal').style.display='flex';
+  const s = typeof loadSettings === 'function' ? loadSettings() : null;
+  const projects = s?.projects || ['AOA-MP','TTB','Geo9','Release 2.1','Release 3'];
+  // Load fresh from Supabase then render modal
+  loadBudgetsAsync().then(b => {
+    document.getElementById('budget-settings-body').innerHTML = projects.map(p=>`
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <div style="width:110px;font-size:13px;font-weight:500">${esc(p)}</div>
+        <input type="number" class="budget-ceiling-input" data-project="${esc(p)}" value="${b[p]||0}"
+          style="flex:1;font-size:13px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm)">
+        <div style="font-size:11px;color:var(--text-3);white-space:nowrap">Used: ${money(getProjectUsed(p))}</div>
+      </div>`).join('');
+    document.getElementById('budget-settings-modal').style.display='flex';
+  });
 }
 function closeBudgetSettings() { document.getElementById('budget-settings-modal').style.display='none'; }
 function saveBudgetSettings() {
   const b = loadBudgets();
   document.querySelectorAll('.budget-ceiling-input').forEach(inp => { b[inp.dataset.project]=Number(inp.value)||0; });
-  storeBudgets(b);
-  closeBudgetSettings();
-  renderPendingMemos();
-  alert('บันทึก Budget Ceiling แล้ว');
+  saveBudgetsAsync(b).then(() => {
+    closeBudgetSettings();
+    renderPendingMemos();
+    alert('บันทึก Budget Ceiling แล้ว');
+  });
 }
 
 // ── backward compat ──
