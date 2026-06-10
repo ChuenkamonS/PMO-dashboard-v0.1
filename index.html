@@ -2068,5 +2068,26 @@ document.addEventListener('click', e => {
         </div>
       </div>
 <script src="views/settings.js"></script>
+
+      <!-- Budget Tag Modal -->
+      <div id="budget-tag-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
+        <div class="card" style="width:420px;max-width:95vw;padding:24px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <span style="font-size:15px;font-weight:700">Assign Budget Source</span>
+            <button class="btn-sm" onclick="closeBudgetTagModal()" style="padding:3px 8px">✕</button>
+          </div>
+          <div style="margin-bottom:14px;padding:10px 12px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border)">
+            <div style="font-size:13px;font-weight:600" id="btm-memo-no"></div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:2px" id="btm-memo-detail"></div>
+          </div>
+          <div style="font-size:12px;color:var(--text-2);margin-bottom:10px">Budget นี้ตัดจาก:</div>
+          <div id="btm-options"></div>
+          <div style="display:flex;gap:8px;margin-top:16px">
+            <button id="btm-save-btn" class="btn-primary" style="flex:1">Confirm</button>
+            <button class="btn-ghost" onclick="closeBudgetTagModal()">Cancel</button>
+          </div>
+        </div>
+      </div>
+
 </body>
 </html>
