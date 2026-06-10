@@ -472,6 +472,7 @@ function parseThaiDate(str) {
     if(yr > 2100) yr -= 543;
     return new Date(yr, parseInt(m2[2])-1, parseInt(m2[1]));
   }
+  console.warn('[parseThaiDate] ไม่สามารถ parse วันที่ได้:', str, '— จะใช้ createdAt/approvedAt แทน');
   return null;
 }
 
