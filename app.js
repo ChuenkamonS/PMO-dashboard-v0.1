@@ -545,6 +545,7 @@ function initApp() {
     loadMemosAsync(),
     typeof loadManualLicensesAsync === 'function' ? loadManualLicensesAsync() : Promise.resolve(),
     typeof loadInfraCostsAsync     === 'function' ? loadInfraCostsAsync()     : Promise.resolve(),
+    typeof loadBudgetsAsync        === 'function' ? loadBudgetsAsync()        : Promise.resolve(),
   ]).then(() => {
     renderPendingMemos();
     renderHistoryMemos();
