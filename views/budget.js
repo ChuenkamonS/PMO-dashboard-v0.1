@@ -1,6 +1,6 @@
 // ── SL+Infra sidebar nav ──
 function switchSLNav(panel, btn) {
-  ['cost','forecast','infra','bva'].forEach(p => {
+  ['cost','forecast','infra','bva','budgetsettings'].forEach(p => {
     const panelEl = document.getElementById('sl-panel-' + p);
     const navEl   = document.getElementById('sl-nav-' + p);
     if(panelEl) panelEl.style.display = p === panel ? '' : 'none';
@@ -484,14 +484,19 @@ function parseThaiDate(str) {
 
 // ════════════════════════════════════════════════════
 // SHARED HELPER — distributes SL memo amounts by month
-// Returns: { 'YYYY-MM': { total: number, memos: [{memoNo, name, monthly}] } }
-// Use this in Overview KPI, Forecast, and BvA for consistency
+// proj: project name, or null for all, or 'Company-Wide' for shared
+// Respects budgetSource — auto = project, override = budgetSource
 // ════════════════════════════════════════════════════
+function getMemoBudgetSource(memo) {
+  // If PMO overrode, use that; otherwise default to memo.project
+  return memo.budgetSource || memo.project || '(ไม่ระบุ)';
+}
+
 function buildActualByMonth(proj) {
   const approved = loadMemos().filter(m =>
     memoStatusKey(m) === 'completed' &&
     m.type === 'sl' &&
-    (proj === null || (m.project || '(ไม่ระบุ)') === proj)
+    (proj === null || getMemoBudgetSource(m) === proj)
   );
   const result = {}; // { 'YYYY-MM': { total, memos: [] } }
 
@@ -1049,4 +1054,115 @@ function _renderBudgetVsActual(allProjects, infraEntries, licByProj) {
       </div>
     </td>
   </tr>`).join('');
+}
+
+// ════════════════════════════════════════
+// BUDGET SETTINGS (Annual budget per project)
+// ════════════════════════════════════════
+const SLINF_BUDGET_KEY = 'orbit-pmo-sl-budgets-v1';
+
+function loadSLBudgets() {
+  try { return JSON.parse(localStorage.getItem(SLINF_BUDGET_KEY)||'{}'); }
+  catch(e) { return {}; }
+}
+function storeSLBudgets(d) {
+  try { localStorage.setItem(SLINF_BUDGET_KEY, JSON.stringify(d)); } catch(e) {}
+}
+function getSLBudgetForProject(proj, year) {
+  const d = loadSLBudgets();
+  return d[year]?.[proj] || 0;
+}
+
+function renderBudgetSettings() {
+  const body = document.getElementById('sl-budget-settings-body');
+  if(!body) return;
+  const year = document.getElementById('sl-bgt-year')?.value || '2569';
+  const budgets = loadSLBudgets();
+  const yearData = budgets[year] || {};
+
+  const s = typeof loadSettings === 'function' ? loadSettings() : null;
+  const projects = [...new Set([
+    ...(s?.projects || []),
+    'Company-Wide',
+    ...Object.keys(yearData)
+  ])].filter(Boolean);
+
+  if(!projects.length) {
+    body.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:12px">ยังไม่มีโปรเจค — กด "+ เพิ่มโปรเจค" หรือตั้งค่าโปรเจคใน Settings ก่อน</div>`;
+    return;
+  }
+
+  const tdS = 'padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px';
+  body.innerHTML = `
+    <table class="hist-table" style="margin-bottom:12px">
+      <thead><tr>
+        <th style="padding:8px 12px;text-align:left;font-weight:500">Project</th>
+        <th style="padding:8px 12px;text-align:left;font-weight:500">Annual Budget (฿)</th>
+        <th style="padding:8px 12px;text-align:right;font-weight:500">Monthly (คำนวณให้)</th>
+        <th style="padding:8px 12px;text-align:center;font-weight:500">Actions</th>
+      </tr></thead>
+      <tbody>
+        ${projects.map(proj => {
+          const annual = yearData[proj] || 0;
+          const monthly = annual ? Math.round(annual/12) : 0;
+          const isCompany = proj === 'Company-Wide';
+          return `<tr style="${isCompany?'background:var(--blue-50)':''}">
+            <td style="${tdS};font-weight:500">${esc(proj)}${isCompany?'<span style="font-size:10px;background:#E6F1FB;color:#0C447C;padding:1px 6px;border-radius:4px;margin-left:6px">Shared</span>':''}</td>
+            <td style="${tdS}">
+              <input type="number" id="bgt-inp-${esc(proj)}" value="${annual||''}" placeholder="0"
+                style="font-size:12px;padding:4px 8px;width:160px"
+                oninput="updateMonthlyPreview('${esc(proj)}')">
+            </td>
+            <td style="${tdS};text-align:right;color:var(--text-3)" id="bgt-mo-${esc(proj)}">${annual ? money(monthly) : '—'}</td>
+            <td style="${tdS};text-align:center">
+              <button class="btn-primary" onclick="saveBudgetRow('${esc(proj)}')" style="font-size:11px;padding:3px 10px">Save</button>
+              ${annual ? `<button class="btn-sm" onclick="clearBudgetRow('${esc(proj)}')" style="font-size:11px;padding:3px 8px;margin-left:4px;color:var(--red)">✕</button>` : ''}
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+    <div style="font-size:11px;color:var(--text-3)">* Company-Wide = งบกลาง เช่น AI tools ที่ใช้ทั้งบริษัท</div>`;
+}
+
+function updateMonthlyPreview(proj) {
+  const inp = document.getElementById('bgt-inp-' + proj);
+  const moEl = document.getElementById('bgt-mo-' + proj);
+  if(!inp || !moEl) return;
+  const annual = parseFloat(inp.value)||0;
+  moEl.textContent = annual ? money(Math.round(annual/12)) : '—';
+}
+
+function saveBudgetRow(proj) {
+  const inp = document.getElementById('bgt-inp-' + proj);
+  const year = document.getElementById('sl-bgt-year')?.value || '2569';
+  const annual = parseFloat(inp?.value)||0;
+  const budgets = loadSLBudgets();
+  if(!budgets[year]) budgets[year] = {};
+  if(annual > 0) budgets[year][proj] = annual;
+  else delete budgets[year][proj];
+  storeSLBudgets(budgets);
+  renderBudgetSettings();
+  // refresh BvA if visible
+  if(document.getElementById('sl-panel-bva')?.style.display !== 'none') renderBudgetSLInfra();
+}
+
+function clearBudgetRow(proj) {
+  if(!confirm(`ลบงบประมาณของ "${proj}" ออก?`)) return;
+  const year = document.getElementById('sl-bgt-year')?.value || '2569';
+  const budgets = loadSLBudgets();
+  if(budgets[year]) delete budgets[year][proj];
+  storeSLBudgets(budgets);
+  renderBudgetSettings();
+}
+
+function addBudgetRow() {
+  const proj = prompt('ชื่อโปรเจค หรือ "Company-Wide":');
+  if(!proj || !proj.trim()) return;
+  const year = document.getElementById('sl-bgt-year')?.value || '2569';
+  const budgets = loadSLBudgets();
+  if(!budgets[year]) budgets[year] = {};
+  if(!(proj in budgets[year])) budgets[year][proj] = 0;
+  storeSLBudgets(budgets);
+  renderBudgetSettings();
 }
