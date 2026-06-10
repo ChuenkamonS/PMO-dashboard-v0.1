@@ -133,9 +133,9 @@ function storeInfraCosts(arr) {
   try { localStorage.setItem(INFRA_KEY, JSON.stringify(_infraCache)); } catch(e) {}
 }
 
-// Helper: unique entry id
+// Helper: stable deterministic entry id (project + program, no timestamp)
 function infraEntryId(project, program) {
-  return `${project}__${program}__${Date.now()}`;
+  return `${project}__${program}`.replace(/[^a-zA-Z0-9_\-ก-๙]/g, '_');
 }
 
 // Get infra cost for a project in a specific month — used by Forecast + BvA
@@ -816,13 +816,15 @@ function saveInfraCost() {
   if(!program) { alert('กรุณากรอก Program'); return; }
   if(!monthly) { alert('กรุณากรอก Monthly Cost'); return; }
 
-  const entry = {
-    id:           editId || infraEntryId(project, program),
-    project, program,
-    monthly_cost: monthly,
-    start_month:  start,
-    end_month:    end,
-  };
+  // Generate stable id; if editing reuse existing id, if new ensure uniqueness
+  let id = editId || infraEntryId(project, program);
+  if (!editId) {
+    // Avoid collision with existing entries for same project+program
+    const existing = loadInfraCosts().filter(e => e.id.startsWith(infraEntryId(project, program)));
+    if (existing.length > 0) id = `${infraEntryId(project, program)}_${existing.length + 1}`;
+  }
+
+  const entry = { id, project, program, monthly_cost: monthly, start_month: start, end_month: end };
 
   saveInfraEntryAsync(entry).catch(e => console.warn('Supabase infra save failed', e));
   closeInfraModal();
