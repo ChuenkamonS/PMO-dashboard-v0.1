@@ -1626,6 +1626,36 @@ svg.icon { display: inline-block; vertical-align: middle; }
       <!-- ════ DEVICE REGISTRY ════ -->
       <div id="view-device" class="view">
 
+        <!-- Tab switcher -->
+        <div style="display:flex;gap:0;border-bottom:0.5px solid var(--border);margin-bottom:14px">
+          <button class="dev-tab-btn active" id="dev-tbtn-registry" onclick="switchDevTab('registry',this)"
+            style="font-size:12px;padding:8px 16px;border:none;border-bottom:2px solid #185FA5;background:none;color:#185FA5;font-weight:500;cursor:pointer">Device registry</button>
+          <button class="dev-tab-btn" id="dev-tbtn-orders" onclick="switchDevTab('orders',this)"
+            style="font-size:12px;padding:8px 16px;border:none;border-bottom:2px solid transparent;background:none;color:var(--text-2);cursor:pointer">Purchase orders <span id="dev-po-badge" style="font-size:10px;background:#FAEEDA;color:#633806;padding:1px 7px;border-radius:100px;margin-left:4px"></span></button>
+        </div>
+
+        <!-- ── PURCHASE ORDERS PANEL ── -->
+        <div id="dev-panel-orders" style="display:none">
+          <div class="metric-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px">
+            <div class="metric-card"><div class="metric-label">Active orders</div><div class="metric-val" id="po-kpi-active" style="color:#185FA5">0</div></div>
+            <div class="metric-card"><div class="metric-label">Units awaiting</div><div class="metric-val" id="po-kpi-awaiting" style="color:#854F0B">0</div></div>
+            <div class="metric-card"><div class="metric-label">Partially arrived</div><div class="metric-val" id="po-kpi-partial" style="color:#854F0B">0</div></div>
+            <div class="metric-card"><div class="metric-label">Fulfilled</div><div class="metric-val" id="po-kpi-fulfilled" style="color:#3B6D11">0</div></div>
+          </div>
+          <div class="card" style="padding:0;overflow:hidden">
+            <table class="hist-table">
+              <thead><tr>
+                <th>Memo</th><th>Item</th><th>Project</th>
+                <th style="text-align:center">Ordered</th><th style="text-align:center">Arrived</th>
+                <th style="width:120px">Progress</th><th>Status</th><th>Actions</th>
+              </tr></thead>
+              <tbody id="po-table-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ── DEVICE REGISTRY PANEL ── -->
+        <div id="dev-panel-registry">
         <!-- Metric cards -->
         <div class="metric-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px">
           <div class="metric-card"><div class="metric-label">Total Devices</div><div class="metric-val" id="dev-total" style="color:var(--blue)">0</div><div class="metric-sub" id="dev-total-sub"></div></div>
@@ -1738,6 +1768,29 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <tbody id="dev-table-body"></tbody>
           </table>
           <div id="dev-load-more-footer" style="display:none"></div>
+        </div> <!-- end dev-panel-registry -->
+      </div> <!-- end view-device -->
+
+      <!-- Mark Arrived Modal -->
+      <div id="mark-arrived-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:300;align-items:center;justify-content:center">
+        <div style="background:var(--surface);border-radius:var(--r);padding:24px;width:460px;max-width:95vw">
+          <div style="font-size:15px;font-weight:600;margin-bottom:6px">Mark devices as arrived</div>
+          <div style="font-size:12px;color:var(--text-3);margin-bottom:16px" id="mark-arrived-subtitle"></div>
+          <input type="hidden" id="mark-arrived-po-id">
+          <div class="fg" style="margin-bottom:12px">
+            <label>จำนวนที่มาถึง *</label>
+            <input type="number" id="mark-arrived-qty" min="1" class="ri" placeholder="เช่น 3">
+          </div>
+          <div class="fg" style="margin-bottom:16px">
+            <label>Serial numbers (1 ต่อบรรทัด — ถ้ามี)</label>
+            <textarea id="mark-arrived-serials" class="ri" rows="4" placeholder="F2NXQ8XXXXX&#10;F2NXQ9XXXXX&#10;..." style="resize:vertical;font-family:var(--font-mono);font-size:12px"></textarea>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn-ghost" onclick="closeMarkArrivedModal()">ยกเลิก</button>
+            <button class="btn-primary" onclick="submitMarkArrived()">บันทึก</button>
+          </div>
+        </div>
+      </div>
 
           <!-- Device detail panel -->
           <div id="dev-detail-panel" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-top:12px"></div>
