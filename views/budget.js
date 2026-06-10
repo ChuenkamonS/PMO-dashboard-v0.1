@@ -203,7 +203,7 @@ const OV_TYPE_COLORS = { sl:'#185FA5', hw:'#1D9E75', int:'#EF9F27', ent:'#7F77DD
 const _ov = {
   mode: 'spend',
   groupBy: 'type',
-  stackMode: 'stacked',
+  stackMode: 'stacked', // always stacked
   preset: 12,
   fromIdx: 0,
   toIdx: 11,
@@ -280,20 +280,21 @@ function ovSetMode(m) {
 
 function ovSetGroup(g) {
   _ov.groupBy = g;
-  const tCard = document.getElementById('ov-vcard-type');
-  const pCard = document.getElementById('ov-vcard-project');
-  if (tCard) tCard.style.border = g === 'type'    ? '1.5px solid var(--blue)' : '0.5px solid var(--border)';
-  if (pCard) pCard.style.border = g === 'project' ? '1.5px solid var(--blue)' : '0.5px solid var(--border)';
+  // Update group buttons
+  document.querySelectorAll('.ov-group-btn').forEach(b => {
+    const active = b.id === 'ov-gbtn-' + g;
+    b.style.background = active ? 'var(--blue)' : 'transparent';
+    b.style.color      = active ? '#fff' : 'var(--text-2)';
+  });
+  // Fix 3: Hide type chips when group by project (not relevant)
+  const typeCol = document.getElementById('ov-type-col');
+  if (typeCol) typeCol.style.display = g === 'type' ? '' : 'none';
   _ovRenderChart();
 }
 
 function ovSetStack(s) {
-  _ov.stackMode = s;
-  const ss = document.getElementById('ov-sbtn-stacked');
-  const sg = document.getElementById('ov-sbtn-grouped');
-  if (ss) { ss.style.background = s === 'stacked' ? 'var(--blue)' : 'transparent'; ss.style.color = s === 'stacked' ? '#fff' : 'var(--text-2)'; }
-  if (sg) { sg.style.background = s === 'grouped' ? 'var(--blue)' : 'transparent'; sg.style.color = s === 'grouped' ? '#fff' : 'var(--text-2)'; }
-  _ovRenderChart();
+  // Side by side removed — always stacked
+  _ov.stackMode = 'stacked';
 }
 
 function ovSetPreset(n) {
@@ -605,29 +606,32 @@ function ovSetMode(m) {
   document.querySelectorAll('.ov-mode-btn').forEach(b => b.classList.remove('active'));
   const btn = document.getElementById('ov-mbtn-' + m);
   if (btn) btn.classList.add('active');
-  const sf  = document.getElementById('ov-spend-filters');
-  const sg  = document.getElementById('ov-spend-grouping');
-  const bf  = document.getElementById('ov-bva-filters');
-  if (sf) sf.style.display = m === 'spend' ? 'grid' : 'none';
-  if (sg) sg.style.display = m === 'spend' ? '' : 'none';
-  if (bf) bf.style.display = m === 'bva'   ? '' : 'none';
+  // Show/hide spend-only controls
+  const svw = document.getElementById('ov-spend-view-wrap');
+  const tc  = document.getElementById('ov-type-col');
+  if (svw) svw.style.display = m === 'bva' ? 'none' : 'flex';
+  if (tc)  tc.style.display  = (m === 'bva' || _ov.groupBy === 'project') ? 'none' : '';
+  _ovUpdateKPIs();
   _ovRenderChart();
 }
 
 function ovSetGroup(g) {
   _ov.groupBy = g;
-  document.querySelectorAll('.ov-group-btn').forEach(b => b.classList.remove('active'));
-  const btn = document.getElementById('ov-gbtn-' + g);
-  if (btn) btn.classList.add('active');
+  // Update group buttons
+  document.querySelectorAll('.ov-group-btn').forEach(b => {
+    const active = b.id === 'ov-gbtn-' + g;
+    b.style.background = active ? 'var(--blue)' : 'transparent';
+    b.style.color      = active ? '#fff' : 'var(--text-2)';
+  });
+  // Fix 3: Hide type chips when group by project (not relevant)
+  const typeCol = document.getElementById('ov-type-col');
+  if (typeCol) typeCol.style.display = g === 'type' ? '' : 'none';
   _ovRenderChart();
 }
 
 function ovSetStack(s) {
-  _ov.stackMode = s;
-  document.querySelectorAll('.ov-stack-btn').forEach(b => b.classList.remove('active'));
-  const btn = document.getElementById('ov-sbtn-' + s);
-  if (btn) btn.classList.add('active');
-  _ovRenderChart();
+  // Side by side removed — always stacked
+  _ov.stackMode = 'stacked';
 }
 
 function ovSetPreset(n) {
