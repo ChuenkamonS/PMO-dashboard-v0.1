@@ -552,15 +552,27 @@ document.addEventListener('click', e => {
 
 
 // ── Budget Tag Cell (inline in history table) ──
+// Default: auto-assign to memo.project — PMO can override to Company-Wide
+function getEffectiveBudgetSource(memo) {
+  // If PMO manually set it, use that
+  if(memo.budgetSource) return { source: memo.budgetSource, isAuto: false };
+  // Otherwise auto-assign to memo project
+  return { source: memo.project || '(ไม่ระบุ)', isAuto: true };
+}
+
 function buildBudgetTagCell(memo) {
   if(memo.type !== 'sl' || memo.status !== 'completed') {
     return '<span style="color:var(--text-3);font-size:11px">—</span>';
   }
-  if(!memo.budgetSource) {
-    return `<button type="button" style="font-size:10px;padding:2px 7px;background:var(--amber-50);color:var(--amber-800);border:0.5px solid #FAC775;border-radius:4px;cursor:pointer;white-space:nowrap" onclick="openBudgetTagModal('${esc(memo.memoNo)}')">⚑ Tag</button>`;
+  const { source, isAuto } = getEffectiveBudgetSource(memo);
+  const isCompany = source === 'Company-Wide';
+
+  if(isAuto) {
+    // Auto-assigned — show with subtle style + override button
+    return `<span style="font-size:10px;padding:2px 7px;background:var(--green-50);color:var(--green-800);border-radius:4px;cursor:pointer;white-space:nowrap" onclick="openBudgetTagModal('${esc(memo.memoNo)}')" title="Auto จาก project — คลิกเพื่อ override">${esc(source)} <span style="opacity:.6">auto</span></span>`;
   }
-  const isCompany = memo.budgetSource === 'Company-Wide';
-  return `<span style="font-size:10px;padding:2px 7px;background:${isCompany?'var(--blue-50)':'var(--green-50)'};color:${isCompany?'var(--blue-800)':'var(--green-800)'};border-radius:4px;cursor:pointer;white-space:nowrap" onclick="openBudgetTagModal('${esc(memo.memoNo)}')" title="คลิกเพื่อเปลี่ยน">${esc(memo.budgetSource)}</span>`;
+  // Manually overridden
+  return `<span style="font-size:10px;padding:2px 7px;background:${isCompany?'var(--blue-50)':'var(--green-50)'};color:${isCompany?'var(--blue-800)':'var(--green-800)'};border:0.5px solid ${isCompany?'#B5D4F4':'#C0DD97'};border-radius:4px;cursor:pointer;white-space:nowrap" onclick="openBudgetTagModal('${esc(memo.memoNo)}')" title="คลิกเพื่อเปลี่ยน">⚑ ${esc(source)}</span>`;
 }
 
 // ── Budget Source Tag ──
@@ -582,13 +594,21 @@ function openBudgetTagModal(memoNo) {
   const modal = document.getElementById('budget-tag-modal');
   if(!modal) return;
 
+  const { source: curSource, isAuto } = getEffectiveBudgetSource(memo);
   document.getElementById('btm-memo-no').textContent = memo.memoNo;
   document.getElementById('btm-memo-detail').textContent = `${memo.project} · ${typeof money === 'function' ? money(memo.total||0) : memo.total}`;
+  const noteEl = document.getElementById('btm-auto-note');
+  if(noteEl) {
+    noteEl.textContent = isAuto
+      ? `ตอนนี้ใช้ค่า default: "${curSource}" (จาก project) — override ถ้าต้องการเปลี่ยน`
+      : `Override โดย PMO: "${curSource}" — เลือกใหม่เพื่อเปลี่ยน`;
+    noteEl.style.color = isAuto ? 'var(--text-3)' : 'var(--amber-800)';
+  }
 
   const optContainer = document.getElementById('btm-options');
   optContainer.innerHTML = options.map(opt => {
     const isCompany = opt === 'Company-Wide';
-    const isSelected = memo.budgetSource === opt;
+    const isSelected = curSource === opt;
     return `<label style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:0.5px solid var(--border);border-radius:var(--r);margin-bottom:8px;cursor:pointer;${isSelected?'background:var(--blue-50);border-color:var(--blue)':''}">
       <input type="radio" name="bsrc-opt" value="${esc(opt)}" ${isSelected?'checked':''} style="margin-top:2px">
       <div>
@@ -608,9 +628,13 @@ function closeBudgetTagModal() {
 }
 
 function saveBudgetTag(memoNo) {
+  const memo = getHistoryMemos().find(m => m.memoNo === memoNo);
+  if(!memo) return;
   const selected = document.querySelector('input[name="bsrc-opt"]:checked')?.value;
   if(!selected) { alert('กรุณาเลือก Budget Source'); return; }
-  updateMemoStatus(memoNo, 'completed', { budgetSource: selected });
+  // If selected == project (auto default), clear override → revert to auto
+  const isRevertToAuto = selected === (memo.project || '(ไม่ระบุ)') && memo.budgetSource;
+  updateMemoStatus(memoNo, 'completed', { budgetSource: selected === (memo.project||'(ไม่ระบุ)') ? null : selected });
   closeBudgetTagModal();
   renderHistoryMemos();
 }
