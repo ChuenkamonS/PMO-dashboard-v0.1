@@ -288,10 +288,11 @@ function swView(id, el, title) {
   document.getElementById('page-title').textContent = title;
   if(el) el.classList.add('active');
   if(['create','pending','history'].includes(id)) document.getElementById('nav-memo').classList.add('active');
-  if(id === 'budget') renderBudget();
+  if(id === 'budget')  renderBudget();
   if(id === 'license') renderLicense();
-  if(id === 'device') renderDevice();
-  if(id === 'history') renderHistoryMemos();
+  if(id === 'device')  renderDevice();
+  if(id === 'history') { renderHistoryMemos(); if(typeof populateHistTabCounts==='function') populateHistTabCounts(); }
+  if(id === 'pending') renderPendingMemos();
 
   if(id === 'resource') { if(typeof renderResource==='function') renderResource(); }
 }
