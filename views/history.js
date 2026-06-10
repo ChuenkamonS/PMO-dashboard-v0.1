@@ -475,7 +475,7 @@ function renderHistoryMemos() {
   if (countEl) countEl.textContent = `แสดง ${memos.length} รายการ · คลิกแถวเพื่อดูรายละเอียด`;
 
   if (!memos.length) {
-    body.innerHTML = `<tr><td colspan="12" class="hist-empty">ยังไม่มี Memo ตามเงื่อนไขที่เลือก</td></tr>`;
+    body.innerHTML = `<tr><td colspan="13" class="hist-empty">ยังไม่มี Memo ตามเงื่อนไขที่เลือก</td></tr>`;
     return;
   }
 
@@ -495,6 +495,7 @@ function renderHistoryMemos() {
       <td class="hist-dt">${esc(shortDate(histActivityAt(memo)))}</td>
       <td class="hist-dt">${esc(formatApprovalDuration(memo))}</td>
       <td>${rej ? `<button type="button" class="hist-reject-btn" data-hist-action="reject-reason" data-memo="${esc(memo.memoNo)}" title="${esc(rej)}">${esc(rejShort)}</button>` : '<span style="color:var(--text-3)">—</span>'}</td>
+      <td style="text-align:center" onclick="event.stopPropagation()">${buildBudgetTagCell(memo)}</td>
       <td style="text-align:center" onclick="event.stopPropagation()">${histActionButtons(memo)}</td>
     </tr>`;
   }).join('');
@@ -548,6 +549,19 @@ document.addEventListener('click', e => {
   }
 });
 
+
+
+// ── Budget Tag Cell (inline in history table) ──
+function buildBudgetTagCell(memo) {
+  if(memo.type !== 'sl' || memo.status !== 'completed') {
+    return '<span style="color:var(--text-3);font-size:11px">—</span>';
+  }
+  if(!memo.budgetSource) {
+    return `<button type="button" style="font-size:10px;padding:2px 7px;background:var(--amber-50);color:var(--amber-800);border:0.5px solid #FAC775;border-radius:4px;cursor:pointer;white-space:nowrap" onclick="openBudgetTagModal('${esc(memo.memoNo)}')">⚑ Tag</button>`;
+  }
+  const isCompany = memo.budgetSource === 'Company-Wide';
+  return `<span style="font-size:10px;padding:2px 7px;background:${isCompany?'var(--blue-50)':'var(--green-50)'};color:${isCompany?'var(--blue-800)':'var(--green-800)'};border-radius:4px;cursor:pointer;white-space:nowrap" onclick="openBudgetTagModal('${esc(memo.memoNo)}')" title="คลิกเพื่อเปลี่ยน">${esc(memo.budgetSource)}</span>`;
+}
 
 // ── Budget Source Tag ──
 function buildBudgetSourceBadge(memo) {
