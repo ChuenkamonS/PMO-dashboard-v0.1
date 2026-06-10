@@ -1472,8 +1472,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
           </select>
           <select id="lic-filter-project" onchange="renderLicense()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
             <option value="all">ทุกโครงการ</option>
-            <option>AOA-MP</option><option>TTB</option><option>Geo9</option>
-            <option>Release 2.1</option><option>Release 3</option>
           </select>
           <select id="lic-sort" onchange="renderLicense()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
             <option value="expiry-asc">หมดอายุใกล้สุด</option>
@@ -1496,16 +1494,17 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <div class="card" style="padding:0;overflow:hidden">
           <table class="hist-table">
             <thead><tr>
-              <th style="width:16%;padding-left:16px">Software</th>
-              <th style="width:8%">Seats</th>
-              <th style="width:10%">฿/เดือน</th>
-              <th style="width:10%">Owner</th>
-              <th style="width:9%">Department</th>
-              <th style="width:9%">โครงการ</th>
-              <th style="width:9%">วันที่ซื้อ</th>
-              <th style="width:9%">หมดอายุ</th>
-              <th style="width:11%;text-align:center">สถานะ</th>
-              <th style="width:9%;text-align:center">Actions</th>
+              <th style="width:15%;padding-left:16px">Software</th>
+              <th style="width:7%">Seats</th>
+              <th style="width:9%">฿/เดือน</th>
+              <th style="width:9%">Owner</th>
+              <th style="width:8%">Department</th>
+              <th style="width:8%">โครงการ</th>
+              <th style="width:8%">วันที่ซื้อ</th>
+              <th style="width:8%">หมดอายุ</th>
+              <th style="width:9%;text-align:center">สถานะ</th>
+              <th style="width:7%;text-align:center">Source</th>
+              <th style="width:8%;text-align:center">Actions</th>
             </tr></thead>
             <tbody id="lic-table-body"></tbody>
           </table>
@@ -1521,6 +1520,9 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <button onclick="closeLicenseModal()" style="background:none;border:none;cursor:pointer;color:var(--text-3);font-size:20px">&#x2715;</button>
           </div>
           <input type="hidden" id="lic-edit-id">
+          <div id="lic-memo-hint" style="display:none;background:#FEF9E7;border:0.5px solid #F0C27F;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:#854F0B">
+            🔒 License นี้มาจาก SL Memo — ราคา, Seats, วันที่, และ Memo Ref แก้ไขไม่ได้ แก้ได้เฉพาะ Owner, Department, Status, และ Note
+          </div>
           <div class="form-grid" style="margin-bottom:10px">
             <div class="fg"><label>Software Name *</label><input type="text" id="lic-name" placeholder="เช่น Figma, GitHub Copilot"></div>
             <div class="fg"><label>Vendor</label><input type="text" id="lic-vendor" placeholder="เช่น Adobe, Microsoft"></div>
@@ -1531,7 +1533,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <div class="fg"><label>Owner</label><input type="text" id="lic-owner" placeholder="ชื่อผู้รับผิดชอบ"></div>
             <div class="fg"><label>Department / Team</label><input type="text" id="lic-dept" placeholder="เช่น PMO, Design Team"></div>
             <div class="fg"><label>โครงการ</label>
-              <select id="lic-project"><option value="">— ไม่ระบุ —</option><option>AOA-MP</option><option>TTB</option><option>Geo9</option><option>Release 2.1</option><option>Release 3</option></select>
+              <select id="lic-project"><option value="">— ไม่ระบุ —</option></select>
             </div>
             <div class="fg"><label>License Type</label>
               <select id="lic-type-field"><option value="subscription">Subscription</option><option value="perpetual">Perpetual</option><option value="trial">Trial</option></select>
