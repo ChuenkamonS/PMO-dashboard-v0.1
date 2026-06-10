@@ -162,6 +162,7 @@ function renderPendingContent() {
     const no = btn.dataset.memo;
     if(btn.dataset.action==='approve')     openApproveModal(no);
     else if(btn.dataset.action==='reject') openRejectModal(no);
+    else if(btn.dataset.action==='cancel') cancelMemo(no);
     else if(btn.dataset.action==='detail') openDetailModal(no);
   };
 }
@@ -186,11 +187,13 @@ function buildPendingRow(memo) {
   const statusCls = memo.status==='completed'?'background:#EAF3DE;color:#27500A':memo.status==='rejected'?'background:#FCEBEB;color:#791F1F':'background:#EEEDFE;color:#3C3489';
   const statusLbl = memo.status==='completed'?'Completed':memo.status==='rejected'?'Rejected':stage;
 
+  const isPending = !memo.status || memo.status === 'pending';
   const actionBtns = canAct
     ? `<button class="btn-approve" data-action="approve" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 7px">✓</button>
        <button class="btn-reject"  data-action="reject"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 7px;margin-left:2px">✕</button>
        <button class="btn-sm"      data-action="detail"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 6px;margin-left:2px">⊙</button>`
-    : `<button class="btn-sm" data-action="detail" data-memo="${esc(memo.memoNo)}" style="font-size:11px;padding:3px 8px">Details</button>`;
+    : `<button class="btn-sm" data-action="detail" data-memo="${esc(memo.memoNo)}" style="font-size:11px;padding:3px 8px">Details</button>
+       ${isOwn && isPending ? `<button class="btn-sm" data-action="cancel" data-memo="${esc(memo.memoNo)}" style="font-size:11px;padding:3px 8px;margin-left:4px;color:var(--red)" title="ยกเลิก Memo นี้">✕ Cancel</button>` : ''}`;
 
   return `<tr style="cursor:pointer" onclick="if(!event.target.closest('[data-action]'))openDetailModal('${esc(memo.memoNo)}')">
     <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
@@ -407,5 +410,19 @@ function saveBudgetSettings() {
 }
 
 // ── backward compat ──
+
+// ── Cancel Memo (by requester) ──
+function cancelMemo(memoNo) {
+  const memo = loadMemos().find(m => m.memoNo === memoNo);
+  if(!memo) return;
+  if(!confirm(`ยกเลิก Memo "${memoNo}"?\nหลังจากยกเลิกแล้วจะไม่สามารถกู้คืนได้`)) return;
+  updateMemoStatus(memoNo, 'cancelled', {
+    rejectionReason: 'ยกเลิกโดยผู้ขอ',
+    rejectedBy: currentUser(),
+  });
+  renderPendingMemos();
+  renderHistoryMemos();
+}
+
 function approveMemo(memoNo) { openApproveModal(memoNo); }
 function rejectMemo(memoNo)  { openRejectModal(memoNo); }
