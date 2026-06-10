@@ -32,6 +32,7 @@ function deviceToDb(d, isNew=false) {
     source:        d.source || 'manual',
     updated_at:    d.updatedAt || new Date().toISOString(),
   };
+  return row;
 }
 
 function dbToDevice(r) {
@@ -222,8 +223,9 @@ function createPurchaseOrdersFromMemo(memo) {
     // Don't duplicate — check by both memoNo + itemName
     const isDup = existing.some(p => p.memoNo === memo.memoNo && p.itemName === name);
     if (isDup) return;
+    const poId = `po_${memo.memoNo}_${name}`.replace(/[\s/\\]/g, '_');
     const po = {
-      id:          `po_${memo.memoNo}_${name}`.replace(/\s/g, '_'),
+      id:          poId,
       memoNo:      memo.memoNo,
       project:     memo.project || '',
       itemName:    name,
@@ -235,7 +237,13 @@ function createPurchaseOrdersFromMemo(memo) {
       updatedAt:   new Date().toISOString(),
     };
     existing.push(po);
-    savePurchaseOrderAsync(po).catch(e => console.warn('PO save failed', e));
+    // Use upsert — on_conflict=id means if PO already exists, skip (no update needed)
+    if (checkSupa) {
+      checkSupa().then(ok => {
+        if (ok) supaFetch('purchase_orders', 'POST', poToDb(po), '?on_conflict=id&ignore_duplicates=true')
+          .catch(e => console.warn('PO upsert skipped (likely duplicate):', e.message));
+      });
+    }
   });
   storePurchaseOrders(existing);
 }
