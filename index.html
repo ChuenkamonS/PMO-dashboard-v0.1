@@ -1333,6 +1333,11 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
                 <span style="font-size:12px;color:var(--text-2)">Budget vs Actual</span>
               </div>
+              <div id="sl-nav-budgetsettings" class="sl-nav-item" onclick="switchSLNav('budgetsettings',this)"
+                style="padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid transparent">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                <span style="font-size:12px;color:var(--text-2)">Budget Settings</span>
+              </div>
             </div>
 
             <!-- Content panels -->
@@ -1431,6 +1436,26 @@ svg.icon { display: inline-block; vertical-align: middle; }
                   <span style="color:var(--amber)">● 90–100% Near limit</span>
                   <span style="color:var(--red)">● &gt;100% Over budget</span>
                 </div>
+              </div>
+
+
+              <!-- Budget Settings panel -->
+              <div id="sl-panel-budgetsettings" style="display:none;padding:0">
+                <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+                  <div>
+                    <span style="font-size:12px;font-weight:600">Budget Settings — SL + Infra</span>
+                    <span style="font-size:11px;color:var(--text-3);margin-left:8px">ตั้งงบรายปีต่อโปรเจค ระบบคำนวณรายเดือนให้เอง</span>
+                  </div>
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <select id="sl-bgt-year" onchange="renderBudgetSettings()" style="font-size:11px;padding:3px 8px">
+                      <option value="2568">2568</option>
+                      <option value="2569" selected>2569</option>
+                      <option value="2570">2570</option>
+                    </select>
+                    <button class="btn-primary" onclick="addBudgetRow()" style="font-size:11px;padding:4px 10px">+ เพิ่มโปรเจค</button>
+                  </div>
+                </div>
+                <div id="sl-budget-settings-body" style="padding:14px 16px"></div>
               </div>
 
             </div>
@@ -2081,6 +2106,7 @@ document.addEventListener('click', e => {
             <div style="font-size:13px;font-weight:600" id="btm-memo-no"></div>
             <div style="font-size:11px;color:var(--text-3);margin-top:2px" id="btm-memo-detail"></div>
           </div>
+          <div id="btm-auto-note" style="font-size:11px;margin-bottom:10px;padding:6px 10px;background:var(--bg);border-radius:var(--r-sm)"></div>
           <div style="font-size:12px;color:var(--text-2);margin-bottom:10px">Budget นี้ตัดจาก:</div>
           <div id="btm-options"></div>
           <div style="display:flex;gap:8px;margin-top:16px">
