@@ -139,8 +139,8 @@ function rmRow(btn, cid) {
   if(c.querySelectorAll('.item-row').length > 1) btn.closest('.item-row').remove();
 }
 function addSLRow() {
-  const d = document.createElement('div'); d.className='item-row'; d.style.gridTemplateColumns='3fr 1.2fr 0.8fr 0.8fr 30px';
-  d.innerHTML = `<input class="ri" type="text" placeholder="ชื่อ Software"><input class="ri sl-price" type="number" placeholder="ราคา" oninput="calcSL()"><input class="ri sl-mo" type="number" value="12" oninput="calcSL()"><input class="ri sl-qty" type="number" placeholder="จำนวน" oninput="calcSL()"><button class="rm-btn" onclick="rmRow(this,'sl-rows');calcSL()" title="ลบ">${TRASH}</button>`;
+  const d = document.createElement('div'); d.className='item-row'; d.style.gridTemplateColumns='2.5fr 1.2fr 0.8fr 0.8fr 1fr 1fr 30px';
+  d.innerHTML = `<input class="ri" type="text" placeholder="ชื่อ Software"><input class="ri sl-price" type="number" placeholder="ราคา" oninput="calcSL()"><input class="ri sl-mo" type="number" value="12" oninput="calcSL()"><input class="ri sl-qty" type="number" placeholder="จำนวน" oninput="calcSL()"><input class="ri sl-start" type="month" placeholder="YYYY-MM"><input class="ri sl-end" type="month" placeholder="YYYY-MM"><button class="rm-btn" onclick="rmRow(this,'sl-rows');calcSL()" title="ลบ">${TRASH}</button>`;
   document.getElementById('sl-rows').appendChild(d);
 }
 function addHWRow() {
@@ -265,12 +265,14 @@ function collectMemoData() {
     const rows = Array.from(document.querySelectorAll('#sl-rows .item-row')).map((row,i) => {
       const inp = row.querySelectorAll('input');
       const price=Number(inp[1]?.value)||0, months=Number(inp[2]?.value)||0, qty=Number(inp[3]?.value)||0;
-      return { no:i+1, name:inp[0]?.value.trim()||'-', price, months, qty, subtotal:price*months*qty };
+      const startMonth = inp[4]?.value || null;  // YYYY-MM
+      const endMonth   = inp[5]?.value || null;  // YYYY-MM
+      return { no:i+1, name:inp[0]?.value.trim()||'-', price, months, qty, subtotal:price*months*qty, startMonth, endMonth };
     });
     data.total = rows.reduce((s,r)=>s+r.subtotal, 0);
-    data.slItems = rows.map(r => ({ name:r.name, price:r.price, months:r.months, qty:r.qty }));
+    data.slItems = rows.map(r => ({ name:r.name, price:r.price, months:r.months, qty:r.qty, startMonth:r.startMonth, endMonth:r.endMonth }));
     data.amountWords = val('#fs-sl .form-grid .fg:nth-child(2) input');
-    data.sections.push({ title:'รายการ Software', html:table(['#','ชื่อ Software','฿/เดือน','เดือน','จำนวน','รวม'], rows.map(r=>[r.no,r.name,money(r.price),r.months,r.qty,money(r.subtotal)]), [2,5]) });
+    data.sections.push({ title:'รายการ Software', html:table(['#','ชื่อ Software','฿/เดือน','เดือน','จำนวน','เริ่ม','สิ้นสุด','รวม'], rows.map(r=>[r.no,r.name,money(r.price),r.months,r.qty,r.startMonth||'-',r.endMonth||'-',money(r.subtotal)]), [2,7]) });
     const acctCols = getAcctCols();
     const acctRows = Array.from(document.querySelectorAll('#acct-body tr')).map(tr=>[val('.acct-email',tr),...Array.from(tr.querySelectorAll('.acct-val')).map(s=>s.value)]).filter(r=>r.some(Boolean));
     if(acctCols.length && acctRows.length) data.sections.push({ title:'ตาราง Account', html:table(['Email',...acctCols], acctRows, []) });
