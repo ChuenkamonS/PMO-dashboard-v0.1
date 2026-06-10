@@ -1011,15 +1011,19 @@ function _renderBudgetVsActual(allProjects, infraEntries, licByProj) {
       .filter(e => e.project === proj)
       .reduce((s, e) => s + (e.monthly_cost || 0) * infraOverlapMonths(e.start_month, e.end_month, budgetFrom, budgetTo), 0);
 
-    const licMonthly = licByProj[proj] || 0;
-    const budget     = (licMonthly * rangeVal) + infraBudget;
+    // Use Budget Settings if set — if not, budget = null (no budget configured)
+    const annualBgt  = slBudgets[proj] || 0;
+    const licMonthly = annualBgt > 0 ? annualBgt / 12 : 0;
+    const budget     = annualBgt > 0 ? (licMonthly * rangeVal) + infraBudget : null;
     const actual     = (actualByProj[proj]||0) + infraActual;
-    const pct        = budget > 0 ? Math.round(actual/budget*100) : 0;
-    const color      = pct > 100 ? 'var(--red)' : pct >= 90 ? 'var(--amber)' : 'var(--green)';
-    const barW       = Math.min(pct, 100);
+    const hasBudget  = budget !== null;
+    const pct        = hasBudget && budget > 0 ? Math.round(actual/budget*100) : null;
+    const color      = pct === null ? 'var(--text-3)' : pct > 100 ? 'var(--red)' : pct >= 90 ? 'var(--amber)' : 'var(--green)';
+    const barW       = pct !== null ? Math.min(pct, 100) : 0;
 
-    return { proj, budget, actual, remaining: budget-actual, pct, color, barW };
-  }).filter(d => d.budget > 0 || d.actual > 0);
+    return { proj, budget, actual, remaining: hasBudget ? budget-actual : null, pct, color, barW, hasBudget };
+  // Show row if has actual spend OR has budget set
+  }).filter(d => d.actual > 0 || d.hasBudget);
 
   const totalBudget  = projData.reduce((s,d)=>s+d.budget,0);
   const totalActual  = projData.reduce((s,d)=>s+d.actual,0);
@@ -1029,7 +1033,7 @@ function _renderBudgetVsActual(allProjects, infraEntries, licByProj) {
   // Summary cards
   if(summary) summary.innerHTML = `
     <div style="background:var(--bg);border-radius:var(--r-sm);padding:10px 12px">
-      <div style="font-size:11px;color:var(--text-3);margin-bottom:3px">Budget (Forecast)</div>
+      <div style="font-size:11px;color:var(--text-3);margin-bottom:3px">Budget (Annual Settings)</div>
       <div style="font-size:18px;font-weight:600">${money(Math.round(totalBudget))}</div>
       <div style="font-size:11px;color:var(--text-3)">${rangeVal} เดือน รวม</div>
     </div>
