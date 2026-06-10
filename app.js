@@ -271,10 +271,15 @@ function updateMemoStatus(memoNo, status, extra={}) {
   if(status==='completed') memos[idx].approvedAt = memos[idx].updatedAt;
   if(status==='rejected')  memos[idx].rejectedAt = memos[idx].updatedAt;
   storeMemos(memos);
-  _memCache = null; // force fresh read
+  _memCache = null;
+  // Auto-create purchase orders for HW memos
+  if(status === 'completed' && memos[idx].type === 'hw') {
+    if(typeof createPurchaseOrdersFromMemo === 'function') {
+      createPurchaseOrdersFromMemo(memos[idx]);
+    }
+  }
   renderPendingMemos();
   renderHistoryMemos();
-  // Async update Supabase then re-render with confirmed server data
   updateMemoStatusAsync(memoNo, status, extra)
     .then(() => { renderPendingMemos(); renderHistoryMemos(); })
     .catch(e => console.warn('Supabase status update failed', e));
@@ -550,6 +555,8 @@ function initApp() {
     typeof loadManualLicensesAsync === 'function' ? loadManualLicensesAsync() : Promise.resolve(),
     typeof loadInfraCostsAsync     === 'function' ? loadInfraCostsAsync()     : Promise.resolve(),
     typeof loadBudgetsAsync        === 'function' ? loadBudgetsAsync()        : Promise.resolve(),
+    typeof loadDevicesAsync        === 'function' ? loadDevicesAsync()        : Promise.resolve(),
+    typeof loadPurchaseOrdersAsync === 'function' ? loadPurchaseOrdersAsync() : Promise.resolve(),
   ]).then(() => {
     renderPendingMemos();
     renderHistoryMemos();
