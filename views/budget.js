@@ -1,2153 +1,1509 @@
-<!DOCTYPE html>
-<html lang="th">
-<head>
-<meta charset="UTF-8">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23185FA5'/><circle cx='16' cy='16' r='8' fill='white'/></svg>">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PMO Dashboard — Orbit Digital</title>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<style>
-:root {
-  --blue:        #185FA5;
-  --blue-50:     #E6F1FB;
-  --blue-100:    #B5D4F4;
-  --blue-600:    #185FA5;
-  --blue-800:    #0C447C;
-  --blue-900:    #042C53;
-  --green:       #3B6D11;
-  --green-50:    #EAF3DE;
-  --green-200:   #97C459;
-  --amber:       #854F0B;
-  --amber-50:    #FAEEDA;
-  --amber-200:   #EF9F27;
-  --red:         #A32D2D;
-  --red-50:      #FCEBEB;
-  --red-200:     #F09595;
-  --gray:        #5F5E5A;
-  --gray-50:     #F1EFE8;
-  --gray-200:    #B4B2A9;
-  --purple:      #3C3489;
-  --purple-50:   #EEEDFE;
-  --bg:          #F4F3EF;
-  --surface:     #FFFFFF;
-  --border:      rgba(0,0,0,0.07);
-  --border-md:   rgba(0,0,0,0.12);
-  --text:        #1C1C1A;
-  --text-2:      #5F5E5A;
-  --text-3:      #A09E98;
-  --r:           10px;
-  --r-sm:        6px;
-  --sidebar-w:   196px;
+// ── SL+Infra sidebar nav ──
+function switchSLNav(panel, btn) {
+  ['forecast','infra','bva','budgetsettings'].forEach(p => {
+    const panelEl = document.getElementById('sl-panel-' + p);
+    const navEl   = document.getElementById('sl-nav-' + p);
+    if(panelEl) panelEl.style.display = p === panel ? '' : 'none';
+    if(navEl) {
+      navEl.style.borderLeft = p === panel ? '2px solid var(--blue)' : '2px solid transparent';
+      navEl.style.background = p === panel ? 'var(--blue-50)' : '';
+      const span = navEl.querySelector('span');
+      if(span) {
+        span.style.color      = p === panel ? 'var(--blue)' : 'var(--text-2)';
+        span.style.fontWeight = p === panel ? '600' : '400';
+      }
+      const svg = navEl.querySelector('svg');
+      if(svg) svg.setAttribute('stroke', p === panel ? '#185FA5' : 'currentColor');
+    }
+  });
+  // Trigger render for panels that need it
+  if(panel === 'budgetsettings') renderBudgetSettings();
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; }
+// ─────────────────────────────────────────
+// views/budget.js — Budget & Spend (merged)
+// Sub-tabs: Overview | SL+Infra | Others
+// ─────────────────────────────────────────
 
-body {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  font-size: 14px;
-  line-height: 1.6;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
-}
+// ── Constants ──
+const BGT_TYPE_COLORS = { sl:'#185FA5', hw:'#3B6D11', int:'#854F0B', ent:'#3C3489', dep:'#A32D2D' };
+const BGT_TYPE_LABELS = { sl:'Software License', hw:'Hardware', int:'Team Activity', ent:'Client Expense', dep:'Deployment' };
+const BGT_PROJ_COLORS = ['#185FA5','#3B6D11','#854F0B','#3C3489','#A32D2D','#5F5E5A','#0F6E56','#8B4513'];
+const INFRA_KEY = 'orbit-pmo-infra-v1';
 
-/* ── LAYOUT ── */
-.layout { display: flex; flex: 1; overflow: hidden; }
+// ── Infra Storage ──
+// NEW structure: array of entry objects
+// JS:  [ { id, project, program, monthly_cost, start_month, end_month } ]
+// DB:  infra_costs table with same columns (start_month, end_month as "YYYY-MM" text)
+//
+// Helper: monthKey for a Date → "YYYY-MM"
+const infraMonthKey = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 
-/* ── SIDEBAR ── */
-.sidebar {
-  width: var(--sidebar-w);
-  flex-shrink: 0;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
-.sb-logo {
-  padding: 16px 14px 14px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-.sb-dot {
-  width: 28px; height: 28px;
-  border-radius: 7px;
-  background: var(--blue);
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-}
-.sb-dot svg { width: 14px; height: 14px; fill: #fff; }
-.sb-brand { font-size: 12px; font-weight: 600; color: var(--text); line-height: 1.3; }
-.sb-brand-sub { font-size: 10px; color: var(--text-3); font-weight: 400; }
-
-.sb-nav { padding: 10px 8px; flex: 1; }
-.sb-section {
-  font-size: 9px; font-weight: 600;
-  color: var(--text-3);
-  letter-spacing: .7px;
-  text-transform: uppercase;
-  padding: 0 8px;
-  margin: 12px 0 4px;
-}
-.sb-section:first-child { margin-top: 0; }
-
-.sb-item {
-  display: flex; align-items: center; gap: 8px;
-  padding: 7px 8px;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  color: var(--text-2);
-  font-size: 12px;
-  font-weight: 500;
-  margin-bottom: 1px;
-  transition: background .12s, color .12s;
-  user-select: none;
-}
-.sb-item svg { width: 15px; height: 15px; flex-shrink: 0; opacity: .7; }
-.sb-item:hover { background: var(--bg); color: var(--text); }
-.sb-item:hover svg { opacity: 1; }
-.sb-item.active { background: var(--blue-50); color: var(--blue-800); }
-.sb-item.active svg { opacity: 1; fill: var(--blue-800); stroke: var(--blue-800); }
-.sb-item .sb-badge {
-  margin-left: auto;
-  font-size: 9px; font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 10px;
-  background: var(--amber-50);
-  color: var(--amber);
+// Get months that overlap between an entry's [start,end] and a query [from,to]
+// All args are "YYYY-MM" strings. Returns count of overlapping months.
+function infraOverlapMonths(start, end, rangeFrom, rangeTo) {
+  const s = start || '2000-01';
+  const e = end   || '2099-12';
+  const from = s > rangeFrom ? s : rangeFrom;
+  const to   = e < rangeTo   ? e : rangeTo;
+  if (from > to) return 0;
+  const [fy, fm] = from.split('-').map(Number);
+  const [ty, tm] = to.split('-').map(Number);
+  return (ty - fy) * 12 + (tm - fm) + 1;
 }
 
-.sb-sub { margin-left: 4px; }
-.sb-sub-item {
-  display: flex; align-items: center; gap: 7px;
-  padding: 5px 8px 5px 20px;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  color: var(--text-3);
-  font-size: 11px;
-  margin-bottom: 1px;
-  border-left: 2px solid transparent;
-  transition: all .12s;
-  user-select: none;
-}
-.sb-sub-item svg { width: 13px; height: 13px; flex-shrink: 0; }
-.sb-sub-item:hover { background: var(--bg); color: var(--text-2); }
-.sb-sub-item.active {
-  color: var(--blue);
-  font-weight: 600;
-  border-left-color: var(--blue);
-  background: var(--blue-50);
-}
-.sb-sub-item .sb-badge {
-  margin-left: auto;
-  font-size: 9px; font-weight: 700;
-  padding: 1px 6px; border-radius: 10px;
-  background: var(--amber-50); color: var(--amber);
+// Check if an infra entry is active in a given month ("YYYY-MM")
+function infraActiveInMonth(entry, monthStr) {
+  const s = entry.start_month || '2000-01';
+  const e = entry.end_month   || '2099-12';
+  return monthStr >= s && monthStr <= e;
 }
 
-.sb-footer {
-  padding: 8px;
-  border-top: 1px solid var(--border);
-}
-.sb-user {
-  display: flex; align-items: center; gap: 8px;
-  padding: 7px 8px;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  transition: background .12s;
-}
-.sb-user:hover { background: var(--bg); }
-.sb-avatar {
-  width: 28px; height: 28px; border-radius: 50%;
-  background: var(--blue-50); color: var(--blue-800);
-  font-size: 10px; font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-}
-.sb-uname { font-size: 12px; font-weight: 600; color: var(--text); }
-.sb-urole { font-size: 10px; color: var(--text-3); }
+let _infraCache = null;
 
-/* ── MAIN ── */
-.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
-
-.topbar {
-  height: 48px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0 20px;
-  flex-shrink: 0;
-}
-.topbar-left { display: flex; align-items: center; gap: 10px; }
-.topbar-title { font-size: 14px; font-weight: 600; color: var(--text); }
-.topbar-crumb { font-size: 12px; color: var(--text-3); }
-.topbar-right { display: flex; align-items: center; gap: 8px; }
-.topbar-btn {
-  width: 32px; height: 32px;
-  border-radius: var(--r-sm);
-  border: 1px solid var(--border-md);
-  background: transparent;
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  color: var(--text-2);
-  transition: background .12s;
-}
-.topbar-btn:hover { background: var(--bg); }
-.topbar-btn svg { width: 16px; height: 16px; }
-
-/* ── CONTENT ── */
-.content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px;
+// Load: returns array of entry objects
+async function loadInfraCostsAsync() {
+  if (await checkSupa()) {
+    try {
+      const rows = await supaFetch('infra_costs', 'GET', null, '?order=project.asc');
+      _infraCache = (rows || []).map(r => ({
+        id:           r.id,
+        project:      r.project,
+        program:      r.program,
+        monthly_cost: Number(r.monthly_cost) || 0,
+        start_month:  r.start_month || null,
+        end_month:    r.end_month   || null,
+      }));
+      try { localStorage.setItem(INFRA_KEY, JSON.stringify(_infraCache)); } catch(e) {}
+      return _infraCache;
+    } catch(e) {
+      console.warn('Supabase infra_costs read failed, fallback', e.message);
+    }
+  }
+  return loadInfraCosts();
 }
 
-/* ── VIEWS ── */
-.view { display: none; }
-.view.active { display: block; }
-
-/* ── CARDS ── */
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r);
-  padding: 16px 18px;
-  margin-bottom: 12px;
-}
-.card-head {
-  display: flex; align-items: center; gap: 9px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 14px;
-}
-.card-num {
-  width: 22px; height: 22px; border-radius: 50%;
-  background: var(--blue-50); color: var(--blue-800);
-  font-size: 11px; font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-}
-.card-title { font-size: 13px; font-weight: 600; color: var(--text); }
-.card-subtitle { font-size: 11px; color: var(--text-3); margin-left: 4px; }
-
-/* ── TYPE SELECTOR ── */
-.type-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 8px;
-}
-.type-btn {
-  padding: 12px 8px;
-  border: 1.5px solid var(--border-md);
-  border-radius: var(--r);
-  background: var(--surface);
-  cursor: pointer;
-  text-align: center;
-  transition: all .15s;
-}
-.type-btn:hover {
-  border-color: var(--blue-100);
-  background: var(--blue-50);
-}
-.type-btn.selected {
-  border-color: var(--blue);
-  background: var(--blue-50);
-  box-shadow: 0 0 0 3px rgba(24,95,165,.1);
-}
-.type-code {
-  display: block;
-  font-size: 15px; font-weight: 700;
-  color: var(--blue-800);
-  margin-bottom: 3px;
-  font-family: 'IBM Plex Mono', monospace;
-}
-.type-name {
-  display: block;
-  font-size: 10px;
-  color: var(--text-3);
-  line-height: 1.3;
-}
-.type-btn.selected .type-name { color: var(--blue-600); }
-
-/* ── FORM ── */
-.form-grid   { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
-.form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
-.fg { display: flex; flex-direction: column; gap: 4px; }
-.fg label { font-size: 11px; font-weight: 600; color: var(--text-2); letter-spacing: .1px; }
-.fg input, .fg select, .fg textarea {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 13px;
-  padding: 7px 10px;
-  border: 1px solid var(--border-md);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--text);
-  width: 100%;
-  transition: border-color .15s, box-shadow .15s;
-  outline: none;
-}
-.fg input:focus, .fg select:focus, .fg textarea:focus {
-  border-color: var(--blue);
-  box-shadow: 0 0 0 3px rgba(24,95,165,.08);
-}
-.fg input[readonly] {
-  background: var(--bg);
-  color: var(--text-3);
-  border-color: var(--border);
-  cursor: default;
-}
-.fg input[readonly]:focus { box-shadow: none; border-color: var(--border); }
-.fg textarea { resize: vertical; min-height: 64px; }
-.form-note { font-size: 11px; color: var(--text-3); margin-top: 6px; }
-
-/* ── ITEMS TABLE ── */
-.items-hdr {
-  display: grid; gap: 7px;
-  padding-bottom: 6px;
-  margin-bottom: 6px;
-  border-bottom: 1px solid var(--border);
-}
-.items-hdr span { font-size: 10px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .3px; }
-.item-row { display: grid; gap: 7px; align-items: center; margin-bottom: 6px; }
-.ri {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 13px;
-  padding: 6px 9px;
-  border: 1px solid var(--border-md);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--text);
-  width: 100%;
-  transition: border-color .15s;
-  outline: none;
-}
-.ri:focus { border-color: var(--blue); }
-.rm-btn {
-  width: 30px; height: 30px;
-  border: 1px solid var(--border-md);
-  border-radius: var(--r-sm);
-  background: none;
-  color: var(--red);
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: background .12s;
-  flex-shrink: 0;
-}
-.rm-btn:hover { background: var(--red-50); }
-.rm-btn svg { width: 13px; height: 13px; }
-
-.add-btn {
-  width: 100%; margin-top: 6px;
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 12px; font-weight: 500;
-  color: var(--blue);
-  background: var(--blue-50);
-  border: 1px dashed var(--blue-100);
-  border-radius: var(--r-sm);
-  padding: 7px;
-  cursor: pointer;
-  transition: background .12s;
-  text-align: center;
-}
-.add-btn:hover { background: var(--blue-100); }
-
-.total-box {
-  display: flex; align-items: center; justify-content: space-between;
-  background: var(--blue-50);
-  border: 1px solid var(--blue-100);
-  border-radius: var(--r-sm);
-  padding: 10px 14px;
-  margin-top: 10px;
-}
-.total-label { font-size: 12px; font-weight: 600; color: var(--blue-800); }
-.total-val { font-size: 18px; font-weight: 600; color: var(--blue-900); font-family: 'IBM Plex Mono', monospace; }
-
-/* ── ROW NAME ── */
-.row-name { display: grid; grid-template-columns: 20px 1fr 30px; gap: 6px; align-items: center; margin-bottom: 5px; }
-.name-num { font-size: 11px; color: var(--text-3); text-align: center; }
-
-/* ── FIELD SECTIONS ── */
-.fs { display: none; }
-.fs.active { display: block; }
-
-/* ── ACTIONS ── */
-.action-row { display: flex; gap: 8px; justify-content: flex-end; padding-top: 6px; }
-.btn-primary {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 13px; font-weight: 600;
-  padding: 9px 20px;
-  background: var(--blue);
-  color: #fff;
-  border: none;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  display: inline-flex; align-items: center; gap: 6px;
-  transition: background .15s;
-}
-.btn-primary:hover { background: var(--blue-800); }
-.btn-ghost {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 13px; font-weight: 500;
-  padding: 9px 16px;
-  background: transparent;
-  color: var(--text-2);
-  border: 1px solid var(--border-md);
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  transition: background .15s;
-}
-.btn-ghost:hover { background: var(--bg); }
-
-/* ── HINT ── */
-.form-hint {
-  text-align: center;
-  padding: 40px 20px;
-  color: var(--text-3);
-}
-.form-hint svg { width: 36px; height: 36px; margin-bottom: 10px; opacity: .4; }
-.form-hint p { font-size: 13px; }
-
-/* ── BADGES ── */
-.badge {
-  font-size: 10px; font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 20px;
-  display: inline-block; white-space: nowrap;
-}
-.badge-blue   { background: var(--blue-50);   color: var(--blue-800); }
-.badge-green  { background: var(--green-50);  color: var(--green); }
-.badge-amber  { background: var(--amber-50);  color: var(--amber); }
-.badge-red    { background: var(--red-50);    color: var(--red); }
-.badge-gray   { background: var(--gray-50);   color: var(--gray); }
-.badge-purple { background: var(--purple-50); color: var(--purple); }
-.mono { font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
-
-/* ── METRICS ── */
-.metric-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
-.metric-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r);
-  padding: 14px 16px;
-}
-.metric-label { font-size: 11px; color: var(--text-3); margin-bottom: 4px; }
-.metric-val { font-size: 24px; font-weight: 600; }
-.metric-sub { font-size: 11px; color: var(--text-3); margin-top: 2px; }
-
-/* ── PENDING CARDS ── */
-.sec-label {
-  font-size: 10px; font-weight: 700;
-  color: var(--text-3);
-  text-transform: uppercase; letter-spacing: .5px;
-  margin-bottom: 8px; margin-top: 16px;
-}
-.sec-label:first-child { margin-top: 0; }
-.pend-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r);
-  padding: 14px 16px;
-  margin-bottom: 8px;
-  transition: border-color .15s;
-}
-.pend-card:hover { border-color: var(--blue-100); }
-.pend-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
-.pend-title { font-size: 13px; font-weight: 600; color: var(--text); }
-.pend-meta { font-size: 11px; color: var(--text-3); margin-top: 3px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.pend-amount { font-size: 14px; font-weight: 700; color: var(--blue-800); font-family: 'IBM Plex Mono', monospace; }
-.pend-detail {
-  font-size: 12px; color: var(--text-2);
-  background: var(--bg);
-  border-radius: var(--r-sm);
-  padding: 8px 12px;
-  margin-bottom: 10px;
-  line-height: 1.6;
-}
-.pend-actions { display: flex; gap: 6px; }
-.btn-approve {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 12px; font-weight: 600;
-  padding: 6px 14px;
-  background: var(--green-50); color: var(--green);
-  border: 1px solid var(--green-200);
-  border-radius: var(--r-sm); cursor: pointer;
-  display: inline-flex; align-items: center; gap: 5px;
-  transition: background .12s;
-}
-.btn-approve:hover { background: #C0DD97; }
-.btn-reject {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 12px; font-weight: 500;
-  padding: 6px 14px;
-  background: var(--red-50); color: var(--red);
-  border: 1px solid var(--red-200);
-  border-radius: var(--r-sm); cursor: pointer;
-  display: inline-flex; align-items: center; gap: 5px;
-  transition: background .12s;
-}
-.btn-reject:hover { background: #F7C1C1; }
-.btn-sm {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 12px;
-  padding: 6px 12px;
-  background: transparent; color: var(--text-3);
-  border: 1px solid var(--border-md);
-  border-radius: var(--r-sm); cursor: pointer;
-  display: inline-flex; align-items: center; gap: 5px;
-  transition: background .12s;
-}
-.btn-sm:hover { background: var(--bg); color: var(--text-2); }
-.btn-sm.active { background: var(--blue); color: #fff; border-color: var(--blue); }
-
-/* ── DIVIDER ── */
-.divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
-
-/* ── FILTER ROW ── */
-.filter-row { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
-.filter-row select {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 12px; padding: 6px 10px;
-  border: 1px solid var(--border-md);
-  border-radius: var(--r-sm);
-  background: var(--surface); color: var(--text);
-  cursor: pointer; outline: none;
-}
-.btn-export {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 12px; font-weight: 500;
-  padding: 6px 12px;
-  background: var(--surface); color: var(--text-2);
-  border: 1px solid var(--border-md);
-  border-radius: var(--r-sm); cursor: pointer;
-  display: inline-flex; align-items: center; gap: 5px;
-  margin-left: auto; transition: background .12s;
-}
-.btn-export:hover { background: var(--bg); }
-
-/* ── HISTORY TABLE ── */
-.hist-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
-.hist-table th {
-  text-align: left; padding: 8px 12px;
-  font-size: 10px; font-weight: 700; color: var(--text-3);
-  text-transform: uppercase; letter-spacing: .4px;
-  border-bottom: 1px solid var(--border);
-}
-.hist-table td {
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--border);
-  vertical-align: middle;
-}
-.hist-table tr:last-child td { border-bottom: none; }
-.hist-table tbody tr.hist-row { transition: background .1s; cursor: pointer; }
-.hist-table tbody tr.hist-row:hover td { background: var(--bg); }
-.filter-row input[type="search"],
-.filter-row input[type="text"] {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 12px; padding: 6px 10px;
-  border: 1px solid var(--border-md); border-radius: var(--r-sm);
-  background: var(--surface); color: var(--text); outline: none;
-  min-width: 200px; flex: 1 1 200px;
-}
-.filter-row input[type="date"],
-.filter-row input[type="number"] {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 12px; padding: 6px 10px;
-  border: 1px solid var(--border-md); border-radius: var(--r-sm);
-  background: var(--surface); color: var(--text);
-}
-.hist-adv-panel {
-  display: none; flex-wrap: wrap; gap: 8px; align-items: center;
-  margin-bottom: 12px; padding: 10px 12px;
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--r);
-}
-.hist-adv-panel.is-open { display: flex; }
-.hist-adv-sep { font-size: 11px; color: var(--text-3); }
-.hist-amt-input { width: 96px; }
-.hist-actions { display: inline-flex; align-items: center; gap: 4px; justify-content: center; }
-.hist-act-btn { padding: 4px 7px !important; min-width: 28px; justify-content: center; }
-.hist-act-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
-.hist-memo-no { font-weight: 600; color: var(--blue-800); }
-.hist-cell-clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hist-table tbody tr.hist-row { cursor: pointer; }
-.hist-amt { text-align: right; white-space: nowrap; }
-.hist-dt { font-size: 11px; color: var(--text-2); white-space: nowrap; }
-.hist-reject-btn {
-  background: none; border: none; padding: 0; margin: 0; cursor: pointer;
-  font-size: 11px; color: var(--red); text-align: left;
-  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.hist-reject-btn:hover { text-decoration: underline; }
-.hist-reject-popover {
-  display: none; position: fixed; z-index: 400; max-width: 320px;
-  padding: 10px 12px; background: var(--surface);
-  border: 1px solid var(--border-md); border-radius: var(--r-sm);
-  box-shadow: 0 8px 24px rgba(0,0,0,.12); font-size: 12px; line-height: 1.5;
-}
-.hist-empty { text-align: center; padding: 32px 16px !important; color: var(--text-3); }
-.hist-detail-meta {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 10px; margin-bottom: 14px; padding: 12px;
-  background: var(--bg); border-radius: var(--r-sm);
-}
-.hist-detail-meta .lbl { display: block; font-size: 9px; font-weight: 700; color: var(--text-3); text-transform: uppercase; margin-bottom: 2px; }
-.hist-detail-block { margin-bottom: 14px; }
-.hist-detail-block-title { font-size: 11px; font-weight: 700; color: var(--text-3); text-transform: uppercase; margin-bottom: 8px; }
-.hist-detail-note { padding: 10px; border-radius: var(--r-sm); font-size: 12px; margin-bottom: 10px; }
-.hist-detail-note--ok { background: var(--green-50); }
-.hist-detail-note--err { background: var(--red-50); }
-.hist-timeline { border-left: 2px solid var(--border-md); margin-left: 6px; padding-left: 14px; }
-.hist-timeline-item { position: relative; margin-bottom: 12px; }
-.hist-timeline-dot { position: absolute; left: -21px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--blue); border: 2px solid var(--surface); }
-.hist-timeline-dot.reject { background: var(--red); }
-.hist-timeline-dot.done { background: var(--green); }
-.hist-audit-log { max-height: 160px; overflow-y: auto; }
-.hist-audit-row { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 11px; }
-.hist-audit-time { color: var(--text-3); white-space: nowrap; min-width: 100px; }
-.hist-linked-row { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
-
-/* ── PLACEHOLDER ── */
-.placeholder {
-  text-align: center; padding: 60px 20px; color: var(--text-3);
-}
-.placeholder svg { width: 40px; height: 40px; margin-bottom: 12px; opacity: .3; }
-.placeholder h3 { font-size: 15px; font-weight: 600; color: var(--text-2); margin-bottom: 4px; }
-.placeholder p { font-size: 13px; }
-
-
-/* ── PDF TEMPLATE ── */
-.pdf-stage {
-  position: fixed;
-  left: -9999px;
-  top: 0;
-  width: 794px;
-  background: #fff;
-  color: #111;
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-}
-.pdf-page {
-  width: 794px;
-  min-height: 1123px;
-  padding: 54px 64px;
-  background: #fff;
-  font-size: 13px;
-  line-height: 1.72;
-}
-.pdf-head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #185FA5; padding-bottom: 14px; margin-bottom: 18px; }
-.pdf-brand { font-size: 18px; font-weight: 700; color: #185FA5; }
-.pdf-subbrand { font-size: 11px; color: #5F5E5A; }
-.pdf-memo-no { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5F5E5A; text-align: right; }
-.pdf-title { text-align: center; font-size: 18px; font-weight: 700; margin: 18px 0; }
-.pdf-meta { display: grid; grid-template-columns: 86px 1fr; gap: 5px 12px; margin-bottom: 18px; }
-.pdf-label { font-weight: 700; color: #444; }
-.pdf-section { margin-top: 14px; }
-.pdf-section-title { font-weight: 700; color: #185FA5; margin-bottom: 6px; }
-.pdf-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
-.pdf-table th, .pdf-table td { border: 1px solid #d9d9d9; padding: 6px 8px; vertical-align: top; }
-.pdf-table th { background: #E6F1FB; color: #0C447C; font-weight: 700; text-align: left; }
-.pdf-table .num { text-align: right; font-family: 'IBM Plex Mono', monospace; white-space: nowrap; }
-.pdf-total { display: flex; justify-content: flex-end; gap: 14px; margin-top: 10px; font-weight: 700; color: #042C53; }
-.pdf-signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 54px; }
-.pdf-sign-box { text-align: center; min-height: 110px; }
-.pdf-sign-line { border-top: 1px solid #222; margin: 54px 18px 8px; }
-.pdf-muted { color: #666; }
-.pdf-alert { margin-top: 10px; padding: 8px 10px; border: 1px solid #B5D4F4; background: #E6F1FB; border-radius: 6px; color: #0C447C; font-size: 12px; }
-@media print {
-  body.printing-pdf .layout { display: none; }
-  body.printing-pdf .pdf-stage { position: static; width: auto; }
-  body.printing-pdf .pdf-page { width: auto; min-height: auto; padding: 32px; }
+// Save single entry to Supabase + localStorage
+async function saveInfraEntryAsync(entry) {
+  const all = loadInfraCosts();
+  const idx = all.findIndex(e => e.id === entry.id);
+  if (idx >= 0) all[idx] = entry; else all.push(entry);
+  storeInfraCosts(all);
+  _infraCache = all;
+  if (await checkSupa()) {
+    try {
+      await supaFetch('infra_costs', 'POST', entry, '?on_conflict=id');
+      _infraCache = null;
+    } catch(e) { console.warn('Supabase infra save failed', e.message); }
+  }
 }
 
-/* ── SVG ICONS ── */
-svg.icon { display: inline-block; vertical-align: middle; }
+// Delete single entry
+async function deleteInfraEntryAsync(id) {
+  const all = loadInfraCosts().filter(e => e.id !== id);
+  storeInfraCosts(all);
+  _infraCache = all;
+  if (await checkSupa()) {
+    try {
+      await supaFetch('infra_costs', 'DELETE', null, '?id=eq.' + encodeURIComponent(id));
+      _infraCache = null;
+    } catch(e) { console.warn('Supabase infra delete failed', e.message); }
+  }
+}
 
-/* ── Cost Dashboard Sub-tabs ── */
-.cost-tab-bar { display:flex; align-items:flex-end; justify-content:space-between; border-bottom:1px solid rgba(0,0,0,0.12); margin-bottom:0; }
-#cost-subtab-bar { display:flex; gap:4px; }
-.cost-stab { padding:7px 18px; font-size:12px; font-weight:500; font-family:inherit; border:1px solid rgba(0,0,0,0.12); border-bottom:none; border-radius:6px 6px 0 0; background:#ECEAE4; color:#5F5E5A; cursor:pointer; }
-.cost-stab:hover { background:#E2E0DA; color:#1C1C1A; }
-.cost-stab.active { background:#FFFFFF; color:#185FA5; font-weight:600; position:relative; top:1px; }
-.cost-stab.active::after { content:""; position:absolute; left:-1px; right:-1px; bottom:-2px; height:2px; background:#FFFFFF; }
-.cost-tab-panel { border:1px solid rgba(0,0,0,0.12); border-top:none; border-radius:0 6px 6px 6px; padding:14px; background:#FFFFFF; margin-bottom:14px; }
-</style>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous"></script>
-</head>
-<body>
+// localStorage fallback — returns array
+function loadInfraCosts() {
+  if (_infraCache !== null) return _infraCache;
+  try {
+    const d = JSON.parse(localStorage.getItem(INFRA_KEY) || '[]');
+    // Migrate old flat-object format → array
+    if (d && !Array.isArray(d)) {
+      const migrated = [];
+      Object.entries(d).forEach(([project, progs]) => {
+        Object.entries(progs).forEach(([program, cost]) => {
+          migrated.push({ id: `${project}__${program}`, project, program, monthly_cost: Number(cost)||0, start_month: null, end_month: null });
+        });
+      });
+      storeInfraCosts(migrated);
+      return migrated;
+    }
+    return Array.isArray(d) ? d : [];
+  } catch(e) { return []; }
+}
+function storeInfraCosts(arr) {
+  _infraCache = Array.isArray(arr) ? arr : [];
+  try { localStorage.setItem(INFRA_KEY, JSON.stringify(_infraCache)); } catch(e) {}
+}
 
-<div class="layout">
-  <!-- ════════ SIDEBAR ════════ -->
-  <div class="sidebar">
-    <div class="sb-logo">
-      <div class="sb-dot">
-        <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5"/></svg>
+// Helper: stable deterministic entry id (project + program, no timestamp)
+function infraEntryId(project, program) {
+  return `${project}__${program}`.replace(/[^a-zA-Z0-9_\-ก-๙]/g, '_');
+}
+
+// Get infra cost for a project in a specific month — used by Forecast + BvA
+function getInfraCostForMonth(infraEntries, project, monthStr) {
+  return infraEntries
+    .filter(e => e.project === project && infraActiveInMonth(e, monthStr))
+    .reduce((s, e) => s + (e.monthly_cost || 0), 0);
+}
+
+// Get all projects that appear in infra entries
+function getInfraProjects(infraEntries) {
+  return [...new Set(infraEntries.map(e => e.project))].sort();
+}
+
+// ── License cost by project (from license monitor) ──
+function getLicenseCostByProject() {
+  if(typeof getAllLicenses !== 'function') return {};
+  const result = {};
+  getAllLicenses().forEach(l => {
+    const proj = l.project || '(ไม่ระบุ)';
+    result[proj] = (result[proj]||0) + (l.pricePerMonth||0) * (l.seats||1);
+  });
+  return result;
+}
+
+// ── Sub-tab switching ──
+let _bgtCurrentTab = 'overview';
+function switchBudgetTab(tab, btn) {
+  _bgtCurrentTab = tab;
+  // Hide all budget sub-tab panels
+  ['overview','sl-infra','others'].forEach(t => {
+    const p = document.getElementById('bgt-tab-' + t);
+    if(p) p.style.display = 'none';
+  });
+  // Remove active from all budget tab buttons
+  document.querySelectorAll('#view-budget .cost-stab').forEach(b => {
+    b.classList.remove('active');
+    b.style.background = '';
+    b.style.color = '';
+  });
+  // Show selected panel
+  const panel = document.getElementById('bgt-tab-' + tab);
+  if(panel) panel.style.display = '';
+  if(btn) btn.classList.add('active');
+  // Render content
+  if(tab === 'overview')  { _ov.initialized = false; renderBudgetOverview(); }
+  if(tab === 'sl-infra')  renderBudgetSLInfra();
+}
+
+// ── Main entry ──
+function renderBudget() {
+  if(_bgtCurrentTab === 'overview')  renderBudgetOverview();
+  if(_bgtCurrentTab === 'sl-infra')  renderBudgetSLInfra();
+}
+
+// ══════════════════════════════════════════
+// SUB-TAB 1: OVERVIEW
+// ══════════════════════════════════════════
+
+const OV_PROJ_COLORS = ['#185FA5','#1D9E75','#EF9F27','#7F77DD','#5DCAA5','#D85A30','#888780','#3C3489','#639922'];
+const OV_TYPE_COLORS = { sl:'#185FA5', hw:'#1D9E75', int:'#EF9F27', ent:'#7F77DD', dep:'#D85A30' };
+
+const _ov = {
+  groupBy: 'type',
+  preset: 12,
+  fromIdx: 0,
+  toIdx: 11,
+  allMonths: [],
+  activeProjKeys: new Set(),
+  activeTypeKeys: new Set(),
+  initialized: false,
+};
+
+function renderBudgetOverview() {
+  _ovBuildMonths();
+  _ovInitState();
+  _ovUpdateKPIs();
+  _ovRenderChips();
+  _ovRenderChart();
+  _ovRenderBvA();
+}
+
+function _ovBuildMonths() {
+  const now = new Date();
+  _ov.allMonths = [];
+  for (let i = 23; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    _ov.allMonths.push({
+      key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,
+      label: d.toLocaleString('th-TH', { month:'short', year:'2-digit' }),
+    });
+  }
+  const fromSel = document.getElementById('ov-from-sel');
+  const toSel   = document.getElementById('ov-to-sel');
+  if (fromSel && !fromSel.options.length) {
+    _ov.allMonths.forEach((m, i) => {
+      const o1 = document.createElement('option'); o1.value = i; o1.textContent = m.label; fromSel.appendChild(o1);
+      const o2 = document.createElement('option'); o2.value = i; o2.textContent = m.label; toSel.appendChild(o2);
+    });
+    toSel.value = _ov.allMonths.length - 1;
+  }
+}
+
+function _ovInitState() {
+  if (_ov.initialized) return;
+  _ov.initialized = true;
+  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
+  const projKeys  = [...new Set(approved.map(m => m.project || '(ไม่ระบุ)'))].sort();
+  _ov.activeProjKeys = new Set(projKeys);
+  _ov.activeTypeKeys = new Set(['sl','hw','int','ent','dep']);
+  _ovApplyPresetIdxs(12);
+}
+
+function _ovApplyPresetIdxs(n) {
+  _ov.toIdx   = _ov.allMonths.length - 1;
+  _ov.fromIdx = Math.max(0, _ov.toIdx - n + 1);
+  _ovUpdatePeriodLabels();
+}
+
+function _ovUpdatePeriodLabels() {
+  if (!_ov.allMonths.length) return;
+  const from = _ov.allMonths[_ov.fromIdx];
+  const to   = _ov.allMonths[_ov.toIdx];
+  const n    = _ov.toIdx - _ov.fromIdx + 1;
+  const txt  = `${from?.label} – ${to?.label} · ${n} เดือน`;
+  ['ov-period-label','ov-period-label-a','ov-bva-period-label'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = txt;
+  });
+  // Update donut title
+  const dt = document.getElementById('ov-donut-title');
+  if (dt) dt.textContent = `สัดส่วนรวม ${n} เดือน`;
+}
+
+// ── Period controls ──
+function ovSetPreset(n) {
+  _ov.preset = n;
+  document.querySelectorAll('.ov-preset-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('ov-pbtn-' + n)?.classList.add('active');
+  const cr = document.getElementById('ov-custom-range');
+  if (n === 0) {
+    if (cr) cr.style.display = 'flex';
+  } else {
+    if (cr) cr.style.display = 'none';
+    // Cap at 12 months
+    _ovApplyPresetIdxs(Math.min(n, 12));
+    _ovUpdateKPIs();
+    _ovRenderChart();
+    _ovRenderBvA();
+  }
+}
+
+function ovApplyCustomRange() {
+  const f = parseInt(document.getElementById('ov-from-sel')?.value ?? 0);
+  const t = parseInt(document.getElementById('ov-to-sel')?.value ?? _ov.allMonths.length - 1);
+  // Cap range at 12 months
+  const cappedT = Math.min(Math.max(f, t), f + 11);
+  _ov.fromIdx = f;
+  _ov.toIdx   = cappedT;
+  // Sync to-sel if capped
+  const toSel = document.getElementById('ov-to-sel');
+  if (toSel) toSel.value = cappedT;
+  _ovUpdatePeriodLabels();
+  _ovUpdateKPIs();
+  _ovRenderChart();
+  _ovRenderBvA();
+}
+
+// ── Group by ──
+function ovSetGroup(g) {
+  _ov.groupBy = g;
+  document.querySelectorAll('.ov-group-btn').forEach(b => {
+    const active = b.id === 'ov-gbtn-' + g;
+    b.style.background = active ? 'var(--blue)' : 'transparent';
+    b.style.color      = active ? '#fff' : 'var(--text-2)';
+  });
+  // Hide type chips when grouping by project
+  const typeCol = document.getElementById('ov-type-col');
+  if (typeCol) typeCol.style.display = g === 'type' ? '' : 'none';
+  _ovRenderChart();
+}
+
+// ── Chip toggles ──
+function ovToggleProj(k) {
+  if (_ov.activeProjKeys.has(k)) { if (_ov.activeProjKeys.size > 1) _ov.activeProjKeys.delete(k); }
+  else _ov.activeProjKeys.add(k);
+  _ovRenderChips(); _ovUpdateKPIs(); _ovRenderChart(); _ovRenderBvA();
+}
+function ovToggleType(k) {
+  if (_ov.activeTypeKeys.has(k)) { if (_ov.activeTypeKeys.size > 1) _ov.activeTypeKeys.delete(k); }
+  else _ov.activeTypeKeys.add(k);
+  _ovRenderChips(); _ovUpdateKPIs(); _ovRenderChart();
+}
+
+// ── Chips ──
+function _ovRenderChips() {
+  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
+  const projKeys = [...new Set(approved.map(m => m.project || '(ไม่ระบุ)'))].sort();
+  const typeKeys = ['sl','hw','int','ent','dep'];
+  const chip = (label, on, onclick) =>
+    `<span onclick="${onclick}" style="display:inline-flex;align-items:center;font-size:11px;padding:4px 11px;border-radius:20px;cursor:pointer;user-select:none;margin-bottom:3px;transition:all 0.12s;border:0.5px solid ${on ? 'transparent' : 'var(--border)'};background:${on ? 'var(--blue)' : 'transparent'};color:${on ? '#fff' : 'var(--text-2)'}">${label}</span>`;
+
+  const projChips = document.getElementById('ov-proj-chips');
+  if (projChips) projChips.innerHTML = projKeys.map(k => chip(esc(k), _ov.activeProjKeys.has(k), `ovToggleProj('${esc(k)}')`)).join('');
+
+  const typeChips = document.getElementById('ov-type-chips');
+  if (typeChips) typeChips.innerHTML = typeKeys.map(k => chip(BGT_TYPE_LABELS[k], _ov.activeTypeKeys.has(k), `ovToggleType('${k}')`)).join('');
+
+  const tc = document.getElementById('ov-type-count');
+  if (tc) tc.textContent = _ov.activeTypeKeys.size === typeKeys.length ? '(all)' : `(${_ov.activeTypeKeys.size}/${typeKeys.length})`;
+}
+
+// ── KPIs ──
+function _ovUpdateKPIs() {
+  const months    = _ov.allMonths.slice(_ov.fromIdx, _ov.toIdx + 1);
+  const numMonths = months.length;
+  const fromKey   = months[0]?.key;
+  const toKey     = months[months.length - 1]?.key;
+  const projArr   = [..._ov.activeProjKeys];
+  const typeArr   = [..._ov.activeTypeKeys];
+
+  // Actual: distribute SL by month, lump-sum others
+  let total = 0;
+  projArr.forEach(proj => {
+    const byMonth = buildActualByMonth(proj);
+    Object.entries(byMonth).forEach(([k, v]) => { if (k >= fromKey && k <= toKey) total += v.total; });
+  });
+  const nonSLTypes = typeArr.filter(t => t !== 'sl');
+  if (nonSLTypes.length) {
+    loadMemos().filter(m => memoStatusKey(m) === 'completed' && nonSLTypes.includes(m.type) && projArr.includes(m.project || '(ไม่ระบุ)')).forEach(m => {
+      const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
+      const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      if (k >= fromKey && k <= toKey) total += Number(m.total) || 0;
+    });
+  }
+
+  const currentYear  = String(new Date().getFullYear() + 543);
+  const slBudgets    = loadSLBudgets()?.[currentYear] || {};
+  const annualBudget = projArr.reduce((s, p) => s + (slBudgets[p] || 0), 0);
+  const budgetTotal  = annualBudget > 0 ? (annualBudget / 12) * numMonths : 0;
+
+  const now = new Date();
+  const smooth3Keys = [];
+  for (let i = 3; i >= 1; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    smooth3Keys.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+  }
+  let smooth3Total = 0;
+  projArr.forEach(proj => {
+    const byMonth = buildActualByMonth(proj);
+    smooth3Keys.forEach(k => { smooth3Total += byMonth[k]?.total || 0; });
+  });
+  const smoothMonthlyRate = smooth3Total / 3;
+  const monthsLeft        = 12 - now.getMonth();
+  const ytdStart = `${now.getFullYear()}-01`;
+  const ytdEnd   = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  let ytdTotal = 0;
+  projArr.forEach(proj => {
+    const byMonth = buildActualByMonth(proj);
+    Object.entries(byMonth).forEach(([k, v]) => { if (k >= ytdStart && k <= ytdEnd) ytdTotal += v.total; });
+  });
+  const forecastTotal = ytdTotal + smoothMonthlyRate * monthsLeft;
+
+  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  setText('bgt-kpi-total', money(Math.round(total)));
+  setText('bgt-kpi-actual-sub', `กระจายตาม duration (${numMonths} เดือน)`);
+
+  if (budgetTotal > 0) {
+    const pct      = Math.round(total / budgetTotal * 100);
+    const rem      = budgetTotal - total;
+    const remColor = total > budgetTotal ? 'var(--red)' : pct >= 90 ? 'var(--amber)' : 'var(--green)';
+    setText('bgt-kpi-budget', money(Math.round(budgetTotal)));
+    setText('bgt-kpi-budget-sub', `ตั้งไว้ ${numMonths} เดือน`);
+    const remEl = document.getElementById('bgt-kpi-remaining');
+    if (remEl) { remEl.textContent = money(Math.round(rem)); remEl.style.color = remColor; }
+    setText('bgt-kpi-remaining-sub', `${pct}% utilized`);
+    const fColor = forecastTotal > annualBudget ? 'var(--red)' : forecastTotal / annualBudget >= 0.9 ? 'var(--amber)' : 'var(--green)';
+    const fEl = document.getElementById('bgt-kpi-forecast');
+    if (fEl) { fEl.textContent = money(Math.round(forecastTotal)); fEl.style.color = fColor; }
+    setText('bgt-kpi-forecast-sub', 'avg 3 เดือนล่าสุด');
+  } else {
+    setText('bgt-kpi-budget', '—');
+    const budEl = document.getElementById('bgt-kpi-budget-sub');
+    if (budEl) budEl.innerHTML = `ยังไม่ได้ตั้งงบ — <span style="color:var(--blue);cursor:pointer;text-decoration:underline" onclick="switchSLNav('budgetsettings')">ตั้งค่าที่นี่</span>`;
+    setText('bgt-kpi-remaining', '—');
+    setText('bgt-kpi-remaining-sub', 'ต้องตั้งงบก่อน');
+    const fEl = document.getElementById('bgt-kpi-forecast');
+    if (fEl) { fEl.textContent = money(Math.round(forecastTotal)); fEl.style.color = 'var(--amber)'; }
+    setText('bgt-kpi-forecast-sub', 'avg 3 เดือนล่าสุด (ไม่มีงบอ้างอิง)');
+  }
+}
+
+// ── Bar chart ──
+function _ovRenderChart() {
+  const canvas = document.getElementById('ov-main-chart');
+  if (!canvas || typeof Chart === 'undefined') return;
+  if (canvas._chart) { canvas._chart.destroy(); canvas._chart = null; }
+
+  const months   = _ov.allMonths.slice(_ov.fromIdx, _ov.toIdx + 1);
+  const labels   = months.map(m => m.label);
+  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
+  const typeKeys = [..._ov.activeTypeKeys];
+  const projKeys = [..._ov.activeProjKeys];
+
+  const getVal = (memo, monthKey) => {
+    const d = parseThaiDate(memo.date) || new Date(memo.updatedAt || memo.createdAt);
+    const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    return k === monthKey ? (Number(memo.total) || 0) : 0;
+  };
+
+  let datasets;
+  if (_ov.groupBy === 'type') {
+    datasets = typeKeys.map(tk => ({
+      label: BGT_TYPE_LABELS[tk] || tk.toUpperCase(),
+      backgroundColor: OV_TYPE_COLORS[tk],
+      borderRadius: 3, borderSkipped: false,
+      data: months.map(m => approved
+        .filter(memo => projKeys.includes(memo.project || '(ไม่ระบุ)') && memo.type === tk)
+        .reduce((s, memo) => s + getVal(memo, m.key), 0)),
+    }));
+  } else {
+    datasets = projKeys.map((pk, pi) => ({
+      label: pk,
+      backgroundColor: OV_PROJ_COLORS[pi % OV_PROJ_COLORS.length],
+      borderRadius: 3, borderSkipped: false,
+      data: months.map(m => approved
+        .filter(memo => (memo.project || '(ไม่ระบุ)') === pk && typeKeys.includes(memo.type))
+        .reduce((s, memo) => s + getVal(memo, m.key), 0)),
+    }));
+  }
+
+  canvas._chart = new Chart(canvas, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 12 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const val = ctx.raw || 0; if (!val) return null;
+              const mIdx = ctx.dataIndex;
+              const monthTotal = datasets.reduce((s, ds) => s + (ds.data[mIdx] || 0), 0);
+              const pct = monthTotal > 0 ? Math.round(val / monthTotal * 100) : 0;
+              return ` ${ctx.dataset.label}: ${money(Math.round(val))} (${pct}%)`;
+            },
+            footer: ctx => {
+              if (!ctx.length) return '';
+              const mIdx = ctx[0].dataIndex;
+              const t = datasets.reduce((s, ds) => s + (ds.data[mIdx] || 0), 0);
+              return t > 0 ? `Total: ${money(Math.round(t))}` : '';
+            },
+          },
+        },
+      },
+      scales: {
+        x: { stacked: true, grid: { display: false }, ticks: { font: { size: 10 } } },
+        y: { stacked: true, ticks: { callback: v => '฿' + Number(v).toLocaleString('th-TH'), font: { size: 10 } } },
+      },
+    },
+  });
+
+  _ovRenderDonut(datasets);
+}
+
+function _ovRenderDonut(datasets) {
+  const donutCanvas = document.getElementById('ov-donut-chart');
+  const legendEl    = document.getElementById('ov-donut-legend');
+  if (!donutCanvas || typeof Chart === 'undefined') return;
+  if (donutCanvas._chart) { donutCanvas._chart.destroy(); donutCanvas._chart = null; }
+
+  const totals = datasets.map(ds => ds.data.reduce((s, v) => s + (v || 0), 0));
+  const grand  = totals.reduce((s, v) => s + v, 0);
+
+  // Show ALL active datasets in legend, even if zero — only hide from chart slices if truly 0
+  const allItems = datasets.map((ds, i) => ({ label: ds.label, color: ds.backgroundColor, total: totals[i] }));
+  const chartItems = grand > 0 ? allItems.filter(d => d.total > 0) : allItems;
+
+  if (donutCanvas._chart) { donutCanvas._chart.destroy(); donutCanvas._chart = null; }
+
+  if (grand > 0) {
+    donutCanvas._chart = new Chart(donutCanvas, {
+      type: 'doughnut',
+      data: {
+        labels: chartItems.map(d => d.label),
+        datasets: [{ data: chartItems.map(d => d.total), backgroundColor: chartItems.map(d => d.color), borderWidth: 1.5, borderColor: '#fff', hoverOffset: 4 }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: '65%',
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${money(Math.round(ctx.raw))} (${Math.round(ctx.raw/grand*100)}%)` } },
+        },
+      },
+    });
+  }
+
+  if (legendEl) {
+    legendEl.innerHTML = allItems.map(d => `
+      <div style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text-2)">
+        <span style="width:8px;height:8px;border-radius:2px;background:${d.color};flex-shrink:0"></span>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.label}</span>
+        <span style="font-weight:500;color:${d.total > 0 ? 'var(--text)' : 'var(--text-3)'}">${grand > 0 ? Math.round(d.total/grand*100) : 0}%</span>
+      </div>`).join('');
+  }
+}
+
+// ── Section B: Budget vs Actual rows ──
+function _ovRenderBvA() {
+  const container = document.getElementById('ov-bva-rows');
+  if (!container) return;
+
+  const months    = _ov.allMonths.slice(_ov.fromIdx, _ov.toIdx + 1);
+  const fromKey   = months[0]?.key;
+  const toKey     = months[months.length - 1]?.key;
+  const numMonths = months.length;
+  const projKeys  = [..._ov.activeProjKeys];
+  const currentYear = String(new Date().getFullYear() + 543);
+  const slBudgets   = loadSLBudgets()?.[currentYear] || {};
+
+  // Render BvA project chips
+  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
+  const allProjKeys = [...new Set(approved.map(m => m.project || '(ไม่ระบุ)'))].sort();
+  const bvaChips = document.getElementById('ov-bva-proj-chips');
+  if (bvaChips) {
+    bvaChips.innerHTML = allProjKeys.map(k => {
+      const on = _ov.activeProjKeys.has(k);
+      return `<span onclick="ovToggleProj('${esc(k)}')" style="display:inline-flex;align-items:center;font-size:11px;padding:3px 10px;border-radius:20px;cursor:pointer;user-select:none;border:0.5px solid ${on ? 'transparent' : 'var(--border)'};background:${on ? 'var(--blue)' : 'transparent'};color:${on ? '#fff' : 'var(--text-2)'}">${esc(k)}</span>`;
+    }).join('');
+  }
+
+  const rows = projKeys.map(proj => {
+    let actual = 0;
+    const byMonth = buildActualByMonth(proj);
+    Object.entries(byMonth).forEach(([k, v]) => { if (k >= fromKey && k <= toKey) actual += v.total; });
+
+    const annualBgt = slBudgets[proj] || 0;
+    const budget    = annualBgt > 0 ? (annualBgt / 12) * numMonths : null;
+    const hasBudget = budget !== null && budget > 0;
+    const pct       = hasBudget ? Math.round(actual / budget * 100) : null;
+    const color     = pct === null ? 'var(--text-3)' : pct > 100 ? 'var(--red)' : pct >= 90 ? 'var(--amber)' : 'var(--blue)';
+    const barW      = pct !== null ? Math.min(pct, 100) : 0;
+    return { proj, actual, budget, hasBudget, pct, color, barW };
+  }).filter(d => d.actual > 0 || d.hasBudget);
+
+  if (!rows.length) {
+    container.innerHTML = `<div style="padding:20px;text-align:center;font-size:12px;color:var(--text-3)">ยังไม่มีข้อมูล — Approve SL Memo หรือตั้งงบประมาณก่อน</div>`;
+    return;
+  }
+
+  // Formula note
+  const noteEl = document.getElementById('ov-bva-formula');
+  if (noteEl) {
+    noteEl.innerHTML = `
+      <span style="font-weight:500">Budget</span> = งบรายปีที่ตั้งใน Budget Settings ÷ 12 × ${numMonths} เดือน &nbsp;·&nbsp;
+      <span style="font-weight:500">Actual</span> = SL memo แต่ละรายการกระจายตาม duration (price/seat/เดือน) รวม Infra ที่ active ในช่วงนั้น`;
+  }
+
+  container.innerHTML = rows.map(d => `
+    <div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+        <span style="font-weight:500;color:var(--text)">${esc(d.proj)}</span>
+        <span style="color:var(--text-2)">
+          ${money(Math.round(d.actual))} / ${d.hasBudget ? money(Math.round(d.budget)) : '— (ไม่มีงบ)'}
+          ${d.pct !== null ? `<span style="margin-left:6px;font-weight:500;color:${d.color}">${d.pct}%</span>` : ''}
+        </span>
       </div>
-      <div>
-        <div class="sb-brand">Orbit Digital</div>
-        <div class="sb-brand-sub">PMO Dashboard</div>
+      <div style="height:8px;background:var(--border);border-radius:4px;overflow:hidden">
+        <div style="width:${d.barW}%;height:100%;background:${d.color};border-radius:4px;transition:width .3s"></div>
       </div>
-    </div>
-
-    <div class="sb-nav">
-      <div class="sb-section">Memo</div>
-      <div class="sb-item active" id="nav-memo" onclick="toggleMemoSub(this)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-        Memo
-      </div>
-      <div class="sb-sub" id="memo-sub">
-        <div class="sb-sub-item active" onclick="swView('create',this,'Create Memo')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Create Memo
-        </div>
-        <div class="sb-sub-item" onclick="swView('pending',this,'Pending Approval')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          Pending Approval
-          <span class="sb-badge">2</span>
-        </div>
-        <div class="sb-sub-item" onclick="swView('history',this,'All Memos')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-          All Memos
-        </div>
-      </div>
-
-      <div class="sb-section">Dashboard & Monitor</div>
-      <div class="sb-item" onclick="swView('budget',this,'Budget & Spend')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-        Budget & Spend
-      </div>
-      <div class="sb-item" onclick="swView('license',this,'License Management')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-        License Management
-        <span class="sb-badge" id="lic-renewal-badge" style="display:none"></span>
-      </div>
-      <div class="sb-item" onclick="swView('device',this,'Device Management')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
-        Device Management
-      </div>
-
-      <div class="sb-section">Resource</div>
-      <div class="sb-item" onclick="swView('resource',this,'Resource Management')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        Resource
-      </div>
-      <div class="sb-item" onclick="swView('settings',this,'Settings')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        Settings
-      </div>
-    </div>
-
-    <div class="sb-footer">
-      <div id="sb-user-btn" class="sb-user" onclick="toggleAccountMenu()" style="cursor:pointer;position:relative">
-        <div class="sb-avatar" id="sb-avatar">CK</div>
-        <div style="flex:1">
-          <div class="sb-uname" id="sb-uname">Chuen K.</div>
-          <div class="sb-urole" id="sb-urole">PMO</div>
-        </div>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;color:var(--text-3)"><polyline points="6 9 12 15 18 9"/></svg>
-      </div>
-      <div id="account-menu" style="display:none;position:absolute;bottom:56px;left:8px;right:8px;background:var(--surface);border:1px solid var(--border-md);border-radius:var(--r);box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:100;overflow:hidden">
-        <div style="padding:6px 10px;font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)">Switch Account</div>
-        <div onclick="switchAccount('Chuen K.','PMO','CK')" class="account-opt" style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px">
-          <div style="width:26px;height:26px;border-radius:6px;background:var(--blue-50);color:var(--blue-800);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0">CK</div>
-          <div><div style="font-weight:600;color:var(--text)">Chuen K.</div><div style="color:var(--text-3);font-size:10px">PMO · Requester</div></div>
-        </div>
-        <div onclick="switchAccount('นวพล ง.','Project Director','NW')" class="account-opt" style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px;border-top:1px solid var(--border)">
-          <div style="width:26px;height:26px;border-radius:6px;background:var(--green-50);color:var(--green);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0">NW</div>
-          <div><div style="font-weight:600;color:var(--text)">นวพล ง.</div><div style="color:var(--text-3);font-size:10px">Project Director · Approver</div></div>
-        </div>
-        <div onclick="switchAccount('ปกรณ์ จ.','CEO','PK')" class="account-opt" style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px;border-top:1px solid var(--border)">
-          <div style="width:26px;height:26px;border-radius:6px;background:var(--amber-50);color:var(--amber);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0">PK</div>
-          <div><div style="font-weight:600;color:var(--text)">ปกรณ์ จ.</div><div style="color:var(--text-3);font-size:10px">CEO · Approver</div></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ════════ MAIN ════════ -->
-  <div class="main">
-    <div class="topbar">
-      <div class="topbar-left">
-        <div class="topbar-title" id="page-title">Create Memo</div>
-      </div>
-      <div class="topbar-right">
-        <button class="topbar-btn" title="Notifications">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-        </button>
-      </div>
-    </div>
-
-    <div class="content">
-
-      <!-- ════ CREATE ════ -->
-      <div id="view-create" class="view active">
-
-        <!-- Type selector -->
-        <div class="card">
-          <div class="card-head">
-            <div class="card-num">1</div>
-            <span class="card-title">เลือกประเภท Memo</span>
-          </div>
-          <div class="type-grid">
-            <div class="type-btn" onclick="selectType('sl',this)">
-              <span class="type-code">SL</span>
-              <span class="type-name">Software License</span>
-            </div>
-            <div class="type-btn" onclick="selectType('hw',this)">
-              <span class="type-code">HW</span>
-              <span class="type-name">Hardware</span>
-            </div>
-            <div class="type-btn" onclick="selectType('int',this)">
-              <span class="type-code">INT</span>
-              <span class="type-name">Team Activity</span>
-            </div>
-            <div class="type-btn" onclick="selectType('ent',this)">
-              <span class="type-code">ENT</span>
-              <span class="type-name">Client Expense</span>
-            </div>
-            <div class="type-btn" onclick="selectType('dep',this)">
-              <span class="type-code">DEP</span>
-              <span class="type-name">Deployment</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Hint before type selected -->
-        <div id="form-hint" class="form-hint">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-          <p>เลือกประเภท Memo ด้านบนเพื่อเริ่มกรอกข้อมูล</p>
-        </div>
-
-        <!-- Form body (hidden until type selected) -->
-        <div id="form-body" style="display:none">
-
-          <!-- General info -->
-          <div class="card">
-            <div class="card-head">
-              <div class="card-num">2</div>
-              <span class="card-title">ข้อมูลทั่วไป</span>
-            </div>
-            <div class="form-grid" style="margin-bottom:10px">
-              <div class="fg"><label>เลข Memo</label><input type="text" id="f-memo-no" placeholder=""></div>
-              <div class="fg"><label>ลงวันที่ *</label><input type="date" id="f-date"></div>
-              <div class="fg">
-                <label>โครงการ *</label>
-                <select id="f-project" onchange="toggleOtherProject();updateSubjectPreview()">
-                  <option value="">— เลือกโครงการ —</option>
-                  <option>AOA-MP</option><option>TTB</option><option>Geo9</option>
-                  <option>Release 2.1</option><option>Release 3</option>
-                  <option value="other">อื่นๆ (กรอกเอง)</option>
-                </select>
-              </div>
-              <div class="fg" id="project-other-wrap" style="display:none">
-                <label>ชื่อโครงการ *</label>
-                <input type="text" id="f-project-other" placeholder="กรอกชื่อโครงการ">
-              </div>
-              <div class="fg">
-                <label>เรียน *</label>
-                <select id="f-to" onchange="toggleToOther()">
-                  <option value="">— เลือก —</option>
-                  <option>ผู้อำนวยการโครงการ</option>
-                  <option>ประธานเจ้าหน้าที่บริหาร</option>
-                  <option>ผู้อำนวยการ</option>
-                  <option value="other">อื่นๆ (กรอกเอง)</option>
-                </select>
-                <div id="to-other-wrap" style="display:none;margin-top:6px">
-                  <input type="text" id="f-to-other" placeholder="ระบุ ชื่อผู้ที่เรียนถึง">
-                </div>
-              </div>
-            </div>
-            <div class="fg" style="margin-bottom:8px">
-              <label>หัวข้อเรื่อง * <span style="font-weight:400;color:var(--text-3)">(สร้างอัตโนมัติ — แก้ไขได้)</span></label>
-              <input type="text" id="f-subject" placeholder="เว้นว่างเพื่อใช้อัตโนมัติ" oninput="this.dataset.manualEdit=this.value?'true':'false'" onfocus="if(!this.value)this.placeholder=memoSubject({type:selectedType,project:document.getElementById('f-project')?.value==='other'?document.getElementById('f-project-other')?.value:document.getElementById('f-project')?.value})">
-            </div>
-            <div class="fg">
-              <label>เหตุผลในการขอ *</label>
-              <select id="f-reason" onchange="toggleOther()">
-                <option value="">— เลือกเหตุผล —</option>
-              </select>
-            </div>
-            <div id="other-wrap" style="display:none;margin-top:8px">
-              <div class="fg"><label>ระบุเหตุผล *</label><textarea id="f-reason-other" placeholder="กรอกเหตุผล..."></textarea></div>
-            </div>
-          </div>
-
-          <!-- Dynamic detail card -->
-          <div class="card">
-            <div class="card-head">
-              <div class="card-num">3</div>
-              <span class="card-title" id="detail-title">รายละเอียด</span>
-            </div>
-
-            <!-- SL fields -->
-            <div class="fs" id="fs-sl">
-              <div class="items-hdr" style="grid-template-columns:2.5fr 1.2fr 0.8fr 0.8fr 1fr 1fr 30px">
-                <span>ชื่อ Software *</span><span>฿/เดือน *</span><span>เดือน *</span><span>จำนวน *</span><span>เริ่ม (เดือน)</span><span>สิ้นสุด (เดือน)</span><span></span>
-              </div>
-              <div id="sl-rows">
-                <div class="item-row" style="grid-template-columns:2.5fr 1.2fr 0.8fr 0.8fr 1fr 1fr 30px">
-                  <input class="ri" type="text" placeholder="GitHub Copilot">
-                  <input class="ri sl-price" type="number" placeholder="600" oninput="calcSL()">
-                  <input class="ri sl-mo" type="number" value="12" oninput="calcSL()">
-                  <input class="ri sl-qty" type="number" placeholder="15" oninput="calcSL()">
-                  <input class="ri sl-start" type="month" placeholder="YYYY-MM">
-                  <input class="ri sl-end" type="month" placeholder="YYYY-MM">
-                  <button class="rm-btn" onclick="rmRow(this,'sl-rows');calcSL()" title="ลบ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></button>
-                </div>
-              </div>
-              <button class="add-btn" onclick="addSLRow()">+ เพิ่ม Software</button>
-              <div class="form-grid" style="margin-top:12px">
-                <div class="fg"><label>วันที่แปลงเรท USD→THB</label><input type="date" id="sl-ratedate"></div>
-                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร *</label><input type="text" placeholder="เช่น สองแสนห้าหมื่นบาทถ้วน"></div>
-              </div>
-              <div class="total-box"><span class="total-label">Total Amount</span><span class="total-val" id="sl-total">฿0</span></div>
-            </div>
-
-            <!-- HW fields -->
-            <div class="fs" id="fs-hw">
-              <div class="items-hdr" style="grid-template-columns:3fr 1.4fr 1fr 30px">
-                <span>ชื่ออุปกรณ์ *</span><span>ราคา/ชิ้น (THB) *</span><span>จำนวน *</span><span></span>
-              </div>
-              <div id="hw-rows">
-                <div class="item-row" style="grid-template-columns:3fr 1.4fr 1fr 30px">
-                  <input class="ri" type="text" placeholder="MacBook Pro 14">
-                  <input class="ri hw-price" type="number" placeholder="79000" oninput="calcHW()">
-                  <input class="ri hw-qty" type="number" placeholder="2" oninput="calcHW()">
-                  <button class="rm-btn" onclick="rmRow(this,'hw-rows');calcHW()" title="ลบ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
-                </div>
-              </div>
-              <button class="add-btn" onclick="addHWRow()">+ เพิ่มอุปกรณ์</button>
-              <div class="form-grid" style="margin-top:12px">
-                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร *</label><input type="text" placeholder="เช่น หนึ่งแสนห้าหมื่นแปดพันบาทถ้วน"></div>
-                <div class="fg"><label>ผู้รับผิดชอบดูแลอุปกรณ์</label><input type="text" placeholder="ชื่อ-นามสกุล"></div>
-              </div>
-              <div class="total-box"><span class="total-label">Total Amount</span><span class="total-val" id="hw-total">฿0</span></div>
-            </div>
-
-            <!-- INT fields -->
-            <div class="fs" id="fs-int">
-              <div class="form-grid" style="margin-bottom:12px">
-                <div class="fg"><label>ไตรมาส / ครั้งที่ *</label><input type="text" placeholder="เช่น Q2 / 2568"></div>
-                <div class="fg"><label>วันที่จัดกิจกรรม *</label><input type="date"></div>
-                <div class="fg"><label>วงเงินต่อคน (บาท) *</label><input type="number" id="int-pp" value="1500" oninput="calcINT()"></div>
-                <div class="fg"><label>จำนวนเงินต่อคนเป็นตัวอักษร *</label><input type="text" placeholder="หนึ่งพันห้าร้อยบาทถ้วน"></div>
-              </div>
-              <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:7px">รายชื่อผู้เข้าร่วม *</div>
-              <div id="int-names">
-                <div class="row-name"><span class="name-num">1.</span><input class="ri int-name" type="text" placeholder="ชื่อ-นามสกุล ตำแหน่ง" oninput="calcINT()"><button class="rm-btn" onclick="rmName(this,'int-names');calcINT()" title="ลบ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button></div>
-              </div>
-              <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-                <button class="add-btn" onclick="addName('int-names','int-name',true)" style="margin-top:0">+ เพิ่มรายชื่อ</button>
-                <button class="btn-sm" onclick="openBulkNameModal('int-names','int-name',true)" style="font-size:11px;padding:5px 10px">⬆ Bulk Upload</button>
-              </div>
-              <div class="total-box"><span class="total-label">Total Amount</span><span class="total-val" id="int-total">฿0</span></div>
-            </div>
-
-            <!-- ENT fields -->
-            <div class="fs" id="fs-ent">
-              <div class="form-grid">
-                <div class="fg" style="grid-column:1/-1"><label>ชื่อลูกค้า / บริษัทที่เลี้ยง *</label><input type="text" placeholder="เช่น บริษัท ปตท. น้ำมันและการค้าปลีก จำกัด (มหาชน)"></div>
-                <div class="fg"><label>วันที่จัดงาน *</label><input type="date"></div>
-                <div class="fg"><label>เวลา *</label><input type="time" value="12:00"></div>
-                <div class="fg"><label>สถานที่ *</label><input type="text" placeholder="เช่น ร้านอาหาร The River Café"></div>
-                <div class="fg"><label>จำนวนผู้เข้าร่วม (คน) *</label><input type="number" placeholder="10"></div>
-                <div class="fg"><label>วงเงินรวม (บาท) *</label><input type="number" placeholder="50000"></div>
-                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร</label><input type="text" placeholder="เช่น ห้าหมื่นบาทถ้วน"></div>
-              </div>
-            </div>
-
-            <!-- DEP fields -->
-            <div class="fs" id="fs-dep">
-              <div class="form-grid" style="margin-bottom:12px">
-                <div class="fg"><label>วันที่ Deploy (Start) *</label><input type="date"></div>
-                <div class="fg"><label>วันที่ Deploy (End) *</label><input type="date"></div>
-                <div class="fg"><label>สถานที่ Deploy *</label><input type="text" placeholder="เช่น สำนักงานลูกค้า"></div>
-                <div class="fg"><label>รูปแบบ</label>
-                  <select><option>Onsite</option><option>Online</option><option>Online / Onsite</option></select>
-                </div>
-                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร</label><input type="text" placeholder="เช่น หนึ่งร้อยบาทถ้วน"></div>
-                <div class="fg"><label>วงเงินอำนาจอนุมัติ (บาท)</label><input type="text" value="500,000"></div>
-              </div>
-              <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:7px">รายชื่อพนักงานที่ Deploy <span style="font-weight:400;color:var(--text-3)">(optional)</span></div>
-              <div id="dep-names">
-                <div class="row-name"><span class="name-num">1.</span><input class="ri dep-name" type="text" placeholder="ชื่อ-นามสกุล ตำแหน่ง"><button class="rm-btn" onclick="rmName(this,'dep-names')" title="ลบ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button></div>
-              </div>
-              <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-                <button class="add-btn" onclick="addName('dep-names','dep-name',false)" style="margin-top:0">+ เพิ่มรายชื่อ</button>
-                <button class="btn-sm" onclick="openBulkNameModal('dep-names','dep-name',false)" style="font-size:11px;padding:5px 10px">⬆ Bulk Upload</button>
-              </div>
-            </div>
-
-          </div><!-- /dynamic card -->
-
-          <!-- Optional: Account table (SL only) -->
-          <div class="card" id="acct-card" style="display:none">
-            <div class="card-head">
-              <div class="card-num">4</div>
-              <span class="card-title">ตาราง Account</span>
-              <span class="card-subtitle">(optional)</span>
-            </div>
-            <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:10px">
-              <input class="ri acct-col" type="text" placeholder="Col 1 เช่น GitHub" style="font-size:11px;padding:5px 7px" oninput="rebuildAcct()">
-              <input class="ri acct-col" type="text" placeholder="Col 2" style="font-size:11px;padding:5px 7px" oninput="rebuildAcct()">
-              <input class="ri acct-col" type="text" placeholder="Col 3" style="font-size:11px;padding:5px 7px" oninput="rebuildAcct()">
-              <input class="ri acct-col" type="text" placeholder="Col 4" style="font-size:11px;padding:5px 7px" oninput="rebuildAcct()">
-              <input class="ri acct-col" type="text" placeholder="Col 5" style="font-size:11px;padding:5px 7px" oninput="rebuildAcct()">
-            </div>
-            <div style="overflow-x:auto">
-              <table style="width:100%;border-collapse:collapse;font-size:12px">
-                <thead id="acct-head"></thead>
-                <tbody id="acct-body"></tbody>
-              </table>
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-              <button class="add-btn" onclick="addAcctRow()" style="margin-top:0">+ เพิ่ม Account</button>
-              <button class="btn-sm" onclick="openBulkAcctModal()" style="font-size:11px;padding:5px 10px">⬆ Bulk Upload</button>
-            </div>
-          </div>
-
-          <!-- Reviewer & Approver -->
-          <div class="card">
-            <div class="card-head">
-              <div class="card-num" id="rev-num">4</div>
-              <span class="card-title">Reviewer & Approver</span>
-            </div>
-            <div style="font-size:11px;font-weight:600;color:var(--text-3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px">Reviewer</div>
-            <div class="form-grid-3" style="margin-bottom:14px">
-              <div class="fg">
-                <label>ชื่อ Reviewer *</label>
-                <select id="f-reviewer-name" onchange="toggleReviewerNameOther()">
-                  <option value="">— เลือก —</option>
-                  <option>นาย นวพล งามวรโรจน์สกุล</option>
-                  <option>นาย ปกรณ์ เจียมสกุลทิพย์</option>
-                  <option value="other">อื่นๆ (กรอกเอง)</option>
-                </select>
-                <input type="text" id="f-reviewer-name-other" placeholder="กรอกชื่อ-นามสกุล" style="display:none;margin-top:6px">
-              </div>
-              <div class="fg">
-                <label>ตำแหน่ง *</label>
-                <select id="f-reviewer-title" onchange="toggleReviewerTitleOther()">
-                  <option value="">— เลือก —</option>
-                  <option>ผู้อำนวยการโครงการ</option>
-                  <option>ประธานเจ้าหน้าที่บริหาร</option>
-                  <option>ผู้อำนวยการ</option>
-                  <option value="other">อื่นๆ (กรอกเอง)</option>
-                </select>
-                <input type="text" id="f-reviewer-title-other" placeholder="กรอกตำแหน่ง" style="display:none;margin-top:6px">
-              </div>
-              <div class="fg"><label>วันที่ลงนาม *</label><input type="date" id="f-signdate"></div>
-            </div>
-            <div style="font-size:11px;font-weight:600;color:var(--text-3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px">Approver</div>
-            <div class="form-grid-3">
-              <div class="fg">
-                <label>ชื่อ Approver *</label>
-                <select id="f-approver-name" onchange="toggleApproverNameOther()">
-                  <option value="">— เลือก —</option>
-                  <option>นาย นวพล งามวรโรจน์สกุล</option>
-                  <option>นาย ปกรณ์ เจียมสกุลทิพย์</option>
-                  <option value="other">อื่นๆ (กรอกเอง)</option>
-                </select>
-                <input type="text" id="f-approver-name-other" placeholder="กรอกชื่อ-นามสกุล" style="display:none;margin-top:6px">
-              </div>
-              <div class="fg">
-                <label>ตำแหน่ง *</label>
-                <select id="f-appr-title" onchange="toggleApproverTitleOther()">
-                  <option value="">— เลือก —</option>
-                  <option>ผู้อำนวยการโครงการ</option>
-                  <option>ประธานเจ้าหน้าที่บริหาร</option>
-                  <option>ผู้อำนวยการ</option>
-                  <option value="other">อื่นๆ (กรอกเอง)</option>
-                </select>
-                <input type="text" id="f-appr-title-other" placeholder="กรอกตำแหน่ง" style="display:none;margin-top:6px">
-              </div>
-              <div class="fg"><label>วันที่ลงนาม *</label><input type="date" id="f-apprdate"></div>
-            </div>
-          </div>
-
-          <div class="action-row">
-            <button class="btn-ghost" onclick="resetMemoForm()">ยกเลิก</button>
-            <button class="btn-sm" onclick="saveDraft()" style="font-size:13px;padding:8px 16px" id="btn-save-draft" style="display:none">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-              Save to Draft
-            </button>
-            <button class="btn-primary" onclick="generateMemoPdf()">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              Save & Generate PDF
-            </button>
-          </div>
-
-        </div><!-- /form-body -->
-      </div><!-- /view-create -->
-
-      <!-- ════ PENDING ════ -->
-      <div id="view-pending" class="view">
-        <!-- KPI: single focus — how many need action -->
-        <div class="metric-row" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
-          <div class="metric-card">
-            <div class="metric-label">Awaiting Approval</div>
-            <div class="metric-val" id="pending-count" style="color:var(--amber)">0</div>
-            <div class="metric-sub">รอตัดสินใจ</div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-label">Waiting longest</div>
-            <div class="metric-val" id="pending-oldest-days" style="color:var(--red)">—</div>
-            <div class="metric-sub">วัน (นานสุด)</div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-label">Total Amount</div>
-            <div class="metric-val" id="pending-total-amt" style="color:var(--blue);font-size:18px">—</div>
-            <div class="metric-sub">รวมวงเงินที่รออนุมัติ</div>
-          </div>
-        </div>
-
-        <!-- Filters -->
-        <div class="filter-row" style="margin-bottom:12px">
-          <input type="text" id="pend-search" placeholder="🔍 ค้นหา Memo No, Project, Requester..."
-            style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:220px;outline:none"
-            oninput="_pendingSearch=this.value;renderPendingContent()">
-          <select id="pend-filter-type" onchange="renderPendingContent()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกประเภท</option>
-            <option value="sl">SL</option><option value="hw">HW</option>
-            <option value="int">INT</option><option value="ent">ENT</option><option value="dep">DEP</option>
-          </select>
-          <select id="pend-filter-project" onchange="renderPendingContent()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกโครงการ</option>
-          </select>
-          <select id="pend-sort" onchange="renderPendingContent()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="wait-desc">รอนานสุด</option>
-            <option value="date-desc">วันที่ล่าสุด</option>
-            <option value="amount-desc">วงเงิน มาก→น้อย</option>
-            <option value="amount-asc">วงเงิน น้อย→มาก</option>
-          </select>
-        </div>
-
-        <div id="pending-list"></div>
-      </div>
-
-      <!-- ════ ALL MEMOS (History) ════ -->
-      <div id="view-history" class="view">
-        <!-- Status tabs -->
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-          <div style="display:flex;gap:4px;background:var(--bg);border-radius:var(--r);padding:4px">
-            <button class="hist-tab-btn active" data-status="all" onclick="switchHistTab('all',this)" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:var(--surface);color:var(--blue)">
-              All <span class="hist-tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
-            </button>
-            <button class="hist-tab-btn" data-status="draft" onclick="switchHistTab('draft',this)" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
-              Draft <span class="hist-tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
-            </button>
-            <button class="hist-tab-btn" data-status="pending" onclick="switchHistTab('pending',this)" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
-              Pending <span class="hist-tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
-            </button>
-            <button class="hist-tab-btn" data-status="completed" onclick="switchHistTab('completed',this)" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
-              Approved <span class="hist-tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
-            </button>
-            <button class="hist-tab-btn" data-status="rejected" onclick="switchHistTab('rejected',this)" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
-              Rejected <span class="hist-tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
-            </button>
-          </div>
-        </div>
-        <div class="filter-row" style="margin-bottom:12px">
-          <input type="search" id="hist-search" placeholder="🔍 ค้นหา Memo, ผู้ขอ, โครงการ…" oninput="renderHistoryMemos()">
-          <select id="hist-status" onchange="renderHistoryMemos()" style="display:none">
-            <option value="all">ทุกสถานะ</option>
-            <option value="completed">Completed</option>
-            <option value="rejected">Rejected</option>
-            <option value="pending">Pending</option>
-            <option value="pending_a1">Pending A1</option>
-            <option value="pending_a2">Pending A2</option>
-            <option value="draft">Draft</option>
-            <option value="cancelled">Cancelled</option>
-            <option value="expired">Expired</option>
-          </select>
-          <select id="hist-type" onchange="renderHistoryMemos()"><option value="all">ทุกประเภท</option><option value="sl">SL</option><option value="hw">HW</option><option value="int">INT</option><option value="ent">ENT</option><option value="dep">DEP</option></select>
-          <select id="hist-project" onchange="renderHistoryMemos()"><option value="all">ทุกโครงการ</option></select>
-          <select id="hist-range" onchange="renderHistoryMemos()"><option value="month">เดือนนี้</option><option value="last-month">เดือนที่แล้ว</option><option value="3-months">3 เดือน</option><option value="all">ทั้งหมด</option></select>
-          <select id="hist-sort" onchange="renderHistoryMemos()">
-            <option value="updated-desc">อัปเดตล่าสุด</option>
-            <option value="updated-asc">อัปเดตเก่าสุด</option>
-            <option value="created-desc">สร้างล่าสุด</option>
-            <option value="created-asc">สร้างเก่าสุด</option>
-            <option value="amount-desc">วงเงินมาก→น้อย</option>
-            <option value="amount-asc">วงเงินน้อย→มาก</option>
-            <option value="project-asc">โครงการ A-Z</option>
-            <option value="status-asc">สถานะ</option>
-          </select>
-          <button type="button" class="btn-sm" id="hist-filter-toggle" onclick="toggleHistFilters()" aria-expanded="false">ตัวกรองเพิ่มเติม</button>
-          <button type="button" class="btn-export" onclick="exportHistoryCsv()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Export CSV
-          </button>
-        </div>
-        <div id="hist-filters-advanced" class="hist-adv-panel filter-row" style="margin-bottom:12px">
-          <input type="date" id="hist-date-from" title="จากวันที่" onchange="renderHistoryMemos()">
-          <span class="hist-adv-sep">–</span>
-          <input type="date" id="hist-date-to" title="ถึงวันที่" onchange="renderHistoryMemos()">
-          <select id="hist-amt-preset" onchange="renderHistoryMemos()">
-            <option value="all">ทุกวงเงิน</option>
-            <option value="gt100k">&gt; 100k</option>
-            <option value="50k-100k">50k – 100k</option>
-            <option value="lt50k">&lt; 50k</option>
-          </select>
-          <input type="number" id="hist-amt-min" class="hist-amt-input" placeholder="ขั้นต่ำ ฿" min="0" onchange="renderHistoryMemos()">
-          <input type="number" id="hist-amt-max" class="hist-amt-input" placeholder="สูงสุด ฿" min="0" onchange="renderHistoryMemos()">
-          <select id="hist-requester" onchange="renderHistoryMemos()"><option value="all">— กรองตามผู้ขอ —</option></select>
-          <select id="hist-approver" onchange="renderHistoryMemos()"><option value="all">— กรองตามผู้อนุมัติ —</option></select>
-        </div>
-        <div class="card" style="padding:0;overflow:hidden" id="hist-table-wrap">
-          <div class="card-head" style="padding:14px 16px 12px;border-bottom:1px solid var(--border);margin:0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-            <span class="card-title">Memo History</span>
-            <span id="hist-result-count" style="font-size:11px;color:var(--text-3);font-weight:400">แสดง 0 รายการ · คลิกแถวเพื่อดูรายละเอียด</span>
-          </div>
-          <div style="overflow-x:auto">
-            <table class="hist-table">
-              <thead><tr>
-                <th style="width:10%;padding-left:16px">เลข Memo</th>
-                <th style="width:6%">Type</th>
-                <th style="width:9%">โครงการ</th>
-                <th style="width:9%">ผู้ขอ</th>
-                <th style="width:8%">วงเงิน</th>
-                <th style="width:7%">สถานะ</th>
-                <th style="width:9%">ผู้อนุมัติ</th>
-                <th style="width:6%">สร้าง</th>
-                <th style="width:6%">อัปเดต</th>
-                <th style="width:7%">ระยะเวลา</th>
-                <th style="width:8%">เหตุผล Reject</th>
-                <th style="width:10%;text-align:center">Budget</th>
-                <th style="width:10%;text-align:center">จัดการ</th>
-              </tr></thead>
-              <tbody id="history-body"></tbody>
-            </table>
-          </div>
-        </div>
-        <div id="hist-reject-popover" class="hist-reject-popover" role="tooltip"></div>
-      </div>
-
-      <!-- ════ BUDGET ════ -->
-      <div id="view-budget" class="view">
-
-        <!-- Sub-tab bar -->
-        <div class="cost-tab-bar" style="margin-bottom:12px">
-          <div style="display:flex;gap:4px">
-            <button class="cost-stab active" data-tab="overview" onclick="switchBudgetTab('overview',this)">Overview</button>
-            <button class="cost-stab" data-tab="sl-infra" onclick="switchBudgetTab('sl-infra',this)">SL + Infra</button>
-            <button class="cost-stab" data-tab="others" onclick="switchBudgetTab('others',this)">Others</button>
-          </div>
-        </div>
-
-        <!-- ── SUB-TAB: OVERVIEW ── -->
-        <div id="bgt-tab-overview" class="cost-tab-panel">
-
-          <!-- Period selector — controls everything -->
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-            <span style="font-size:11px;font-weight:500;color:var(--text-3)">Period</span>
-            <div style="display:flex;gap:4px">
-              <button class="btn-sm ov-preset-btn" id="ov-pbtn-3"  onclick="ovSetPreset(3)">3M</button>
-              <button class="btn-sm ov-preset-btn" id="ov-pbtn-6"  onclick="ovSetPreset(6)">6M</button>
-              <button class="btn-sm ov-preset-btn active" id="ov-pbtn-12" onclick="ovSetPreset(12)">12M</button>
-              <button class="btn-sm ov-preset-btn" id="ov-pbtn-0"  onclick="ovSetPreset(0)">Custom</button>
-            </div>
-            <div id="ov-custom-range" style="display:none;align-items:center;gap:6px">
-              <select id="ov-from-sel" onchange="ovApplyCustomRange()" class="ri" style="font-size:11px;padding:3px 6px;width:auto"></select>
-              <span style="font-size:11px;color:var(--text-3)">→</span>
-              <select id="ov-to-sel" onchange="ovApplyCustomRange()" class="ri" style="font-size:11px;padding:3px 6px;width:auto"></select>
-              <button class="btn-sm" onclick="ovApplyCustomRange()" style="font-size:11px">Apply</button>
-            </div>
-            <span style="font-size:11px;color:var(--text-3)" id="ov-period-label"></span>
-          </div>
-
-          <!-- KPI row -->
-          <div class="metric-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">
-            <div class="metric-card">
-              <div class="metric-label">งบประมาณ (ช่วงนี้)</div>
-              <div class="metric-val" id="bgt-kpi-budget" style="color:var(--text)">฿0</div>
-              <div class="metric-sub" id="bgt-kpi-budget-sub">ตั้งไว้สำหรับช่วงนี้</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">ใช้จ่ายจริง</div>
-              <div class="metric-val" id="bgt-kpi-total" style="color:var(--blue)">฿0</div>
-              <div class="metric-sub" id="bgt-kpi-actual-sub">กระจายตาม duration</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">คงเหลือ</div>
-              <div class="metric-val" id="bgt-kpi-remaining" style="color:var(--green)">—</div>
-              <div class="metric-sub" id="bgt-kpi-remaining-sub">จากงบที่ตั้งไว้</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">Forecast (ถึงสิ้นปี)</div>
-              <div class="metric-val" id="bgt-kpi-forecast" style="color:var(--amber)">—</div>
-              <div class="metric-sub" id="bgt-kpi-forecast-sub">avg 3 เดือนล่าสุด</div>
-            </div>
-          </div>
-
-          <!-- ── Section A: Spend breakdown ── -->
-          <div class="card" style="padding:14px 16px;margin-bottom:12px">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-              <div style="font-size:12px;font-weight:600;color:var(--text)">A · Spend breakdown <span id="ov-period-label-a" style="font-size:11px;font-weight:400;color:var(--text-3)"></span></div>
-              <div style="display:flex;align-items:center;gap:6px">
-                <span style="font-size:11px;color:var(--text-3)">Group by</span>
-                <div style="display:flex;border:0.5px solid var(--border);border-radius:var(--r-sm);overflow:hidden">
-                  <button class="ov-group-btn" id="ov-gbtn-type" onclick="ovSetGroup('type')"
-                    style="font-size:11px;padding:3px 10px;border:none;background:var(--blue);color:#fff;cursor:pointer">Type</button>
-                  <button class="ov-group-btn" id="ov-gbtn-project" onclick="ovSetGroup('project')"
-                    style="font-size:11px;padding:3px 10px;border:none;background:transparent;color:var(--text-2);cursor:pointer">Project</button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Project filter chips -->
-            <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px" id="ov-proj-chips"></div>
-
-            <!-- Type filter chips (hidden when group=project) -->
-            <div id="ov-type-col" style="margin-bottom:12px">
-              <div style="font-size:10px;font-weight:500;color:var(--text-3);margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em">Filter by type <span id="ov-type-count" style="font-weight:400"></span></div>
-              <div style="display:flex;gap:5px;flex-wrap:wrap" id="ov-type-chips"></div>
-            </div>
-
-            <!-- Bar + Donut side by side -->
-            <div style="display:grid;grid-template-columns:1fr 200px;gap:14px;align-items:start">
-              <div>
-                <div style="font-size:11px;color:var(--text-3);margin-bottom:6px">Monthly spend (฿)</div>
-                <div style="height:220px"><canvas id="ov-main-chart"></canvas></div>
-              </div>
-              <div>
-                <div style="font-size:11px;color:var(--text-3);margin-bottom:6px" id="ov-donut-title">สัดส่วนรวม</div>
-                <div style="width:160px;height:160px;margin:0 auto"><canvas id="ov-donut-chart"></canvas></div>
-                <div id="ov-donut-legend" style="margin-top:8px;display:flex;flex-direction:column;gap:4px"></div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ── Section B: Budget vs Actual ── -->
-          <div class="card" style="padding:14px 16px">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-              <div style="font-size:12px;font-weight:600;color:var(--text)">B · Budget vs actual — by project <span id="ov-bva-period-label" style="font-size:11px;font-weight:400;color:var(--text-3)"></span></div>
-              <div style="display:flex;gap:5px;flex-wrap:wrap" id="ov-bva-proj-chips"></div>
-            </div>
-            <div id="ov-bva-formula" style="font-size:11px;color:var(--text-3);background:var(--bg);border-radius:var(--r-sm);padding:7px 10px;margin-bottom:12px;line-height:1.6"></div>
-            <div id="ov-bva-rows"></div>
-            <div style="margin-top:10px;font-size:11px;color:var(--text-3)">
-              <span style="display:inline-block;width:8px;height:8px;background:var(--red);border-radius:2px;margin-right:4px"></span>&gt;100% over budget &nbsp;
-              <span style="display:inline-block;width:8px;height:8px;background:var(--amber);border-radius:2px;margin-right:4px"></span>90–100% near limit &nbsp;
-              <span style="display:inline-block;width:8px;height:8px;background:var(--blue);border-radius:2px;margin-right:4px"></span>&lt;90% on track
-            </div>
-          </div>
-
-        </div>
-
-        <!-- ── SUB-TAB: SL + INFRA ── -->
-        <div id="bgt-tab-sl-infra" class="cost-tab-panel" style="display:none">
-
-          <!-- KPI row -->
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:12px">
-            <div style="padding:12px 16px;border-right:1px solid var(--border)">
-              <div style="font-size:11px;color:var(--text-3);margin-bottom:3px">Total Monthly</div>
-              <div style="font-size:18px;font-weight:600;color:var(--text)" id="sl-kpi-total">฿0</div>
-              <div style="font-size:11px;color:var(--text-3)">License + Infra</div>
-            </div>
-            <div style="padding:12px 16px;border-right:1px solid var(--border)">
-              <div style="font-size:11px;color:var(--text-3);margin-bottom:3px">License</div>
-              <div style="font-size:18px;font-weight:600;color:var(--blue)" id="sl-kpi-license">฿0</div>
-            </div>
-            <div style="padding:12px 16px">
-              <div style="font-size:11px;color:var(--text-3);margin-bottom:3px">Infra</div>
-              <div style="font-size:18px;font-weight:600;color:var(--amber)" id="sl-kpi-infra">฿0</div>
-            </div>
-          </div>
-
-          <!-- Sidebar nav + content -->
-          <div style="display:grid;grid-template-columns:160px 1fr;border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
-
-            <!-- Left nav -->
-            <div style="border-right:1px solid var(--border);background:var(--bg)">
-              <div id="sl-nav-bva" class="sl-nav-item active" onclick="switchSLNav('bva',this)"
-                style="padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid var(--blue);background:var(--blue-50)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#185FA5" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-                <span style="font-size:12px;font-weight:600;color:var(--blue)">Budget vs Actual</span>
-              </div>
-              <div id="sl-nav-forecast" class="sl-nav-item" onclick="switchSLNav('forecast',this)"
-                style="padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid transparent">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-                <span style="font-size:12px;color:var(--text-2)">Forecast</span>
-              </div>
-              <div id="sl-nav-infra" class="sl-nav-item" onclick="switchSLNav('infra',this)"
-                style="padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid transparent">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6" y2="6"/><line x1="6" y1="18" x2="6" y2="18"/></svg>
-                <span style="font-size:12px;color:var(--text-2)">Infra Cost</span>
-              </div>
-              <div id="sl-nav-budgetsettings" class="sl-nav-item" onclick="switchSLNav('budgetsettings',this)"
-                style="padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid transparent">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                <span style="font-size:12px;color:var(--text-2)">Budget Settings</span>
-              </div>
-            </div>
-
-            <!-- Content panels -->
-            <div>
-
-              <!-- Forecast vs Actual -->
-              <div id="sl-panel-forecast" style="display:none;padding:0">
-                <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-                  <span style="font-size:11px;color:var(--text-3)">Forecast = avg actual (SL memo) · คลิก Actual cell เพื่อดู memo</span>
-                  <div style="display:flex;gap:8px;align-items:center">
-                    <select id="sl-forecast-proj" onchange="renderBudgetSLInfra()" style="font-size:11px;padding:3px 8px">
-                      <option value="all">ทุกโปรเจค</option>
-                    </select>
-                    <select id="sl-forecast-months" onchange="renderBudgetSLInfra()" style="font-size:11px;padding:3px 8px">
-                      <option value="6">6 เดือน</option>
-                      <option value="12">12 เดือน</option>
-                    </select>
-                  </div>
-                </div>
-                <div style="overflow-x:auto">
-                  <table class="hist-table">
-                    <thead id="sl-forecast-thead"></thead>
-                    <tbody id="sl-forecast-body"></tbody>
-                  </table>
-                </div>
-                <!-- Memo breakdown panel -->
-                <div id="sl-memo-breakdown" style="display:none;border-top:1px solid var(--border)">
-                  <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--bg)">
-                    <div style="display:flex;align-items:center;gap:8px">
-                      <span style="font-size:12px;font-weight:600">Memo breakdown</span>
-                      <span id="sl-breakdown-title" style="font-size:11px;background:var(--blue-50);color:var(--blue);padding:2px 8px;border-radius:4px"></span>
-                    </div>
-                    <button class="btn-sm" onclick="document.getElementById('sl-memo-breakdown').style.display='none'" style="font-size:11px;padding:3px 8px">✕</button>
-                  </div>
-                  <table class="hist-table">
-                    <thead><tr>
-                      <th>Memo No</th><th>Software</th><th>฿/เดือน</th><th>Qty</th><th>Monthly (฿)</th>
-                    </tr></thead>
-                    <tbody id="sl-breakdown-body"></tbody>
-                  </table>
-                </div>
-              </div>
-
-              <!-- Infra Cost Matrix -->
-              <div id="sl-panel-infra" style="display:none;padding:0">
-                <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:flex-end;gap:8px">
-                  <label style="cursor:pointer">
-                    <input type="file" id="infra-bulk-input" accept=".xlsx,.xls" style="display:none" onchange="handleInfraBulkUpload(event)">
-                    <span class="btn-sm" style="font-size:11px;padding:4px 10px;display:inline-block">⬆ Bulk Upload</span>
-                  </label>
-                  <button class="btn-primary" onclick="openInfraModal()" style="font-size:11px;padding:4px 12px">+ Add Infra Cost</button>
-                </div>
-                <div style="overflow-x:auto">
-                  <table class="hist-table"><thead id="sl-infra-thead"></thead><tbody id="sl-infra-body"></tbody></table>
-                </div>
-              </div>
-
-              <!-- Budget vs Actual panel -->
-              <div id="sl-panel-bva" style="padding:0">
-                <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-                  <span style="font-size:11px;color:var(--text-3)">Budget = Forecast avg · Actual = SL memo spend ในช่วงที่เลือก</span>
-                  <select id="sl-bva-range" onchange="renderBudgetSLInfra()" style="font-size:11px;padding:3px 8px">
-                    <option value="3">3 เดือน</option>
-                    <option value="6" selected>6 เดือน</option>
-                    <option value="12">12 เดือน</option>
-                  </select>
-                </div>
-                <!-- Summary cards -->
-                <div id="sl-bva-summary" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)"></div>
-                <!-- Per project table -->
-                <table class="hist-table">
-                  <thead><tr>
-                    <th style="padding-left:14px">Project</th>
-                    <th style="text-align:right">Budget (฿)</th>
-                    <th style="text-align:right">Actual (฿)</th>
-                    <th style="text-align:right">Remaining (฿)</th>
-                    <th>Utilization</th>
-                  </tr></thead>
-                  <tbody id="sl-bva-body"></tbody>
-                </table>
-                <div style="padding:8px 14px;background:var(--bg);font-size:11px;color:var(--text-3);display:flex;gap:16px">
-                  <span style="color:var(--green)">● &lt;90% On track</span>
-                  <span style="color:var(--amber)">● 90–100% Near limit</span>
-                  <span style="color:var(--red)">● &gt;100% Over budget</span>
-                </div>
-              </div>
-
-
-              <!-- Budget Settings panel -->
-              <div id="sl-panel-budgetsettings" style="display:none;padding:0">
-                <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-                  <div>
-                    <span style="font-size:12px;font-weight:600">Budget Settings — SL + Infra</span>
-                    <span style="font-size:11px;color:var(--text-3);margin-left:8px">ตั้งงบรายปีต่อโปรเจค ระบบคำนวณรายเดือนให้เอง</span>
-                  </div>
-                  <div style="display:flex;gap:8px;align-items:center">
-                    <select id="sl-bgt-year" onchange="renderBudgetSettings()" style="font-size:11px;padding:3px 8px">
-                      <option value="2568">2568</option>
-                      <option value="2569" selected>2569</option>
-                      <option value="2570">2570</option>
-                    </select>
-                    <button class="btn-primary" onclick="addBudgetRow()" style="font-size:11px;padding:4px 10px">+ เพิ่มโปรเจค</button>
-                  </div>
-                </div>
-                <div id="sl-budget-settings-body" style="padding:14px 16px"></div>
-              </div>
-
-            </div>
-          </div>
-        </div>
-
-        <!-- ── SUB-TAB: OTHERS (Phase 2) ── -->
-        <div id="bgt-tab-others" class="cost-tab-panel" style="display:none">
-          <div class="card" style="padding:48px;text-align:center">
-            <div style="font-size:36px;margin-bottom:12px">🚧</div>
-            <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:8px">Coming Soon — Phase 2</div>
-            <div style="font-size:13px;color:var(--text-3);max-width:400px;margin:0 auto;line-height:1.8">Budget vs Actual สำหรับ HW / INT / ENT / DEP<br>อยู่ระหว่างรอ confirm budget structure กับทีม</div>
-          </div>
-        </div>
-
-      </div>
-      <!-- ════ LICENSE ════ -->
-      <div id="view-license" class="view">
-
-        <!-- Metric cards -->
-        <div class="metric-row" style="grid-template-columns:repeat(5,1fr);margin-bottom:14px">
-          <div class="metric-card"><div class="metric-label">Active Licenses</div><div class="metric-val" id="lic-active" style="color:var(--blue)">0</div><div class="metric-sub" id="lic-active-cost"></div></div>
-          <div class="metric-card"><div class="metric-label">Expiring Soon (≤30d)</div><div class="metric-val" id="lic-expiring" style="color:var(--amber)">0</div><div class="metric-sub">ต้องต่ออายุเร็วๆ นี้</div></div>
-          <div class="metric-card"><div class="metric-label">Expired</div><div class="metric-val" id="lic-expired" style="color:var(--red)">0</div><div class="metric-sub">หมดอายุแล้ว</div></div>
-          <div class="metric-card"><div class="metric-label">ค่าใช้จ่าย/เดือน</div><div class="metric-val" id="lic-monthly" style="font-size:18px;margin-top:4px">฿0</div><div class="metric-sub">รวมทุก active</div></div>
-          <div class="metric-card"><div class="metric-label">ค่าใช้จ่าย/ปี</div><div class="metric-val" id="lic-annual" style="font-size:18px;margin-top:4px">฿0</div><div class="metric-sub" id="lic-renewal-3m"></div></div>
-        </div>
-
-
-        <!-- Search & Filters + Add button -->
-        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
-          <input type="text" id="lic-search" placeholder="🔍 ค้นหา Software, Project, Owner..."
-            style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px;outline:none"
-            oninput="renderLicense()">
-          <select id="lic-filter-status" onchange="renderLicense()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกสถานะ</option>
-            <option value="active">Active</option>
-            <option value="expiring">Expiring (≤30d)</option>
-            <option value="expiring-7">≤ 7 วัน</option>
-            <option value="expiring-15">≤ 15 วัน</option>
-            <option value="expiring-30">≤ 30 วัน</option>
-            <option value="expired">Expired</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-          <select id="lic-filter-project" onchange="renderLicense()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกโครงการ</option>
-          </select>
-          <select id="lic-sort" onchange="renderLicense()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="expiry-asc">หมดอายุใกล้สุด</option>
-            <option value="cost-desc">ราคา มาก→น้อย</option>
-            <option value="seats-desc">Seats มาก→น้อย</option>
-            <option value="purchase-desc">ซื้อล่าสุด</option>
-          </select>
-          <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="downloadTemplate('license')" title="Download Template">⬇ Template</button>
-          <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="importBulk('license')" title="Import from Excel">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Import Excel
-          </button>
-          <button class="btn-primary" style="font-size:12px;padding:6px 14px" onclick="openLicenseModal()">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add License
-          </button>
-        </div>
-
-        <!-- Registry table -->
-        <div class="card" style="padding:0;overflow:hidden">
-          <table class="hist-table">
-            <thead><tr>
-              <th style="width:15%;padding-left:16px">Software</th>
-              <th style="width:7%">Seats</th>
-              <th style="width:9%">฿/เดือน</th>
-              <th style="width:9%">Owner</th>
-              <th style="width:8%">Department</th>
-              <th style="width:8%">โครงการ</th>
-              <th style="width:8%">วันที่ซื้อ</th>
-              <th style="width:8%">หมดอายุ</th>
-              <th style="width:9%;text-align:center">สถานะ</th>
-              <th style="width:7%;text-align:center">Source</th>
-              <th style="width:8%;text-align:center">Actions</th>
-            </tr></thead>
-            <tbody id="lic-table-body"></tbody>
-          </table>
-        </div>
-
-      </div>
-
-      <!-- License Add/Edit Modal -->
-      <div id="license-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:300;align-items:center;justify-content:center">
-        <div style="background:var(--surface);border-radius:var(--r);padding:24px;width:540px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.2)">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
-            <div style="font-size:15px;font-weight:700" id="lic-modal-title">Add License</div>
-            <button onclick="closeLicenseModal()" style="background:none;border:none;cursor:pointer;color:var(--text-3);font-size:20px">&#x2715;</button>
-          </div>
-          <input type="hidden" id="lic-edit-id">
-          <div id="lic-memo-hint" style="display:none;background:#FEF9E7;border:0.5px solid #F0C27F;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:#854F0B">
-            🔒 License นี้มาจาก SL Memo — ราคา, Seats, วันที่, และ Memo Ref แก้ไขไม่ได้ แก้ได้เฉพาะ Owner, Department, Status, และ Note
-          </div>
-          <div class="form-grid" style="margin-bottom:10px">
-            <div class="fg"><label>Software Name *</label><input type="text" id="lic-name" placeholder="เช่น Figma, GitHub Copilot"></div>
-            <div class="fg"><label>Vendor</label><input type="text" id="lic-vendor" placeholder="เช่น Adobe, Microsoft"></div>
-            <div class="fg"><label>Seats</label><input type="number" id="lic-seats" placeholder="1" min="1"></div>
-            <div class="fg"><label>ราคา/เดือน (บาท)</label><input type="number" id="lic-price" placeholder="0"></div>
-          </div>
-          <div class="form-grid" style="margin-bottom:10px">
-            <div class="fg"><label>Owner</label><input type="text" id="lic-owner" placeholder="ชื่อผู้รับผิดชอบ"></div>
-            <div class="fg"><label>Department / Team</label><input type="text" id="lic-dept" placeholder="เช่น PMO, Design Team"></div>
-            <div class="fg"><label>โครงการ</label>
-              <select id="lic-project"><option value="">— ไม่ระบุ —</option></select>
-            </div>
-            <div class="fg"><label>License Type</label>
-              <select id="lic-type-field"><option value="subscription">Subscription</option><option value="perpetual">Perpetual</option><option value="trial">Trial</option></select>
-            </div>
-          </div>
-          <div class="form-grid" style="margin-bottom:10px">
-            <div class="fg"><label>วันที่ซื้อ</label><input type="date" id="lic-purchase-date"></div>
-            <div class="fg"><label>วันหมดอายุ</label><input type="date" id="lic-expiry-date"></div>
-            <div class="fg"><label>Billing Frequency</label>
-              <select id="lic-billing"><option value="monthly">Monthly</option><option value="annual">Annual</option><option value="one-time">One-time</option></select>
-            </div>
-            <div class="fg"><label>สถานะ</label>
-              <select id="lic-status-field"><option value="active">Active</option><option value="renew-soon">Renew Soon</option><option value="cancelled">Cancelled</option></select>
-            </div>
-          </div>
-          <div class="form-grid" style="margin-bottom:16px">
-            <div class="fg"><label>Link Memo No.</label><input type="text" id="lic-memo-ref" placeholder="เช่น ORB-2605-001"></div>
-            <div class="fg"><label>หมายเหตุ</label><input type="text" id="lic-note" placeholder="รายละเอียดเพิ่มเติม"></div>
-          </div>
-          <div style="display:flex;gap:8px;justify-content:flex-end">
-            <button class="btn-ghost" onclick="closeLicenseModal()">ยกเลิก</button>
-            <button class="btn-primary" onclick="saveLicenseManual()">บันทึก</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ════ DEVICE REGISTRY ════ -->
-      <div id="view-device" class="view">
-
-        <!-- Metric cards -->
-        <div class="metric-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px">
-          <div class="metric-card"><div class="metric-label">Total Devices</div><div class="metric-val" id="dev-total" style="color:var(--blue)">0</div><div class="metric-sub" id="dev-total-sub"></div></div>
-          <div class="metric-card"><div class="metric-label">In Use</div><div class="metric-val" id="dev-inuse" style="color:var(--green)">0</div><div class="metric-sub">มีผู้ถือครองอยู่</div></div>
-          <div class="metric-card"><div class="metric-label">Warranty หมดแล้ว</div><div class="metric-val" id="dev-warranty-expired" style="color:var(--red)">0</div><div class="metric-sub">ต้องดำเนินการ</div></div>
-          <div class="metric-card"><div class="metric-label">Available</div><div class="metric-val" id="dev-available" style="color:var(--gray)">0</div><div class="metric-sub">ยังไม่มีผู้ถือ</div></div>
-        </div>
-
-        <!-- Summary tables side by side -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
-
-          <!-- Table 1: Platform × Type -->
-          <div class="card" style="padding:0;overflow:hidden">
-            <div style="padding:12px 16px 10px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600">Summary by Platform × Type</div>
-            <table class="hist-table" id="dev-summary-platform">
-              <thead><tr>
-                <th style="padding-left:16px">Platform</th>
-                <th>Mobile</th>
-                <th>Tablet</th>
-                <th>Other</th>
-                <th style="text-align:right;padding-right:16px">Total</th>
-              </tr></thead>
-              <tbody id="dev-summary-platform-body"></tbody>
-            </table>
-          </div>
-
-          <!-- Table 2: By Project -->
-          <div class="card" style="padding:0;overflow:hidden">
-            <div style="padding:12px 16px 10px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600">Summary by Project</div>
-            <table class="hist-table" id="dev-summary-project">
-              <thead><tr>
-                <th style="padding-left:16px">โครงการ</th>
-                <th>In Use</th>
-                <th>Available</th>
-                <th>Other</th>
-                <th style="text-align:right;padding-right:16px">Total</th>
-              </tr></thead>
-              <tbody id="dev-summary-project-body"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Filter row -->
-        <div class="filter-row" style="margin-bottom:10px">
-          <input type="text" id="dev-search" placeholder="🔍 ค้นหา Device, Serial, Owner..."
-            style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px;outline:none"
-            oninput="renderDevice()">
-          <select id="dev-filter-platform" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุก Platform</option>
-            <option value="ios">iOS</option>
-            <option value="android">Android</option>
-            <option value="huawei">Huawei</option>
-            <option value="windows">Windows</option>
-            <option value="other">Other</option>
-          </select>
-          <select id="dev-filter-type" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกประเภท</option>
-            <option value="mobile">Mobile Phone</option>
-            <option value="tablet">Tablet</option>
-            <option value="laptop">Laptop</option>
-            <option value="other">Other</option>
-          </select>
-          <select id="dev-filter-status" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกสถานะ</option>
-            <option value="in-use">In Use</option>
-            <option value="available">Available</option>
-            <option value="maintenance">Maintenance</option>
-            <option value="retired">Retired</option>
-          </select>
-          <select id="dev-filter-project" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกโครงการ</option>
-            <option>AOA-MP</option><option>TTB</option><option>Geo9</option>
-            <option>Release 2.1</option><option>Release 3</option>
-          </select>
-          <select id="dev-filter-company" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุก Company</option>
-            <option value="BBIK">BBIK</option>
-            <option value="Orbit Digital">Orbit Digital</option>
-          </select>
-          <button class="btn-export" onclick="exportDeviceCsv()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Export CSV
-          </button>
-          <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="downloadTemplate('device')">⬇ Template</button>
-          <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="importBulk('device')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Import Excel
-          </button>
-          <button class="btn-primary" style="margin-left:auto" onclick="openDeviceModal()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add Device
-          </button>
-        </div>
-
-        <!-- Main registry table -->
-        <div class="card" style="padding:0;overflow:hidden">
-          <table class="hist-table">
-            <thead><tr>
-              <th style="width:16%;padding-left:16px">Brand / Model</th>
-              <th style="width:8%">OS</th>
-              <th style="width:7%">Type</th>
-              <th style="width:10%">Asset IT</th>
-              <th style="width:11%">Serial No.</th>
-              <th style="width:11%">Assignee</th>
-              <th style="width:9%">Project</th>
-              <th style="width:9%;text-align:center">Status</th>
-              <th style="width:9%">Updated</th>
-              <th style="width:10%;text-align:center">Action</th>
-            </tr></thead>
-            <tbody id="dev-table-body"></tbody>
-          </table>
-          <div id="dev-load-more-footer" style="display:none"></div>
-
-          <!-- Device detail panel -->
-          <div id="dev-detail-panel" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-top:12px"></div>
-
-        </div>
-      </div>
-
-      <!-- ════ RESOURCE MANAGEMENT ════ -->
-      <div id="view-resource" class="view">
-
-        <!-- KPI cards -->
-        <div class="metric-row" id="res-kpi" style="grid-template-columns:repeat(5,1fr);margin-bottom:14px"></div>
-
-        <!-- Filter row -->
-        <div class="filter-row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px">
-          <input type="text" id="res-search" placeholder="🔍 ค้นหา Project, Position, Team..."
-            style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px"
-            oninput="renderResource()">
-          <select id="res-f-status" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกสถานะ</option>
-            <option value="pending">Pending</option>
-            <option value="sourcing">Sourcing</option>
-            <option value="interviewing">Interviewing</option>
-            <option value="offer">Offer in Progress</option>
-            <option value="document">Document Processing</option>
-            <option value="filled">Filled</option>
-            <option value="mitigated">Mitigated</option>
-            <option value="resolved">Resolved</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-          <select id="res-f-hiring" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุก Hiring Type</option>
-            <option>Permanent (Direct)</option>
-            <option>Secondment</option>
-            <option>Sub-contract</option>
-          </select>
-          <select id="res-f-project" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกโครงการ</option>
-            <option>AOA-MP</option><option>TTB</option><option>Geo9</option>
-            <option>Release 2.1</option><option>Release 3</option>
-          </select>
-          <select id="res-f-level" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุก Level</option>
-            <option>Junior</option><option>Mid</option><option>Senior</option>
-            <option>Lead</option><option>Manager</option>
-          </select>
-          <button class="btn-export" onclick="exportResourceCsv()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Export CSV
-          </button>
-          <button class="btn-primary" style="margin-left:auto" onclick="openResModal()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            New Request
-          </button>
-        </div>
-
-        <!-- Table -->
-        <div class="card" style="padding:0;overflow:hidden">
-          <table class="hist-table">
-            <thead><tr>
-              <th style="padding-left:12px;width:12%">Request ID</th>
-              <th style="width:9%">Team</th>
-              <th style="width:9%">Project</th>
-              <th style="width:12%">Position</th>
-              <th style="width:7%">Level</th>
-              <th style="width:4%;text-align:center">HC</th>
-              <th style="width:10%">Hiring Type</th>
-              <th style="width:7%">Start</th>
-              <th style="width:7%">End</th>
-              <th style="width:7%">Request Date</th>
-              <th style="width:7%">Resolved</th>
-              <th style="width:8%;text-align:center">Status</th>
-              <th style="width:11%;text-align:center">Action</th>
-            </tr></thead>
-            <tbody id="res-table-body"></tbody>
-          </table>
-        </div>
-
-        <!-- Pagination -->
-        <div id="res-pagination" style="display:flex;justify-content:space-between;align-items:center;padding:10px 4px;font-size:12px"></div>
-      </div>
-
-      <!-- ════ RESOURCE: New/Edit Modal ════ -->
-      <div id="resource-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
-        <div class="card" style="width:640px;max-width:95vw;max-height:90vh;overflow-y:auto;padding:24px;position:relative">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
-            <span id="res-modal-title" style="font-size:15px;font-weight:700">New Resource Request</span>
-            <button class="btn-sm" onclick="closeResModal()" style="padding:4px 10px">✕</button>
-          </div>
-          <input type="hidden" id="res-edit-id">
-          <div id="res-form-body"></div>
-          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px">
-            <button class="btn-ghost" onclick="closeResModal()">Cancel</button>
-            <button class="btn-primary" onclick="saveResource()">💾 Save</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ════ RESOURCE: Status Modal ════ -->
-      <div id="resource-status-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
-        <div class="card" style="width:440px;max-width:95vw;padding:24px">
-          <div style="font-size:15px;font-weight:700;margin-bottom:12px">เปลี่ยนสถานะ</div>
-          <input type="hidden" id="res-status-id">
-          <div id="res-status-current" style="margin-bottom:12px;font-size:13px"></div>
-          <div class="fg" style="margin-bottom:10px"><label>สถานะใหม่</label>
-            <select id="res-status-select" class="ri" style="width:100%"></select>
-          </div>
-          <div class="fg"><label>Remark (จำเป็นเมื่อ Cancelled)</label>
-            <textarea id="res-status-remark" class="ri" rows="2" placeholder="หมายเหตุ"></textarea>
-          </div>
-          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
-            <button class="btn-ghost" onclick="closeResStatus()">Cancel</button>
-            <button class="btn-primary" onclick="saveResStatus()">บันทึก</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ════ RESOURCE: Transfer Modal ════ -->
-      <div id="resource-transfer-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
-        <div class="card" style="width:500px;max-width:95vw;padding:24px">
-          <div style="font-size:15px;font-weight:700;margin-bottom:12px">↗ Transfer Resource</div>
-          <input type="hidden" id="res-transfer-id">
-          <div id="res-transfer-body"></div>
-          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
-            <button class="btn-ghost" onclick="closeResTransfer()">Cancel</button>
-            <button class="btn-primary" onclick="saveResTransfer()">↗ Transfer</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ════ RESOURCE: Detail Drawer ════ -->
-      <div id="resource-detail-drawer" style="position:fixed;top:0;right:0;width:420px;max-width:95vw;height:100vh;background:var(--surface);box-shadow:-4px 0 24px rgba(0,0,0,0.12);z-index:200;transform:translateX(100%);transition:transform 0.25s ease;overflow-y:auto;padding:24px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-          <span style="font-size:14px;font-weight:700">Resource Request Detail</span>
-          <button class="btn-sm" onclick="closeResDetail()" style="padding:4px 10px">✕</button>
-        </div>
-        <div id="res-detail-body"></div>
-      </div>
-
-      <!-- ════ SETTINGS ════ -->
-      <div id="view-settings" class="view"></div>
-
-    </div><!-- /content -->
-  </div><!-- /main -->
-</div><!-- /layout -->
-
-<div id="pdf-stage" class="pdf-stage" aria-hidden="true"></div>
-
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<!-- Core: shared utils, storage, navigation, PDF -->
-<script src="app.js"></script>
-<!-- Views -->
-<script src="views/create.js"></script>
-<script src="views/pending.js"></script>
-<script src="views/history.js"></script>
-<script src="views/budget.js"></script>
-<script src="views/license.js"></script>
-<script src="views/device.js"></script>
-<script src="views/bulk_import.js"></script>
-<script src="views/resource.js"></script>
-<style>
-  #resource-detail-drawer.open { transform: translateX(0); }
-  .badge-purple { background:#E9D5FF; color:#6B21A8; }
-  .badge-teal   { background:#CCFBF1; color:#115E59; }
-  .badge-yellow { background:#FEF9C3; color:#854D0E; }
-  #resource-detail-drawer.open { transform: translateX(0); }
-</style>
-<script>initApp();</script>
-
-<!-- Approve Modal -->
-<div id="approve-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:300;align-items:center;justify-content:center">
-  <div style="background:var(--surface);border-radius:var(--r);padding:24px;width:460px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,0.2)">
-    <div style="font-size:15px;font-weight:700;margin-bottom:16px">✓ Approve Memo</div>
-    <div style="background:var(--bg);border-radius:var(--r-sm);padding:12px;margin-bottom:14px;font-size:13px">
-      <div style="display:grid;grid-template-columns:80px 1fr;gap:6px">
-        <span style="color:var(--text-3);font-size:11px;font-weight:600">MEMO</span><span id="approve-memo-no" style="font-family:monospace;font-weight:600"></span>
-        <span style="color:var(--text-3);font-size:11px;font-weight:600">PROJECT</span><span id="approve-project"></span>
-        <span style="color:var(--text-3);font-size:11px;font-weight:600">AMOUNT</span><span id="approve-amount" style="font-weight:700;color:var(--blue-800)"></span>
-        <span style="color:var(--text-3);font-size:11px;font-weight:600">SUBJECT</span><span id="approve-subject" style="color:var(--text-2)"></span>
-      </div>
-    </div>
-    <div class="fg" style="margin-bottom:16px">
-      <label>Approval Note <span style="color:var(--text-3);font-weight:400">(optional)</span></label>
-      <textarea id="approve-note" placeholder="เช่น Approved via email, Reviewed in meeting..." style="min-height:60px;font-family:inherit;font-size:13px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);width:100%;resize:vertical;outline:none"></textarea>
-    </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn-ghost" onclick="closeApproveModal()">Cancel</button>
-      <button class="btn-primary" onclick="confirmApprove()" style="background:var(--green)">✓ Confirm Approve</button>
-    </div>
-  </div>
-</div>
-
-<!-- Reject Modal -->
-<div id="reject-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:300;align-items:center;justify-content:center">
-  <div style="background:var(--surface);border-radius:var(--r);padding:24px;width:460px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,0.2)">
-    <div style="font-size:15px;font-weight:700;margin-bottom:6px">✕ Reject Memo</div>
-    <div style="font-size:12px;color:var(--text-3);margin-bottom:14px">Memo: <strong id="reject-memo-no"></strong></div>
-    <div class="fg" style="margin-bottom:10px">
-      <label>เหตุผลการ Reject *</label>
-      <select id="reject-reason-select" style="font-family:inherit;font-size:13px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);width:100%;outline:none">
-        <option value="">— เลือกเหตุผล —</option>
-        <option>Budget Issue</option><option>Missing Quotation</option>
-        <option>Incorrect Information</option><option>Duplicate Request</option><option>Other</option>
-      </select>
-    </div>
-    <div class="fg" style="margin-bottom:16px">
-      <label>รายละเอียดเพิ่มเติม <span style="color:var(--text-3);font-weight:400">(optional)</span></label>
-      <textarea id="reject-comment" placeholder="อธิบายเพิ่มเติม..." style="min-height:60px;font-family:inherit;font-size:13px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);width:100%;resize:vertical;outline:none"></textarea>
-    </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn-ghost" onclick="closeRejectModal()">Cancel</button>
-      <button class="btn-reject" onclick="confirmReject()" style="padding:9px 20px;font-size:13px;font-weight:600">✕ Confirm Reject</button>
-    </div>
-  </div>
-</div>
-
-<!-- Detail Modal -->
-<div id="detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:300;align-items:center;justify-content:center">
-  <div style="background:var(--surface);border-radius:var(--r);padding:24px;width:640px;max-width:95vw;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.2)">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-      <div style="font-size:15px;font-weight:700">Memo Detail</div>
-      <button onclick="closeDetailModal()" style="background:none;border:none;cursor:pointer;color:var(--text-3);font-size:20px">&#x2715;</button>
-    </div>
-    <div id="detail-content"></div>
-    <div id="detail-actions" style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--border)"></div>
-  </div>
-</div>
-
-<!-- Device Modal -->
-<div id="device-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:200;align-items:center;justify-content:center">
-  <div style="background:var(--surface);border-radius:var(--r);padding:24px;width:560px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.2)">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
-      <div style="font-size:15px;font-weight:700;color:var(--text)" id="dev-modal-title">Add Device</div>
-      <button onclick="closeDeviceModal()" style="background:none;border:none;cursor:pointer;color:var(--text-3);font-size:20px">&#x2715;</button>
-    </div>
-    <input type="hidden" id="dev-edit-id">
-    <div class="form-grid" style="margin-bottom:10px">
-      <div class="fg"><label>Device Name *</label><input type="text" id="dev-name" placeholder="เช่น iPhone 15 Pro"></div>
-      <div class="fg"><label>Brand / Model</label><input type="text" id="dev-brand" placeholder="เช่น Apple iPhone 15 Pro"></div>
-      <div class="fg"><label>Platform *</label>
-        <select id="dev-platform">
-          <option value="ios">iOS</option>
-          <option value="android">Android</option>
-          <option value="huawei">Huawei</option>
-          <option value="windows">Windows</option>
-          <option value="other">Other</option>
+      ${d.hasBudget ? `<div style="font-size:10px;color:${d.color};margin-top:3px">${d.pct > 100 ? `เกินงบ ${money(Math.round(d.actual - d.budget))}` : d.pct >= 90 ? `เหลือ ${money(Math.round(d.budget - d.actual))} — ใกล้ limit` : `เหลือ ${money(Math.round(d.budget - d.actual))}`}</div>` : ''}
+    </div>`).join('');
+}
+
+// Stubs kept for backward compat
+function ovSetMode(m) { _ovUpdateKPIs(); _ovRenderChart(); _ovRenderBvA(); }
+function ovSetStack(s) {}
+
+
+// ══════════════════════════════════════════
+// SUB-TAB 2: SL + INFRA
+// ══════════════════════════════════════════
+function renderBudgetSLInfra() {
+  // Load fresh from Supabase then render
+  loadInfraCostsAsync().then(infraCosts => _renderBudgetSLInfraWith(infraCosts)).catch(() => _renderBudgetSLInfraWith(loadInfraCosts()));
+}
+
+function _renderBudgetSLInfraWith(infraEntries) {
+  const licByProj  = getLicenseCostByProject();
+  const infraProjs = getInfraProjects(infraEntries);
+
+  // Include Company-Wide + projects from SL memo budget sources
+  const slBudgetProjects = Object.keys(loadSLBudgets()?.[String(new Date().getFullYear()+543)] || {});
+  const memoSources = [...new Set(
+    loadMemos().filter(m=>memoStatusKey(m)==='completed'&&m.type==='sl')
+      .map(m => m.budgetSource || m.project || '(ไม่ระบุ)')
+  )];
+  const allProjects = [...new Set([
+    ...Object.keys(licByProj),
+    ...infraProjs,
+    ...slBudgetProjects,
+    ...memoSources,
+  ])].sort();
+
+  // Cost by Project table: show current monthly rate
+  // For infra: sum entries that are active this month
+  const thisMonth = infraMonthKey(new Date());
+  let totalLicense = 0, totalInfra = 0;
+  const projData = allProjects.map(proj => {
+    const lic   = licByProj[proj] || 0;
+    const infra = getInfraCostForMonth(infraEntries, proj, thisMonth);
+    totalLicense += lic;
+    totalInfra   += infra;
+    return { proj, lic, infra, total: lic + infra };
+  });
+
+  // ── KPIs ──
+  const setKpi = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = money(val); };
+  setKpi('sl-kpi-total',   totalLicense + totalInfra);
+  setKpi('sl-kpi-license', totalLicense);
+  setKpi('sl-kpi-infra',   totalInfra);
+
+  // ── Forecast vs Actual Table ──
+  _renderForecastTable(allProjects, infraEntries, licByProj);
+
+  // Cost by Project panel removed
+
+  // ── Infra Matrix ──
+  _renderInfraMatrix(infraEntries);
+
+  // ── Budget vs Actual ──
+  _renderBudgetVsActual(allProjects, infraEntries, licByProj);
+}
+
+
+// ── Parse Thai date string to JS Date ──
+function parseThaiDate(str) {
+  if(!str) return null;
+  // Try ISO first
+  const d = new Date(str);
+  if(!isNaN(d)) return d;
+  // Thai format: "27 พฤษภาคม 2569" or "26/05/69"
+  const THAI_MONTHS = {'มกราคม':0,'กุมภาพันธ์':1,'มีนาคม':2,'เมษายน':3,'พฤษภาคม':4,'มิถุนายน':5,'กรกฎาคม':6,'สิงหาคม':7,'กันยายน':8,'ตุลาคม':9,'พฤศจิกายน':10,'ธันวาคม':11};
+  const m1 = str.match(/^(\d{1,2})\s+(\S+)\s+(\d{4})$/);
+  if(m1) {
+    const mo = THAI_MONTHS[m1[2]];
+    const yr = parseInt(m1[3]) - 543; // Buddhist Era to CE
+    if(mo !== undefined && yr > 1900) return new Date(yr, mo, parseInt(m1[1]));
+  }
+  // dd/mm/yy or dd/mm/yyyy
+  const m2 = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if(m2) {
+    let yr = parseInt(m2[3]);
+    if(yr < 100) yr += 2500; // treat as Buddhist Era short
+    if(yr > 2100) yr -= 543;
+    return new Date(yr, parseInt(m2[2])-1, parseInt(m2[1]));
+  }
+  console.warn('[parseThaiDate] ไม่สามารถ parse วันที่ได้:', str, '— จะใช้ createdAt/approvedAt แทน');
+  return null;
+}
+
+
+// ════════════════════════════════════════════════════
+// SHARED HELPER — distributes SL memo amounts by month
+// proj: project name, or null for all, or 'Company-Wide' for shared
+// Respects budgetSource — auto = project, override = budgetSource
+// ════════════════════════════════════════════════════
+function getMemoBudgetSource(memo) {
+  // If PMO overrode, use that; otherwise default to memo.project
+  return memo.budgetSource || memo.project || '(ไม่ระบุ)';
+}
+
+function buildActualByMonth(proj) {
+  const approved = loadMemos().filter(m =>
+    memoStatusKey(m) === 'completed' &&
+    m.type === 'sl' &&
+    (proj === null || getMemoBudgetSource(m) === proj)
+  );
+  const result = {}; // { 'YYYY-MM': { total, memos: [] } }
+
+  approved.forEach(memo => {
+    const memoProj = memo.project || '(ไม่ระบุ)';
+    const startDate = parseThaiDate(memo.date) || parseThaiDate(memo.createdAt) || new Date();
+    const startMo = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    const slItems = memo.slItems || [];
+    const parsedItems = !slItems.length
+      ? _parseSLSectionHTML((memo.sections||[]).find(s=>s.title?.includes('Software'))?.html||'')
+      : slItems;
+
+    const addEntry = (name, price, qty, moCount) => {
+      const monthly = (price||0) * (qty||1);
+      for(let i = 0; i < moCount; i++) {
+        const d = new Date(startMo.getFullYear(), startMo.getMonth()+i, 1);
+        const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        if(!result[key]) result[key] = { total: 0, memos: [] };
+        result[key].total += monthly;
+        const ex = result[key].memos.find(x => x.memoNo === memo.memoNo && x.name === name);
+        if(ex) ex.monthly += monthly;
+        else result[key].memos.push({ memoNo: memo.memoNo, proj: memoProj, name, price, qty: qty||1, monthly });
+      }
+    };
+
+    if(!parsedItems.length) {
+      addEntry('SL รวม', (Number(memo.total)||0)/12, 1, 12);
+    } else {
+      parsedItems.forEach(item => addEntry(item.name||'SL', item.price||0, item.qty||1, item.months||12));
+    }
+  });
+  return result;
+}
+
+// Get actual spend for a project in a month range (inclusive YYYY-MM strings)
+function getActualInRange(proj, fromKey, toKey) {
+  const byMonth = buildActualByMonth(proj);
+  return Object.entries(byMonth)
+    .filter(([k]) => k >= fromKey && k <= toKey)
+    .reduce((s, [, v]) => s + v.total, 0);
+}
+
+// ── Forecast vs Actual ──
+function _renderForecastTable(allProjects, infraEntries, licByProj) {
+  const body   = document.getElementById('sl-forecast-body');
+  const thead  = document.getElementById('sl-forecast-thead');
+  if(!body || !thead) return;
+
+  // Project dropdown
+  const projSel = document.getElementById('sl-forecast-proj');
+  if(projSel && projSel.options.length <= 1) {
+    allProjects.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = opt.textContent = p;
+      projSel.appendChild(opt);
+    });
+  }
+  const selProj = projSel?.value || 'all';
+  const showProjects = selProj === 'all' ? allProjects : [selProj];
+
+  // Month range: past N + 3 future
+  const monthCount = parseInt(document.getElementById('sl-forecast-months')?.value || '6');
+  const now = new Date();
+  const months = [];
+  for(let i = monthCount - 1; i >= 0; i--) {
+    months.push(new Date(now.getFullYear(), now.getMonth() - i, 1));
+  }
+  for(let i = 1; i <= 6; i++) {
+    months.push(new Date(now.getFullYear(), now.getMonth() + i, 1));
+  }
+
+  const isFuture  = m => m > now;
+  const monthKey  = m => `${m.getFullYear()}-${String(m.getMonth()+1).padStart(2,'0')}`;
+  const monthLbl  = m => m.toLocaleString('th-TH', { month:'short', year:'2-digit' });
+
+  // Build actual per project/program per month
+  const actualByProjProg = {}; // { proj: { prog: { 'YYYY-MM': amount } } }
+  const approved = loadMemos().filter(m => memoStatusKey(m)==='completed' && m.type==='sl');
+
+  approved.forEach(memo => {
+    const proj = memo.project || '(ไม่ระบุ)';
+    const startDate = parseThaiDate(memo.date) || parseThaiDate(memo.createdAt) || new Date();
+    const startMo = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    const slItems = memo.slItems || [];
+    const parsedItems = !slItems.length
+      ? _parseSLSectionHTML((memo.sections||[]).find(s=>s.title?.includes('Software'))?.html || '')
+      : slItems;
+
+    if(!parsedItems.length) {
+      const mo = 12;
+      const monthly = (Number(memo.total)||0) / mo;
+      if(monthly > 0) {
+        const prog = 'SL รวม';
+        for(let i = 0; i < mo; i++) {
+          const d = new Date(startMo.getFullYear(), startMo.getMonth() + i, 1);
+          const key = monthKey(d);
+          if(!actualByProjProg[proj]) actualByProjProg[proj] = {};
+          if(!actualByProjProg[proj][prog]) actualByProjProg[proj][prog] = {};
+          actualByProjProg[proj][prog][key] = (actualByProjProg[proj][prog][key]||0) + monthly;
+        }
+      }
+      return;
+    }
+    parsedItems.forEach(item => {
+      const prog = item.name || 'SL';
+      const mo   = item.months || 12;
+      const monthly = (item.price||0) * (item.qty||1);
+      // Use item.startMonth if available, else fall back to memo.date
+      const itemStart = item.startMonth
+        ? new Date(item.startMonth + '-01')
+        : startMo;
+      for(let i = 0; i < mo; i++) {
+        const d = new Date(itemStart.getFullYear(), itemStart.getMonth() + i, 1);
+        const key = monthKey(d);
+        if(!actualByProjProg[proj]) actualByProjProg[proj] = {};
+        if(!actualByProjProg[proj][prog]) actualByProjProg[proj][prog] = {};
+        actualByProjProg[proj][prog][key] = (actualByProjProg[proj][prog][key]||0) + monthly;
+      }
+    });
+  });
+
+  // Build thead
+  const thBg = 'background:var(--bg)';
+  const thS  = `padding:7px 8px;font-size:10px;font-weight:600;color:var(--text-3);border-bottom:1px solid var(--border);text-align:right;white-space:nowrap`;
+  const thFS = `padding:7px 8px;font-size:10px;font-weight:600;color:#0C447C;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap;background:#EEF5FF`;
+  thead.innerHTML = `<tr>
+    <th style="${thS};text-align:left;min-width:90px">Project</th>
+    <th style="${thS};text-align:left;min-width:80px">Program</th>
+    <th style="${thS};text-align:center;min-width:60px">Type</th>
+    ${months.map(m => `<th style="${isFuture(m) ? thFS : thS}">${esc(monthLbl(m))}${isFuture(m) ? '<br><span style="font-size:9px;opacity:.7">F</span>' : ''}</th>`).join('')}
+    <th style="${thS};color:var(--blue)">Total</th>
+  </tr>`;
+
+  const tdS  = 'padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;text-align:right';
+  const tdFS = 'padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;text-align:right;background:#EEF5FF;color:#185FA5';
+  const subS = 'padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600;text-align:right;background:var(--bg)';
+  const subFS= 'padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600;text-align:right;background:#EEF5FF;color:#185FA5';
+
+  let rows = '';
+  showProjects.forEach(proj => {
+    const licProgs = actualByProjProg[proj] || {};
+    const projInfraEntries = infraEntries.filter(e => e.project === proj);
+    const infraProgNames   = [...new Set(projInfraEntries.map(e => e.program))];
+    const allProgs = [...new Set([...Object.keys(licProgs), ...infraProgNames])];
+
+    if(!allProgs.length) return;
+
+    let projTotal = 0;
+    const projMonthTotals = months.map(() => 0);
+
+    // License rows
+    Object.entries(licProgs).forEach(([prog, monthData]) => {
+      const pastVals = months.filter(m => !isFuture(m)).map(m => monthData[monthKey(m)]||0).filter(v=>v>0);
+      const progForecast = pastVals.length ? pastVals.reduce((s,v)=>s+v,0)/pastVals.length : 0;
+
+      let rowTotal = 0;
+      const cells = months.map((m, mi) => {
+        const key = monthKey(m);
+        if(isFuture(m)) {
+          const fv = progForecast;
+          rowTotal += fv; projMonthTotals[mi] += fv; projTotal += fv;
+          return `<td style="${tdFS}">${fv > 0 ? money(Math.round(fv)) : '<span style=\"color:var(--text-3)\">—</span>'}</td>`;
+        }
+        const v = monthData[key]||0;
+        rowTotal += v; projMonthTotals[mi] += v; projTotal += v;
+        if(v > 0) return `<td style="${tdS};cursor:pointer;color:var(--blue);text-decoration:underline;text-decoration-color:var(--blue)" onclick="showMemoBreakdown('${esc(proj)}','${esc(key)}')">${money(Math.round(v))}</td>`;
+        return `<td style="${tdS};color:var(--text-3)">—</td>`;
+      }).join('');
+      rows += `<tr>
+        <td style="${tdS};text-align:left;font-weight:500">${esc(proj)}</td>
+        <td style="${tdS};text-align:left">${esc(prog)}</td>
+        <td style="${tdS};text-align:center"><span style="font-size:10px;background:#E6F1FB;color:#0C447C;padding:1px 6px;border-radius:3px">License</span></td>
+        ${cells}
+        <td style="${tdS};font-weight:600;color:var(--blue)">${money(Math.round(rowTotal))}</td>
+      </tr>`;
+    });
+
+    // Infra rows — respect start/end month
+    infraProgNames.forEach(prog => {
+      let rowTotal = 0;
+      const cells = months.map((m, mi) => {
+        const key = monthKey(m);
+        const cost = projInfraEntries
+          .filter(e => e.program === prog && infraActiveInMonth(e, key))
+          .reduce((s, e) => s + (e.monthly_cost || 0), 0);
+        rowTotal += cost; projMonthTotals[mi] += cost; projTotal += cost;
+        if(cost > 0) return `<td style="${isFuture(m) ? tdFS : tdS}">${money(cost)}</td>`;
+        return `<td style="${isFuture(m) ? tdFS : tdS};color:var(--text-3)">—</td>`;
+      }).join('');
+      rows += `<tr>
+        <td style="${tdS};text-align:left;color:var(--text-3);font-size:11px">${esc(proj)}</td>
+        <td style="${tdS};text-align:left;color:var(--text-3);font-size:11px">${esc(prog)}</td>
+        <td style="${tdS};text-align:center"><span style="font-size:10px;background:#FAEEDA;color:#633806;padding:1px 6px;border-radius:3px">Infra</span></td>
+        ${cells}
+        <td style="${tdS};font-weight:600;color:var(--amber)">${money(Math.round(rowTotal))}</td>
+      </tr>`;
+    });
+
+    // Subtotal row
+    rows += `<tr style="background:var(--bg)">
+      <td style="${subS};text-align:left" colspan="2">${esc(proj)} — Subtotal</td>
+      <td style="${subS}"></td>
+      ${projMonthTotals.map((v, mi) => `<td style="${isFuture(months[mi]) ? subFS : subS}">${money(Math.round(v))}</td>`).join('')}
+      <td style="${subS};color:var(--blue)">${money(Math.round(projTotal))}</td>
+    </tr>
+    <tr style="height:6px"><td colspan="${months.length+4}" style="background:var(--color-background-tertiary,#F4F3EF)"></td></tr>`;
+  });
+
+  body.innerHTML = rows || `<tr><td colspan="${months.length+4}" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล</td></tr>`;
+}
+
+
+// ── Parse SL section HTML to extract items ──
+function _parseSLSectionHTML(html) {
+  try {
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    const rows = div.querySelectorAll('tbody tr');
+    const items = [];
+    rows.forEach(row => {
+      const cells = row.querySelectorAll('td');
+      if(cells.length < 5) return;
+      const name  = cells[1]?.textContent?.trim();
+      const price = parseFloat((cells[2]?.textContent||'').replace(/[^0-9.]/g,''))||0;
+      const months= parseInt((cells[3]?.textContent||'').replace(/[^0-9]/g,''))||12;
+      const qty   = parseInt((cells[4]?.textContent||'').replace(/[^0-9]/g,''))||1;
+      if(name && price) items.push({ name, price, months, qty });
+    });
+    return items;
+  } catch(e) { return []; }
+}
+
+// ── Memo breakdown popup ──
+function showMemoBreakdown(proj, monthKey) {
+  const approved = loadMemos().filter(m => memoStatusKey(m)==='completed' && m.type==='sl' && getMemoBudgetSource(m) === proj);
+  const [yr, mo] = monthKey.split('-').map(Number);
+  const label = new Date(yr, mo-1, 1).toLocaleString('th-TH',{month:'long',year:'2-digit'});
+
+  const items = [];
+  approved.forEach(memo => {
+    const startDate = parseThaiDate(memo.date) || parseThaiDate(memo.createdAt) || new Date();
+    const slItems = memo.slItems || [];
+    if(!slItems.length) {
+      // Try parse from sections HTML
+      const slSection = (memo.sections||[]).find(s => s.title && s.title.includes('Software'));
+      const parsedItems = slSection ? _parseSLSectionHTML(slSection.html) : [];
+      const moCount = parsedItems.length ? (parsedItems[0].months||12) : 12;
+      const endMo = new Date(startDate.getFullYear(), startDate.getMonth() + moCount, 1);
+      const target = new Date(yr, mo-1, 1);
+      const startMo = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+      if(target >= startMo && target < endMo) {
+        if(parsedItems.length) {
+          parsedItems.forEach(item => {
+            items.push({ memoNo: memo.memoNo, name: item.name, price: item.price, qty: item.qty, monthly: item.price * item.qty });
+          });
+        } else {
+          items.push({ memoNo: memo.memoNo, name: 'SL รวม', monthly: (Number(memo.total)||0)/moCount });
+        }
+      }
+      return;
+    }
+    slItems.forEach(item => {
+      const endMo = new Date(startDate.getFullYear(), startDate.getMonth()+(item.months||12), 1);
+      const target = new Date(yr, mo-1, 1);
+      const startMo2 = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+      if(target >= startMo2 && target < endMo) {
+        items.push({ memoNo: memo.memoNo, name: item.name||'-', price: item.price, qty: item.qty||1, monthly: (item.price||0)*(item.qty||1) });
+      }
+    });
+  });
+
+  const panel = document.getElementById('sl-memo-breakdown');
+  const title = document.getElementById('sl-breakdown-title');
+  if(!panel || !title) return;
+
+  title.textContent = `${proj} · ${label}`;
+  const tbody = document.getElementById('sl-breakdown-body');
+  const total = items.reduce((s,i)=>s+i.monthly,0);
+
+  tbody.innerHTML = !items.length
+    ? `<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--text-3)">ไม่มี SL memo ในเดือนนี้</td></tr>`
+    : items.map(i => `<tr>
+        <td style="padding:7px 12px;border-bottom:1px solid var(--border);color:var(--blue);font-weight:500">${esc(i.memoNo)}</td>
+        <td style="padding:7px 12px;border-bottom:1px solid var(--border)">${esc(i.name)}</td>
+        <td style="padding:7px 12px;border-bottom:1px solid var(--border);text-align:right">${i.price ? money(i.price) : '—'}</td>
+        <td style="padding:7px 12px;border-bottom:1px solid var(--border);text-align:right">${i.qty || '—'}</td>
+        <td style="padding:7px 12px;border-bottom:1px solid var(--border);text-align:right;font-weight:500">${money(i.monthly)}</td>
+      </tr>`).join('')
+    + `<tr style="background:var(--bg)"><td colspan="4" style="padding:7px 12px;font-weight:600">Total</td><td style="padding:7px 12px;text-align:right;font-weight:600;color:var(--blue)">${money(total)}</td></tr>`;
+
+  panel.style.display = '';
+  panel.scrollIntoView({ behavior:'smooth', block:'nearest' });
+}
+
+
+// ── Infra Matrix ──
+function _renderInfraMatrix(infraEntries) {
+  const infraThead = document.getElementById('sl-infra-thead');
+  const infraBody  = document.getElementById('sl-infra-body');
+  if(!infraThead || !infraBody) return;
+
+  if(!infraEntries.length) {
+    infraThead.innerHTML = '';
+    infraBody.innerHTML  = `<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล Infra — กด "+ Add Infra Cost" เพื่อเพิ่ม</td></tr>`;
+    return;
+  }
+
+  const thS = 'padding:8px 12px;font-size:11px;font-weight:600;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap';
+  const thR = thS + ';text-align:right';
+  infraThead.innerHTML = `<tr>
+    <th style="${thS}">Project</th>
+    <th style="${thS}">Program</th>
+    <th style="${thR}">Monthly Cost</th>
+    <th style="${thS}">Start</th>
+    <th style="${thS}">End</th>
+    <th style="${thS}">Actions</th>
+  </tr>`;
+
+  const tdS = 'padding:7px 12px;border-bottom:1px solid var(--border);font-size:12px';
+  const tdR = tdS + ';text-align:right';
+  infraBody.innerHTML = infraEntries.map(entry => `<tr>
+    <td style="${tdS};font-weight:500">${esc(entry.project)}</td>
+    <td style="${tdS}">${esc(entry.program)}</td>
+    <td style="${tdR};font-weight:600">${money(entry.monthly_cost)}</td>
+    <td style="${tdS};color:var(--text-2)">${entry.start_month || '—'}</td>
+    <td style="${tdS};color:var(--text-2)">${entry.end_month || 'ongoing'}</td>
+    <td style="${tdS};white-space:nowrap">
+      <button class="btn-sm" style="padding:2px 7px;font-size:11px" onclick="openInfraModal('${esc(entry.id)}')">✎</button>
+      <button class="btn-sm" style="padding:2px 7px;font-size:11px;color:var(--red)" onclick="deleteInfraEntry('${esc(entry.id)}')">✕</button>
+    </td>
+  </tr>`).join('');
+}
+
+// ══════════════════════════════════════════
+// INFRA MODAL — Add / Edit entry
+// ══════════════════════════════════════════
+function openInfraModal(entryId) {
+  const s = typeof loadSettings === 'function' ? loadSettings() : null;
+  const projects = s?.projects || ['AOA-MP','TTB','Geo9','Release 2.1','Release 3'];
+  const entry = entryId ? loadInfraCosts().find(e => e.id === entryId) : null;
+
+  document.getElementById('infra-modal').style.display = 'flex';
+  document.getElementById('infra-form').innerHTML = `
+    <input type="hidden" id="inf-entry-id" value="${esc(entry?.id||'')}">
+    <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px">
+      <div class="fg"><label>Project *</label>
+        <select id="inf-project" class="ri">
+          <option value="">— เลือกโครงการ —</option>
+          ${projects.map(p=>`<option value="${esc(p)}" ${p===(entry?.project||'')?'selected':''}>${esc(p)}</option>`).join('')}
         </select>
       </div>
-      <div class="fg"><label>Type *</label>
-        <select id="dev-type">
-          <option value="mobile">Mobile Phone</option>
-          <option value="tablet">Tablet</option>
-          <option value="laptop">Laptop</option>
-          <option value="other">Other</option>
-        </select>
+      <div class="fg"><label>Program *</label>
+        <input id="inf-program" class="ri" placeholder="เช่น AWS, DataDog" value="${esc(entry?.program||'')}">
       </div>
-    </div>
-    <div class="form-grid" style="margin-bottom:10px">
-      <div class="fg"><label>IT Asset ID</label><input type="text" id="dev-asset" placeholder="เช่น OD-001"></div>
-      <div class="fg"><label>Asset ACC</label><input type="text" id="dev-asset-acc" placeholder="เช่น ACC-001"></div>
-      <div class="fg"><label>Serial Number</label><input type="text" id="dev-serial" placeholder="S/N หรือ IMEI"></div>
-      <div class="fg"><label>QTY</label><input type="number" id="dev-qty" min="1" value="1"></div>
-      <div class="fg"><label>OS Version</label><input type="text" id="dev-os-version" placeholder="เช่น iOS 17.4.1"></div>
-      <div class="fg"><label>Company</label>
-        <select id="dev-company">
-          <option value="">— ไม่ระบุ —</option>
-          <option value="BBIK">BBIK</option>
-          <option value="Orbit Digital">Orbit Digital</option>
-        </select>
+      <div class="fg"><label>Monthly Cost (THB) *</label>
+        <input id="inf-monthly" class="ri" type="number" min="0" placeholder="0" value="${entry?.monthly_cost||''}">
       </div>
-      <div class="fg"><label>โครงการ</label>
-        <select id="dev-project">
-          <option value="">— ไม่ระบุ —</option>
-          <option>AOA-MP</option><option>TTB</option><option>Geo9</option>
-          <option>Release 2.1</option><option>Release 3</option>
-        </select>
+      <div class="fg"></div>
+      <div class="fg"><label>Start Month (YYYY-MM)</label>
+        <input id="inf-start" class="ri" type="month" value="${entry?.start_month||''}">
       </div>
-    </div>
-    <div class="form-grid" style="margin-bottom:10px">
-      <div class="fg"><label>Assignee</label><input type="text" id="dev-owner" placeholder="ชื่อ-นามสกุล"></div>
-      <div class="fg"><label>Position</label><input type="text" id="dev-position" placeholder="เช่น PMO, Developer"></div>
-      <div class="fg"><label>QA Owner</label><input type="text" id="dev-qa-owner" placeholder="เช่น Best IT"></div>
-      <div class="fg"><label>วันที่รับอุปกรณ์</label><input type="date" id="dev-assigned-date"></div>
-      <div class="fg"><label>Return Date</label><input type="date" id="dev-return-date"></div>
-      <div class="fg"><label>Link HW Memo</label><input type="text" id="dev-memo-ref" placeholder="เช่น ORB-2605-004"></div>
-    </div>
-    <div class="form-grid" style="margin-bottom:10px">
-      <div class="fg"><label>Warranty Expiry</label><input type="date" id="dev-warranty"></div>
-      <div class="fg"><label>สภาพ (Condition)</label><select id="dev-condition"><option value="new">New</option><option value="good">Good</option><option value="fair">Fair</option><option value="poor">Poor</option></select></div>
-      <div class="fg"><label>สถานะ</label><select id="dev-status"><option value="in-use">In Use</option><option value="available">Available</option><option value="maintenance">Maintenance</option><option value="retired">Retired</option></select></div>
-    </div>
-    <div class="fg" style="margin-bottom:16px">
-      <label>หมายเหตุ</label>
-      <textarea id="dev-note" placeholder="รายละเอียดเพิ่มเติม..." style="min-height:52px"></textarea>
-      <div class="fg"><label>Device Photo</label>
-        <input type="file" id="dev-photo-input" accept="image/*" style="font-size:12px">
-        <img id="dev-photo-preview" src="" style="display:none;width:80px;height:80px;object-fit:cover;border-radius:var(--r-sm);margin-top:6px;border:1px solid var(--border)">
+      <div class="fg"><label>End Month (YYYY-MM) — ว่างไว้ = ongoing</label>
+        <input id="inf-end" class="ri" type="month" value="${entry?.end_month||''}">
       </div>
-    </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn-ghost" onclick="closeDeviceModal()">ยกเลิก</button>
-      <button class="btn-primary" onclick="saveDevice()">บันทึก</button>
-    </div>
-  </div>
-</div>
-
-<style>
-.pend-tab-btn.active { background:var(--surface)!important;color:var(--blue)!important;font-weight:600!important;box-shadow:0 1px 3px rgba(0,0,0,0.08); }
-</style>
-<!-- Bulk Account Upload Modal -->
-<div id="bulk-acct-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
-  <div class="card" style="width:520px;max-width:95vw;padding:24px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <span style="font-size:15px;font-weight:700">Bulk Upload Account</span>
-      <button class="btn-sm" onclick="closeBulkAcctModal()" style="padding:4px 10px">✕</button>
-    </div>
-    <p style="font-size:12px;color:var(--text-2);margin-bottom:12px">วาง email 1 บรรทัดต่อ 1 account — ค่า Col จะถูกเติมจาก dropdown ที่ตั้งไว้</p>
-    <textarea id="bulk-acct-input" class="ri" style="width:100%;height:160px;resize:vertical;font-family:inherit;font-size:12px" placeholder="email1@orbitdigital.co.th&#10;email2@orbitdigital.co.th&#10;..."></textarea>
-    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
-      <button class="btn-ghost" onclick="closeBulkAcctModal()">ยกเลิก</button>
-      <button class="btn-primary" onclick="saveBulkAcct()">✓ เพิ่ม Account</button>
-    </div>
-  </div>
-</div>
-<!-- Bulk Name Upload Modal -->
-<div id="bulk-name-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
-  <div class="card" style="width:500px;max-width:95vw;padding:24px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <span style="font-size:15px;font-weight:700">Bulk Upload รายชื่อ</span>
-      <button class="btn-sm" onclick="closeBulkNameModal()" style="padding:4px 10px">✕</button>
-    </div>
-    <p style="font-size:12px;color:var(--text-2);margin-bottom:12px">วางรายชื่อได้เลย — 1 บรรทัด ต่อ 1 คน เช่น<br><code style="background:var(--bg);padding:2px 6px;border-radius:4px;font-size:11px">นาย สมชาย ใจดี ตำแหน่ง Developer</code></p>
-    <textarea id="bulk-name-input" class="ri" style="width:100%;height:160px;resize:vertical;font-family:inherit;font-size:12px" placeholder="วางรายชื่อที่นี่...&#10;นาย สมชาย ใจดี Developer&#10;นาง สมหญิง รักงาน QA&#10;..."></textarea>
-    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
-      <button class="btn-ghost" onclick="closeBulkNameModal()">ยกเลิก</button>
-      <button class="btn-primary" onclick="saveBulkNames()">✓ เพิ่มรายชื่อ</button>
-    </div>
-  </div>
-</div>
-
-<script>
-function toggleAccountMenu() {
-  const m = document.getElementById('account-menu');
-  m.style.display = m.style.display === 'none' ? 'block' : 'none';
+    </div>`;
 }
-function switchAccount(name, role, initials) {
-  document.getElementById('sb-uname').textContent = name;
-  document.getElementById('sb-urole').textContent = role;
-  document.getElementById('sb-avatar').textContent = initials;
-  document.getElementById('account-menu').style.display = 'none';
-  renderPendingMemos();
+
+function closeInfraModal() { document.getElementById('infra-modal').style.display = 'none'; }
+
+function deleteInfraEntry(id) {
+  if(!confirm('ลบรายการนี้?')) return;
+  deleteInfraEntryAsync(id).catch(e => console.warn('Supabase infra delete failed', e));
+  renderBudgetSLInfra();
 }
-document.addEventListener('click', e => {
-  if(!document.getElementById('sb-user-btn')?.contains(e.target))
-    document.getElementById('account-menu').style.display = 'none';
-});
-</script>
-<input type="file" id="bulk-import-input" accept=".xlsx,.xls" style="display:none" onchange="handleBulkImport(event)">
 
-      <!-- Cost: Infra Input Modal -->
-      <div id="infra-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
-        <div class="card" style="width:500px;max-width:95vw;padding:24px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-            <span style="font-size:15px;font-weight:700">Add / Edit Infra Cost</span>
-            <button class="btn-sm" onclick="closeInfraModal()" style="padding:4px 10px">✕</button>
-          </div>
-          <div id="infra-form"></div>
-          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
-            <button class="btn-ghost" onclick="closeInfraModal()">Cancel</button>
-            <button class="btn-primary" onclick="saveInfraCost()">💾 Save</button>
-          </div>
+function saveInfraCost() {
+  const project = document.getElementById('inf-project')?.value;
+  const program = document.getElementById('inf-program')?.value?.trim();
+  const monthly = parseFloat(document.getElementById('inf-monthly')?.value)||0;
+  const start   = document.getElementById('inf-start')?.value || null;
+  const end     = document.getElementById('inf-end')?.value   || null;
+  const editId  = document.getElementById('inf-entry-id')?.value;
+
+  if(!project) { alert('กรุณาเลือก Project'); return; }
+  if(!program) { alert('กรุณากรอก Program'); return; }
+  if(!monthly) { alert('กรุณากรอก Monthly Cost'); return; }
+
+  // Generate stable id; if editing reuse existing id, if new ensure uniqueness
+  let id = editId || infraEntryId(project, program);
+  if (!editId) {
+    // Avoid collision with existing entries for same project+program
+    const existing = loadInfraCosts().filter(e => e.id.startsWith(infraEntryId(project, program)));
+    if (existing.length > 0) id = `${infraEntryId(project, program)}_${existing.length + 1}`;
+  }
+
+  const entry = { id, project, program, monthly_cost: monthly, start_month: start, end_month: end };
+
+  saveInfraEntryAsync(entry).catch(e => console.warn('Supabase infra save failed', e));
+  closeInfraModal();
+  renderBudgetSLInfra();
+}
+
+// ── Infra Bulk Upload ──
+function handleInfraBulkUpload(event) {
+  const file = event.target.files?.[0];
+  if(!file) return;
+  if(typeof XLSX === 'undefined') { alert('ไม่พบ SheetJS library'); return; }
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb   = XLSX.read(e.target.result, { type:'binary' });
+      const ws   = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval:'' });
+
+      const costs = loadInfraCosts();
+      let added = 0;
+      const currentEntries = loadInfraCosts();
+      rows.forEach(row => {
+        const proj  = String(row['Project']||row['project']||'').trim();
+        const prog  = String(row['Program']||row['program']||row['Program Name']||'').trim();
+        const amt   = parseFloat(row['Monthly Cost']||row['monthly_cost']||row['Cost']||0)||0;
+        const start = String(row['Start Month']||row['start_month']||'').trim() || null;
+        const end   = String(row['End Month']||row['end_month']||'').trim() || null;
+        if(!proj || !prog || !amt) return;
+        const id = infraEntryId(proj, prog);
+        currentEntries.push({ id, project: proj, program: prog, monthly_cost: amt, start_month: start, end_month: end });
+        added++;
+      });
+
+      storeInfraCosts(currentEntries);
+      _infraCache = null;
+      // Push all new entries to Supabase
+      Promise.all(currentEntries.slice(-added).map(e => saveInfraEntryAsync(e))).catch(e => console.warn('Supabase bulk save failed', e));
+      renderBudgetSLInfra();
+      alert(`✓ Import Infra สำเร็จ — อัปเดต ${added} รายการ`);
+    } catch(err) {
+      alert('เกิดข้อผิดพลาด: ' + err.message);
+    }
+  };
+  reader.readAsBinaryString(file);
+  event.target.value = '';
+}
+
+// ── Budget vs Actual ──
+function _renderBudgetVsActual(allProjects, infraEntries, licByProj) {
+  const summary = document.getElementById('sl-bva-summary');
+  const body    = document.getElementById('sl-bva-body');
+  if(!body) return;
+
+  const rangeVal  = parseInt(document.getElementById('sl-bva-range')?.value || '6');
+  const now       = new Date();
+  const cutoff    = new Date(now.getFullYear(), now.getMonth() - rangeVal, 1);
+
+  const monthKey  = m => `${m.getFullYear()}-${String(m.getMonth()+1).padStart(2,'0')}`;
+  const months    = [];
+  for(let i = rangeVal - 1; i >= 0; i--) months.push(new Date(now.getFullYear(), now.getMonth() - i, 1));
+
+  // Build actual per project from SL memos
+  const approved = loadMemos().filter(m => memoStatusKey(m)==='completed' && m.type==='sl');
+  const actualByProj = {};
+  approved.forEach(memo => {
+    const proj = memo.project || '(ไม่ระบุ)';
+    const startDate = parseThaiDate(memo.date) || parseThaiDate(memo.createdAt) || new Date();
+    const startMo = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    const slItems = memo.slItems || [];
+    const parsedItems = !slItems.length
+      ? _parseSLSectionHTML((memo.sections||[]).find(s=>s.title?.includes('Software'))?.html||'')
+      : slItems;
+
+    const processItem = (monthly, moCount, itemStartMo) => {
+      for(let i = 0; i < moCount; i++) {
+        const d = new Date(itemStartMo.getFullYear(), itemStartMo.getMonth()+i, 1);
+        if(d >= cutoff && d <= now) {
+          if(!actualByProj[proj]) actualByProj[proj] = 0;
+          actualByProj[proj] += monthly;
+        }
+      }
+    };
+    if(!parsedItems.length) { processItem((Number(memo.total)||0)/12, 12, startMo); }
+    else parsedItems.forEach(item => {
+      const itemStart = item.startMonth ? new Date(item.startMonth + '-01') : startMo;
+      processItem((item.price||0)*(item.qty||1), item.months||12, itemStart);
+    });
+  });
+
+  // Budget per project — from Budget Settings (annual ÷ 12 × range)
+  const currentYear = String(new Date().getFullYear() + 543); // Thai Buddhist year
+  const slBudgets   = loadSLBudgets()?.[currentYear] || {};
+  const projData = allProjects.map(proj => {
+    // Infra: sum monthly costs for entries active within the range
+    const rangeFrom = infraMonthKey(new Date(now.getFullYear(), now.getMonth() - rangeVal, 1));
+    const rangeTo   = infraMonthKey(now);
+    const infraActual = infraEntries
+      .filter(e => e.project === proj)
+      .reduce((s, e) => s + (e.monthly_cost || 0) * infraOverlapMonths(e.start_month, e.end_month, rangeFrom, rangeTo), 0);
+
+    // Budget: same entries but projected forward rangeVal months from today
+    const budgetFrom = infraMonthKey(now);
+    const budgetTo   = infraMonthKey(new Date(now.getFullYear(), now.getMonth() + rangeVal - 1, 1));
+    const infraBudget = infraEntries
+      .filter(e => e.project === proj)
+      .reduce((s, e) => s + (e.monthly_cost || 0) * infraOverlapMonths(e.start_month, e.end_month, budgetFrom, budgetTo), 0);
+
+    // Use Budget Settings if set — if not, budget = null (no budget configured)
+    const annualBgt  = slBudgets[proj] || 0;
+    const licMonthly = annualBgt > 0 ? annualBgt / 12 : 0;
+    const budget     = annualBgt > 0 ? (licMonthly * rangeVal) + infraBudget : null;
+    const actual     = (actualByProj[proj]||0) + infraActual;
+    const hasBudget  = budget !== null;
+    const pct        = hasBudget && budget > 0 ? Math.round(actual/budget*100) : null;
+    const color      = pct === null ? 'var(--text-3)' : pct > 100 ? 'var(--red)' : pct >= 90 ? 'var(--amber)' : 'var(--green)';
+    const barW       = pct !== null ? Math.min(pct, 100) : 0;
+
+    return { proj, budget, actual, remaining: hasBudget ? budget-actual : null, pct, color, barW, hasBudget };
+  // Show row if has actual spend OR has budget set
+  }).filter(d => d.actual > 0 || d.hasBudget);
+
+  const totalBudget  = projData.reduce((s,d)=>s+d.budget,0);
+  const totalActual  = projData.reduce((s,d)=>s+d.actual,0);
+  const totalPct     = totalBudget > 0 ? Math.round(totalActual/totalBudget*100) : 0;
+  const totalColor   = totalPct > 100 ? 'var(--red)' : totalPct >= 90 ? 'var(--amber)' : 'var(--green)';
+
+  // Summary cards
+  if(summary) summary.innerHTML = `
+    <div style="background:var(--bg);border-radius:var(--r-sm);padding:10px 12px">
+      <div style="font-size:11px;color:var(--text-3);margin-bottom:3px">Budget (Annual Settings)</div>
+      <div style="font-size:18px;font-weight:600">${money(Math.round(totalBudget))}</div>
+      <div style="font-size:11px;color:var(--text-3)">${rangeVal} เดือน รวม</div>
+    </div>
+    <div style="background:var(--bg);border-radius:var(--r-sm);padding:10px 12px">
+      <div style="font-size:11px;color:var(--text-3);margin-bottom:3px">Actual Spend</div>
+      <div style="font-size:18px;font-weight:600;color:var(--blue)">${money(Math.round(totalActual))}</div>
+      <div style="font-size:11px;color:var(--text-3)">SL memo + Infra</div>
+    </div>
+    <div style="background:${totalPct>100?'var(--red-50)':totalPct>=90?'var(--amber-50)':'var(--green-50)'};border-radius:var(--r-sm);padding:10px 12px">
+      <div style="font-size:11px;color:${totalColor};margin-bottom:3px">Remaining</div>
+      <div style="font-size:18px;font-weight:600;color:${totalColor}">${money(Math.round(totalBudget-totalActual))}</div>
+      <div style="font-size:11px;color:${totalColor}">${totalPct}% utilized</div>
+    </div>`;
+
+  // Table rows
+  if(!projData.length) {
+    body.innerHTML = `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูลเพียงพอสำหรับ Budget vs Actual</td></tr>`;
+    return;
+  }
+
+  body.innerHTML = projData.map(d => `<tr>
+    <td style="padding:9px 14px;border-bottom:1px solid var(--border);font-weight:500">${esc(d.proj)}</td>
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border);text-align:right">${money(Math.round(d.budget))}</td>
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border);text-align:right;color:var(--blue);font-weight:500">${money(Math.round(d.actual))}</td>
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border);text-align:right;color:${d.color}">${d.remaining >= 0 ? '' : '-'}${money(Math.abs(Math.round(d.remaining)))}</td>
+    <td style="padding:9px 14px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="flex:1;background:var(--border);border-radius:4px;height:6px;overflow:hidden">
+          <div style="width:${d.barW}%;height:100%;background:${d.color};border-radius:4px"></div>
         </div>
+        <span style="font-size:11px;font-weight:500;color:${d.color};min-width:36px">${d.pct}%</span>
       </div>
+    </td>
+  </tr>`).join('');
+}
 
-      <!-- Cost: Budget Modal -->
-      <div id="budget-cost-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
-        <div class="card" style="width:480px;max-width:95vw;max-height:80vh;overflow-y:auto;padding:24px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-            <span style="font-size:15px;font-weight:700">📊 Set Annual Budget</span>
-            <button class="btn-sm" onclick="closeBudgetCostModal()" style="padding:4px 10px">✕</button>
-          </div>
-          <div id="budget-cost-form"></div>
-          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
-            <button class="btn-ghost" onclick="closeBudgetCostModal()">Cancel</button>
-            <button class="btn-primary" onclick="saveBudgetCost()">💾 Save</button>
-          </div>
-        </div>
-      </div>
-<script src="views/settings.js"></script>
+// ════════════════════════════════════════
+// BUDGET SETTINGS (Annual budget per project)
+// ════════════════════════════════════════
+const SLINF_BUDGET_KEY = 'orbit-pmo-sl-budgets-v1';
 
-      <!-- Budget Tag Modal -->
-      <div id="budget-tag-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
-        <div class="card" style="width:420px;max-width:95vw;padding:24px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-            <span style="font-size:15px;font-weight:700">Assign Budget Source</span>
-            <button class="btn-sm" onclick="closeBudgetTagModal()" style="padding:3px 8px">✕</button>
-          </div>
-          <div style="margin-bottom:14px;padding:10px 12px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border)">
-            <div style="font-size:13px;font-weight:600" id="btm-memo-no"></div>
-            <div style="font-size:11px;color:var(--text-3);margin-top:2px" id="btm-memo-detail"></div>
-          </div>
-          <div id="btm-auto-note" style="font-size:11px;margin-bottom:10px;padding:6px 10px;background:var(--bg);border-radius:var(--r-sm)"></div>
-          <div style="font-size:12px;color:var(--text-2);margin-bottom:10px">Budget นี้ตัดจาก:</div>
-          <div id="btm-options"></div>
-          <div style="display:flex;gap:8px;margin-top:16px">
-            <button id="btm-save-btn" class="btn-primary" style="flex:1">Confirm</button>
-            <button class="btn-ghost" onclick="closeBudgetTagModal()">Cancel</button>
-          </div>
-        </div>
-      </div>
+function loadSLBudgets() {
+  try { return JSON.parse(localStorage.getItem(SLINF_BUDGET_KEY)||'{}'); }
+  catch(e) { return {}; }
+}
+function storeSLBudgets(d) {
+  try { localStorage.setItem(SLINF_BUDGET_KEY, JSON.stringify(d)); } catch(e) {}
+}
+function getSLBudgetForProject(proj, year) {
+  const d = loadSLBudgets();
+  return d[year]?.[proj] || 0;
+}
 
-</body>
-</html>
+function renderBudgetSettings() {
+  const body = document.getElementById('sl-budget-settings-body');
+  if(!body) return;
+  const year = document.getElementById('sl-bgt-year')?.value || '2569';
+  const budgets = loadSLBudgets();
+  const yearData = budgets[year] || {};
+
+  const s = typeof loadSettings === 'function' ? loadSettings() : null;
+  // Combine: settings projects + projects from actual memos + Company-Wide + already budgeted
+  const memoProjects = [...new Set(
+    loadMemos()
+      .filter(m => m.type === 'sl' && memoStatusKey(m) === 'completed')
+      .map(m => m.project || '(ไม่ระบุ)')
+      .filter(Boolean)
+  )];
+  const projects = [...new Set([
+    ...(s?.projects || []),
+    ...memoProjects,
+    'Company-Wide',
+    ...Object.keys(yearData)
+  ])].filter(p => p && p !== '(ไม่ระบุ)');
+
+  if(!projects.length) {
+    body.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:12px">ยังไม่มีโปรเจค — กด "+ เพิ่มโปรเจค" หรือตั้งค่าโปรเจคใน Settings ก่อน</div>`;
+    return;
+  }
+
+  const tdS = 'padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px';
+  body.innerHTML = `
+    <table class="hist-table" style="margin-bottom:12px">
+      <thead><tr>
+        <th style="padding:8px 12px;text-align:left;font-weight:500">Project</th>
+        <th style="padding:8px 12px;text-align:left;font-weight:500">Annual Budget (฿)</th>
+        <th style="padding:8px 12px;text-align:right;font-weight:500">Monthly (คำนวณให้)</th>
+        <th style="padding:8px 12px;text-align:center;font-weight:500">Actions</th>
+      </tr></thead>
+      <tbody>
+        ${projects.map(proj => {
+          const annual = yearData[proj] || 0;
+          const monthly = annual ? Math.round(annual/12) : 0;
+          const isCompany = proj === 'Company-Wide';
+          return `<tr style="${isCompany?'background:var(--blue-50)':''}">
+            <td style="${tdS};font-weight:500">${esc(proj)}${isCompany?'<span style="font-size:10px;background:#E6F1FB;color:#0C447C;padding:1px 6px;border-radius:4px;margin-left:6px">Shared</span>':''}</td>
+            <td style="${tdS}">
+              <input type="number" id="bgt-inp-${esc(proj)}" value="${annual||''}" placeholder="0"
+                style="font-size:12px;padding:4px 8px;width:160px"
+                oninput="updateMonthlyPreview('${esc(proj)}')">
+            </td>
+            <td style="${tdS};text-align:right;color:var(--text-3)" id="bgt-mo-${esc(proj)}">${annual ? money(monthly) : '—'}</td>
+            <td style="${tdS};text-align:center">
+              <button class="btn-primary" onclick="saveBudgetRow('${esc(proj)}')" style="font-size:11px;padding:3px 10px">Save</button>
+              ${annual ? `<button class="btn-sm" onclick="clearBudgetRow('${esc(proj)}')" style="font-size:11px;padding:3px 8px;margin-left:4px;color:var(--red)">✕</button>` : ''}
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+    <div style="font-size:11px;color:var(--text-3)">* Company-Wide = งบกลาง เช่น AI tools ที่ใช้ทั้งบริษัท</div>`;
+}
+
+function updateMonthlyPreview(proj) {
+  const inp = document.getElementById('bgt-inp-' + proj);
+  const moEl = document.getElementById('bgt-mo-' + proj);
+  if(!inp || !moEl) return;
+  const annual = parseFloat(inp.value)||0;
+  moEl.textContent = annual ? money(Math.round(annual/12)) : '—';
+}
+
+function saveBudgetRow(proj) {
+  const inp = document.getElementById('bgt-inp-' + proj);
+  const year = document.getElementById('sl-bgt-year')?.value || '2569';
+  const annual = parseFloat(inp?.value)||0;
+  const budgets = loadSLBudgets();
+  if(!budgets[year]) budgets[year] = {};
+  if(annual > 0) budgets[year][proj] = annual;
+  else delete budgets[year][proj];
+  storeSLBudgets(budgets);
+  renderBudgetSettings();
+  // refresh BvA if visible
+  if(document.getElementById('sl-panel-bva')?.style.display !== 'none') renderBudgetSLInfra();
+}
+
+function clearBudgetRow(proj) {
+  if(!confirm(`ลบงบประมาณของ "${proj}" ออก?`)) return;
+  const year = document.getElementById('sl-bgt-year')?.value || '2569';
+  const budgets = loadSLBudgets();
+  if(budgets[year]) delete budgets[year][proj];
+  storeSLBudgets(budgets);
+  renderBudgetSettings();
+}
+
+function addBudgetRow() {
+  const proj = prompt('ชื่อโปรเจค หรือ "Company-Wide":');
+  if(!proj || !proj.trim()) return;
+  const year = document.getElementById('sl-bgt-year')?.value || '2569';
+  const budgets = loadSLBudgets();
+  if(!budgets[year]) budgets[year] = {};
+  if(!(proj in budgets[year])) budgets[year][proj] = 0;
+  storeSLBudgets(budgets);
+  renderBudgetSettings();
+}
+
+// ── Spending Breakdown (kept for SL+Infra tab use if needed) ──
+function _renderSpendBreakdown() {
+  const thead = document.getElementById('ov-breakdown-thead');
+  const tbody = document.getElementById('ov-breakdown-body');
+  if(!thead || !tbody) return;
+
+  const rangeVal = val('#ov-range') || '12';
+  const projVal  = val('#ov-project') || 'all';
+  const typeVal  = val('#ov-type') || 'all';
+  const types    = typeVal === 'all' ? ['sl','hw','int','ent','dep'] : [typeVal];
+
+  let approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
+  if(rangeVal !== 'all') {
+    const now = new Date();
+    const cutoffKey = `${new Date(now.getFullYear(), now.getMonth()-(parseInt(rangeVal)-1), 1).getFullYear()}-${String(new Date(now.getFullYear(), now.getMonth()-(parseInt(rangeVal)-1), 1).getMonth()+1).padStart(2,'0')}`;
+    approved = approved.filter(m => {
+      const d = parseThaiDate(m.date) || new Date(m.updatedAt||m.createdAt);
+      const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      return k >= cutoffKey;
+    });
+  }
+  if(projVal !== 'all') approved = approved.filter(m => (m.project||'ไม่ระบุ') === projVal);
+  approved = approved.filter(m => types.includes(m.type));
+
+  const projects = [...new Set(approved.map(m => m.project||'ไม่ระบุ'))].sort();
+
+  const thS = 'padding:7px 10px;font-size:10px;font-weight:600;color:var(--text-3);border-bottom:1px solid var(--border);text-align:right;white-space:nowrap';
+
+  if(_spendViewMode === 'cumulative') {
+    // Build per project × type
+    thead.innerHTML = `<tr>
+      <th style="${thS};text-align:left">Project</th>
+      ${types.map(t => `<th style="${thS}">${(BGT_TYPE_LABELS[t]||t).split(' ')[0]}</th>`).join('')}
+      <th style="${thS};color:var(--blue)">Total</th>
+    </tr>`;
+
+    const tdS = 'padding:7px 10px;border-bottom:1px solid var(--border);font-size:12px;text-align:right';
+    let grandTotal = 0;
+    const typeTotals = {};
+    types.forEach(t => typeTotals[t] = 0);
+
+    tbody.innerHTML = projects.map(proj => {
+      const byType = {};
+      let rowTotal = 0;
+      types.forEach(t => {
+        const amt = approved.filter(m => (m.project||'ไม่ระบุ')===proj && m.type===t)
+          .reduce((s,m) => s+(Number(m.total)||0), 0);
+        byType[t] = amt;
+        rowTotal += amt;
+        typeTotals[t] += amt;
+      });
+      grandTotal += rowTotal;
+      return `<tr>
+        <td style="${tdS};text-align:left;font-weight:500">${esc(proj)}</td>
+        ${types.map(t => `<td style="${tdS};color:${byType[t]>0?'var(--text)':'var(--text-3)'}">${byType[t]>0?money(byType[t]):'—'}</td>`).join('')}
+        <td style="${tdS};font-weight:600;color:var(--blue)">${money(rowTotal)}</td>
+      </tr>`;
+    }).join('') + `<tr style="background:var(--bg)">
+      <td style="${tdS};text-align:left;font-weight:600;color:var(--text-2)">Total</td>
+      ${types.map(t => `<td style="${tdS};font-weight:600">${typeTotals[t]>0?money(typeTotals[t]):'—'}</td>`).join('')}
+      <td style="${tdS};font-weight:700;color:var(--blue)">${money(grandTotal)}</td>
+    </tr>`;
+
+  } else {
+    // Monthly view
+    const now = new Date();
+    const months = [];
+    const n = rangeVal === 'all' ? 12 : parseInt(rangeVal);
+    for(let i = n-1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+      months.push({ key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`, label: d.toLocaleString('th-TH',{month:'short',year:'2-digit'}) });
+    }
+
+    thead.innerHTML = `<tr>
+      <th style="${thS};text-align:left">Project</th>
+      ${months.map(m => `<th style="${thS}">${esc(m.label)}</th>`).join('')}
+      <th style="${thS};color:var(--blue)">Total</th>
+    </tr>`;
+
+    const tdS = 'padding:7px 10px;border-bottom:1px solid var(--border);font-size:12px;text-align:right';
+    let grandTotal = 0;
+    const monthTotals = {};
+    months.forEach(m => monthTotals[m.key] = 0);
+
+    tbody.innerHTML = projects.map(proj => {
+      let rowTotal = 0;
+      const cells = months.map(mo => {
+        const amt = approved.filter(m => {
+          if((m.project||'ไม่ระบุ') !== proj) return false;
+          const d = parseThaiDate(m.date) || new Date(m.updatedAt||m.createdAt);
+          return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` === mo.key;
+        }).reduce((s,m) => s+(Number(m.total)||0), 0);
+        rowTotal += amt;
+        monthTotals[mo.key] += amt;
+        return `<td style="${tdS};color:${amt>0?'var(--text)':'var(--text-3)'}">${amt>0?money(amt):'—'}</td>`;
+      }).join('');
+      grandTotal += rowTotal;
+      return `<tr>
+        <td style="${tdS};text-align:left;font-weight:500">${esc(proj)}</td>
+        ${cells}
+        <td style="${tdS};font-weight:600;color:var(--blue)">${money(rowTotal)}</td>
+      </tr>`;
+    }).join('') + `<tr style="background:var(--bg)">
+      <td style="${tdS};text-align:left;font-weight:600;color:var(--text-2)">Total</td>
+      ${months.map(m => `<td style="${tdS};font-weight:600">${monthTotals[m.key]>0?money(monthTotals[m.key]):'—'}</td>`).join('')}
+      <td style="${tdS};font-weight:700;color:var(--blue)">${money(grandTotal)}</td>
+    </tr>`;
+  }
+}
