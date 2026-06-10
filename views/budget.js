@@ -512,31 +512,36 @@ function _ovRenderDonut(datasets) {
 
   const totals = datasets.map(ds => ds.data.reduce((s, v) => s + (v || 0), 0));
   const grand  = totals.reduce((s, v) => s + v, 0);
-  if (!grand) { if (legendEl) legendEl.innerHTML = ''; return; }
 
-  const visible = datasets.map((ds, i) => ({ label: ds.label, color: ds.backgroundColor, total: totals[i] })).filter(d => d.total > 0);
+  // Show ALL active datasets in legend, even if zero — only hide from chart slices if truly 0
+  const allItems = datasets.map((ds, i) => ({ label: ds.label, color: ds.backgroundColor, total: totals[i] }));
+  const chartItems = grand > 0 ? allItems.filter(d => d.total > 0) : allItems;
 
-  donutCanvas._chart = new Chart(donutCanvas, {
-    type: 'doughnut',
-    data: {
-      labels: visible.map(d => d.label),
-      datasets: [{ data: visible.map(d => d.total), backgroundColor: visible.map(d => d.color), borderWidth: 1.5, borderColor: '#fff', hoverOffset: 4 }],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false, cutout: '65%',
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${money(Math.round(ctx.raw))} (${Math.round(ctx.raw/grand*100)}%)` } },
+  if (donutCanvas._chart) { donutCanvas._chart.destroy(); donutCanvas._chart = null; }
+
+  if (grand > 0) {
+    donutCanvas._chart = new Chart(donutCanvas, {
+      type: 'doughnut',
+      data: {
+        labels: chartItems.map(d => d.label),
+        datasets: [{ data: chartItems.map(d => d.total), backgroundColor: chartItems.map(d => d.color), borderWidth: 1.5, borderColor: '#fff', hoverOffset: 4 }],
       },
-    },
-  });
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: '65%',
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${money(Math.round(ctx.raw))} (${Math.round(ctx.raw/grand*100)}%)` } },
+        },
+      },
+    });
+  }
 
   if (legendEl) {
-    legendEl.innerHTML = visible.map(d => `
+    legendEl.innerHTML = allItems.map(d => `
       <div style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text-2)">
         <span style="width:8px;height:8px;border-radius:2px;background:${d.color};flex-shrink:0"></span>
         <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.label}</span>
-        <span style="font-weight:500;color:var(--text)">${Math.round(d.total/grand*100)}%</span>
+        <span style="font-weight:500;color:${d.total > 0 ? 'var(--text)' : 'var(--text-3)'}">${grand > 0 ? Math.round(d.total/grand*100) : 0}%</span>
       </div>`).join('');
   }
 }
@@ -582,6 +587,14 @@ function _ovRenderBvA() {
   if (!rows.length) {
     container.innerHTML = `<div style="padding:20px;text-align:center;font-size:12px;color:var(--text-3)">ยังไม่มีข้อมูล — Approve SL Memo หรือตั้งงบประมาณก่อน</div>`;
     return;
+  }
+
+  // Formula note
+  const noteEl = document.getElementById('ov-bva-formula');
+  if (noteEl) {
+    noteEl.innerHTML = `
+      <span style="font-weight:500">Budget</span> = งบรายปีที่ตั้งใน Budget Settings ÷ 12 × ${numMonths} เดือน &nbsp;·&nbsp;
+      <span style="font-weight:500">Actual</span> = SL memo แต่ละรายการกระจายตาม duration (price/seat/เดือน) รวม Infra ที่ active ในช่วงนั้น`;
   }
 
   container.innerHTML = rows.map(d => `
