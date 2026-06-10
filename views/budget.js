@@ -29,40 +29,51 @@ const BGT_TYPE_LABELS = { sl:'Software License', hw:'Hardware', int:'Team Activi
 const BGT_PROJ_COLORS = ['#185FA5','#3B6D11','#854F0B','#3C3489','#A32D2D','#5F5E5A','#0F6E56','#8B4513'];
 const INFRA_KEY = 'orbit-pmo-infra-v1';
 
-// ── Infra Storage (Supabase + localStorage fallback) ──
-// DB shape: rows of { id, project, program, monthly_cost }
-// JS shape: { project: { program: monthlyCost } }   (flat object, same as before)
+// ── Infra Storage ──
+// NEW structure: array of entry objects
+// JS:  [ { id, project, program, monthly_cost, start_month, end_month } ]
+// DB:  infra_costs table with same columns (start_month, end_month as "YYYY-MM" text)
+//
+// Helper: monthKey for a Date → "YYYY-MM"
+const infraMonthKey = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+
+// Get months that overlap between an entry's [start,end] and a query [from,to]
+// All args are "YYYY-MM" strings. Returns count of overlapping months.
+function infraOverlapMonths(start, end, rangeFrom, rangeTo) {
+  const s = start || '2000-01';
+  const e = end   || '2099-12';
+  const from = s > rangeFrom ? s : rangeFrom;
+  const to   = e < rangeTo   ? e : rangeTo;
+  if (from > to) return 0;
+  const [fy, fm] = from.split('-').map(Number);
+  const [ty, tm] = to.split('-').map(Number);
+  return (ty - fy) * 12 + (tm - fm) + 1;
+}
+
+// Check if an infra entry is active in a given month ("YYYY-MM")
+function infraActiveInMonth(entry, monthStr) {
+  const s = entry.start_month || '2000-01';
+  const e = entry.end_month   || '2099-12';
+  return monthStr >= s && monthStr <= e;
+}
 
 let _infraCache = null;
 
-function infraToRows(costsObj) {
-  // Convert { proj: { prog: amount } } → array of row objects for Supabase
-  const rows = [];
-  Object.entries(costsObj).forEach(([project, programs]) => {
-    Object.entries(programs).forEach(([program, monthly_cost]) => {
-      rows.push({ id: `${project}__${program}`, project, program, monthly_cost: Number(monthly_cost) || 0 });
-    });
-  });
-  return rows;
-}
-function rowsToInfra(rows) {
-  // Convert DB rows → { proj: { prog: amount } }
-  const obj = {};
-  (rows || []).forEach(r => {
-    if (!obj[r.project]) obj[r.project] = {};
-    obj[r.project][r.program] = Number(r.monthly_cost) || 0;
-  });
-  return obj;
-}
-
+// Load: returns array of entry objects
 async function loadInfraCostsAsync() {
   if (await checkSupa()) {
     try {
       const rows = await supaFetch('infra_costs', 'GET', null, '?order=project.asc');
-      const obj = rowsToInfra(rows);
-      _infraCache = obj;
-      try { localStorage.setItem(INFRA_KEY, JSON.stringify(obj)); } catch(e) {}
-      return obj;
+      _infraCache = (rows || []).map(r => ({
+        id:           r.id,
+        project:      r.project,
+        program:      r.program,
+        monthly_cost: Number(r.monthly_cost) || 0,
+        start_month:  r.start_month || null,
+        end_month:    r.end_month   || null,
+      }));
+      try { localStorage.setItem(INFRA_KEY, JSON.stringify(_infraCache)); } catch(e) {}
+      return _infraCache;
     } catch(e) {
       console.warn('Supabase infra_costs read failed, fallback', e.message);
     }
@@ -70,56 +81,73 @@ async function loadInfraCostsAsync() {
   return loadInfraCosts();
 }
 
-async function storeInfraCostsAsync(costsObj) {
-  // Always update localStorage immediately
-  storeInfraCosts(costsObj);
-  _infraCache = costsObj;
-
-  if (!(await checkSupa())) return;
-  try {
-    // Upsert all current rows
-    const rows = infraToRows(costsObj);
-    if (rows.length) {
-      await supaFetch('infra_costs', 'POST', rows, '?on_conflict=id');
-    }
-    // Delete rows that no longer exist
-    const existingIds = rows.map(r => r.id);
-    const allRows = await supaFetch('infra_costs', 'GET', null, '?select=id');
-    const toDelete = (allRows || []).filter(r => !existingIds.includes(r.id));
-    for (const row of toDelete) {
-      await supaFetch('infra_costs', 'DELETE', null, '?id=eq.' + encodeURIComponent(row.id));
-    }
-    _infraCache = null; // force fresh read next time
-  } catch(e) {
-    console.warn('Supabase infra_costs save failed', e.message);
-  }
-}
-
-// ── Sync localStorage → Supabase (one-time migration) ──
-async function syncInfraToSupabase() {
-  if (!(await checkSupa())) return { ok: false };
-  const local = loadInfraCosts();
-  if (!Object.keys(local).length) return { ok: true, pushed: 0 };
-  const rows = infraToRows(local);
-  let pushed = 0;
-  for (const row of rows) {
+// Save single entry to Supabase + localStorage
+async function saveInfraEntryAsync(entry) {
+  const all = loadInfraCosts();
+  const idx = all.findIndex(e => e.id === entry.id);
+  if (idx >= 0) all[idx] = entry; else all.push(entry);
+  storeInfraCosts(all);
+  _infraCache = all;
+  if (await checkSupa()) {
     try {
-      await supaFetch('infra_costs', 'POST', row, '?on_conflict=id');
-      pushed++;
-    } catch(e) { console.warn('Sync failed for infra row', row.id, e.message); }
+      await supaFetch('infra_costs', 'POST', entry, '?on_conflict=id');
+      _infraCache = null;
+    } catch(e) { console.warn('Supabase infra save failed', e.message); }
   }
-  _infraCache = null;
-  return { ok: true, pushed };
 }
 
-// ── Sync localStorage fallback ──
+// Delete single entry
+async function deleteInfraEntryAsync(id) {
+  const all = loadInfraCosts().filter(e => e.id !== id);
+  storeInfraCosts(all);
+  _infraCache = all;
+  if (await checkSupa()) {
+    try {
+      await supaFetch('infra_costs', 'DELETE', null, '?id=eq.' + encodeURIComponent(id));
+      _infraCache = null;
+    } catch(e) { console.warn('Supabase infra delete failed', e.message); }
+  }
+}
+
+// localStorage fallback — returns array
 function loadInfraCosts() {
   if (_infraCache !== null) return _infraCache;
-  try { return JSON.parse(localStorage.getItem(INFRA_KEY) || '{}') || {}; } catch(e) { return {}; }
+  try {
+    const d = JSON.parse(localStorage.getItem(INFRA_KEY) || '[]');
+    // Migrate old flat-object format → array
+    if (d && !Array.isArray(d)) {
+      const migrated = [];
+      Object.entries(d).forEach(([project, progs]) => {
+        Object.entries(progs).forEach(([program, cost]) => {
+          migrated.push({ id: `${project}__${program}`, project, program, monthly_cost: Number(cost)||0, start_month: null, end_month: null });
+        });
+      });
+      storeInfraCosts(migrated);
+      return migrated;
+    }
+    return Array.isArray(d) ? d : [];
+  } catch(e) { return []; }
 }
-function storeInfraCosts(d) {
-  _infraCache = d;
-  try { localStorage.setItem(INFRA_KEY, JSON.stringify(d)); } catch(e) {}
+function storeInfraCosts(arr) {
+  _infraCache = Array.isArray(arr) ? arr : [];
+  try { localStorage.setItem(INFRA_KEY, JSON.stringify(_infraCache)); } catch(e) {}
+}
+
+// Helper: unique entry id
+function infraEntryId(project, program) {
+  return `${project}__${program}__${Date.now()}`;
+}
+
+// Get infra cost for a project in a specific month — used by Forecast + BvA
+function getInfraCostForMonth(infraEntries, project, monthStr) {
+  return infraEntries
+    .filter(e => e.project === project && infraActiveInMonth(e, monthStr))
+    .reduce((s, e) => s + (e.monthly_cost || 0), 0);
+}
+
+// Get all projects that appear in infra entries
+function getInfraProjects(infraEntries) {
+  return [...new Set(infraEntries.map(e => e.project))].sort();
 }
 
 // ── License cost by project (from license monitor) ──
@@ -192,17 +220,14 @@ function renderBudgetOverview() {
   if(typeVal !== 'all') approved = approved.filter(m => m.type === typeVal);
 
   // ── KPIs ──
-  const total    = approved.reduce((s,m) => s+(Number(m.total)||0), 0);
-  const infraMonthly = Object.values(loadInfraCosts()).reduce((s,p) => s + Object.values(p).reduce((ss,v)=>ss+v,0), 0);
-  const infraMonths  = rangeVal === 'all' ? 12 : parseInt(rangeVal);
-  const slInfra  = approved.filter(m => m.type === 'sl').reduce((s,m) => s+(Number(m.total)||0), 0)
-                 + infraMonthly * infraMonths;
-  const others   = approved.filter(m => ['hw','int','ent','dep'].includes(m.type)).reduce((s,m) => s+(Number(m.total)||0), 0);
-
-  const setKpi = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = money(val); };
+  const total  = approved.reduce((s,m) => s+(Number(m.total)||0), 0);
+  const setKpi = (id, v) => { const el = document.getElementById(id); if(el) el.textContent = money(v); };
   setKpi('bgt-kpi-total', total);
-  setKpi('bgt-kpi-sl-infra', slInfra);
-  setKpi('bgt-kpi-others', others);
+  // Hide SL+Infra and Others cards — not meaningful without proper timeframe context
+  ['bgt-kpi-sl-infra','bgt-kpi-others'].forEach(id => {
+    const card = document.getElementById(id)?.closest?.('.metric-card');
+    if(card) card.style.display = 'none';
+  });
 
   // ── Trend chart ──
   _renderOvTrendChart(approved);
@@ -367,21 +392,25 @@ function renderBudgetSLInfra() {
   loadInfraCostsAsync().then(infraCosts => _renderBudgetSLInfraWith(infraCosts)).catch(() => _renderBudgetSLInfraWith(loadInfraCosts()));
 }
 
-function _renderBudgetSLInfraWith(infraCosts) {
+function _renderBudgetSLInfraWith(infraEntries) {
   const licByProj  = getLicenseCostByProject();
+  const infraProjs = getInfraProjects(infraEntries);
 
   const allProjects = [...new Set([
     ...Object.keys(licByProj),
-    ...Object.keys(infraCosts),
+    ...infraProjs,
   ])].sort();
 
+  // Cost by Project table: show current monthly rate
+  // For infra: sum entries that are active this month
+  const thisMonth = infraMonthKey(new Date());
   let totalLicense = 0, totalInfra = 0;
   const projData = allProjects.map(proj => {
     const lic   = licByProj[proj] || 0;
-    const infra = Object.values(infraCosts[proj]||{}).reduce((s,v)=>s+v,0);
+    const infra = getInfraCostForMonth(infraEntries, proj, thisMonth);
     totalLicense += lic;
     totalInfra   += infra;
-    return { proj, lic, infra, total: lic+infra };
+    return { proj, lic, infra, total: lic + infra };
   });
 
   // ── KPIs ──
@@ -391,7 +420,7 @@ function _renderBudgetSLInfraWith(infraCosts) {
   setKpi('sl-kpi-infra',   totalInfra);
 
   // ── Forecast vs Actual Table ──
-  _renderForecastTable(allProjects, infraCosts, licByProj);
+  _renderForecastTable(allProjects, infraEntries, licByProj);
 
   // ── Cost by Project Table ──
   const projBody = document.getElementById('sl-proj-body');
@@ -414,10 +443,10 @@ function _renderBudgetSLInfraWith(infraCosts) {
   }
 
   // ── Infra Matrix ──
-  _renderInfraMatrix(infraCosts);
+  _renderInfraMatrix(infraEntries);
 
   // ── Budget vs Actual ──
-  _renderBudgetVsActual(allProjects, infraCosts, licByProj);
+  _renderBudgetVsActual(allProjects, infraEntries, licByProj);
 }
 
 
@@ -447,7 +476,7 @@ function parseThaiDate(str) {
 }
 
 // ── Forecast vs Actual ──
-function _renderForecastTable(allProjects, infraCosts, licByProj) {
+function _renderForecastTable(allProjects, infraEntries, licByProj) {
   const body   = document.getElementById('sl-forecast-body');
   const thead  = document.getElementById('sl-forecast-thead');
   if(!body || !thead) return;
@@ -540,29 +569,18 @@ function _renderForecastTable(allProjects, infraCosts, licByProj) {
 
   let rows = '';
   showProjects.forEach(proj => {
-    const infraProg = infraCosts[proj] || {};
-    const licProgs  = actualByProjProg[proj] || {};
-    const allProgs  = [...new Set([...Object.keys(licProgs), ...Object.keys(infraProg)])];
+    const licProgs = actualByProjProg[proj] || {};
+    const projInfraEntries = infraEntries.filter(e => e.project === proj);
+    const infraProgNames   = [...new Set(projInfraEntries.map(e => e.program))];
+    const allProgs = [...new Set([...Object.keys(licProgs), ...infraProgNames])];
 
     if(!allProgs.length) return;
-
-    // Forecast baseline per project = avg of past months
-    const pastTotals = months.filter(m => !isFuture(m)).map(m => {
-      const key = monthKey(m);
-      const licTotal = Object.values(licProgs).reduce((s,d)=>s+(d[key]||0),0);
-      const infTotal = Object.values(infraProg).reduce((s,v)=>s+v,0);
-      return licTotal + infTotal;
-    }).filter(v=>v>0);
-    const forecastBase = pastTotals.length ? pastTotals.reduce((s,v)=>s+v,0)/pastTotals.length
-      : Object.values(licProgs).reduce((s,d)=>s+Object.values(d).reduce((ss,v)=>ss+v,0)/Math.max(Object.keys(d).length,1),0)
-        + Object.values(infraProg).reduce((s,v)=>s+v,0);
 
     let projTotal = 0;
     const projMonthTotals = months.map(() => 0);
 
     // License rows
     Object.entries(licProgs).forEach(([prog, monthData]) => {
-      // Forecast per program = avg of its own past actual months
       const pastVals = months.filter(m => !isFuture(m)).map(m => monthData[monthKey(m)]||0).filter(v=>v>0);
       const progForecast = pastVals.length ? pastVals.reduce((s,v)=>s+v,0)/pastVals.length : 0;
 
@@ -588,12 +606,17 @@ function _renderForecastTable(allProjects, infraCosts, licByProj) {
       </tr>`;
     });
 
-    // Infra rows
-    Object.entries(infraProg).forEach(([prog, cost]) => {
+    // Infra rows — respect start/end month
+    infraProgNames.forEach(prog => {
       let rowTotal = 0;
       const cells = months.map((m, mi) => {
+        const key = monthKey(m);
+        const cost = projInfraEntries
+          .filter(e => e.program === prog && infraActiveInMonth(e, key))
+          .reduce((s, e) => s + (e.monthly_cost || 0), 0);
         rowTotal += cost; projMonthTotals[mi] += cost; projTotal += cost;
-        return `<td style="${isFuture(m) ? tdFS : tdS}">${money(cost)}</td>`;
+        if(cost > 0) return `<td style="${isFuture(m) ? tdFS : tdS}">${money(cost)}</td>`;
+        return `<td style="${isFuture(m) ? tdFS : tdS};color:var(--text-3)">—</td>`;
       }).join('');
       rows += `<tr>
         <td style="${tdS};text-align:left;color:var(--text-3);font-size:11px">${esc(proj)}</td>
@@ -702,145 +725,106 @@ function showMemoBreakdown(proj, monthKey) {
 
 
 // ── Infra Matrix ──
-function _renderInfraMatrix(infraCosts) {
+function _renderInfraMatrix(infraEntries) {
   const infraThead = document.getElementById('sl-infra-thead');
   const infraBody  = document.getElementById('sl-infra-body');
   if(!infraThead || !infraBody) return;
 
-  const allProgs = [...new Set(Object.values(infraCosts).flatMap(p => Object.keys(p)))].sort();
-  const allProjs = [...new Set(Object.keys(infraCosts))].sort();
-
-  if(!allProgs.length) {
+  if(!infraEntries.length) {
     infraThead.innerHTML = '';
-    infraBody.innerHTML  = `<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล Infra — กด "+ Add Infra Cost" เพื่อเพิ่ม</td></tr>`;
+    infraBody.innerHTML  = `<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล Infra — กด "+ Add Infra Cost" เพื่อเพิ่ม</td></tr>`;
     return;
   }
 
-  const thS = 'padding:8px 12px;font-size:11px;font-weight:600;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap';
+  const thS = 'padding:8px 12px;font-size:11px;font-weight:600;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap';
+  const thR = thS + ';text-align:right';
   infraThead.innerHTML = `<tr>
-    <th style="${thS};text-align:left;padding-left:14px">Program</th>
-    ${allProjs.map(p => `<th style="${thS}">${esc(p)}</th>`).join('')}
-    <th style="${thS}">Total/Mo</th>
+    <th style="${thS}">Project</th>
+    <th style="${thS}">Program</th>
+    <th style="${thR}">Monthly Cost</th>
+    <th style="${thS}">Start</th>
+    <th style="${thS}">End</th>
     <th style="${thS}">Actions</th>
   </tr>`;
 
-  const tdS = 'padding:7px 12px;border-bottom:1px solid var(--border);font-size:12px;text-align:right';
-  infraBody.innerHTML = allProgs
-    .sort((a,b) => {
-      const ta = allProjs.reduce((s,p)=>s+(infraCosts[p]?.[a]||0),0);
-      const tb = allProjs.reduce((s,p)=>s+(infraCosts[p]?.[b]||0),0);
-      return tb - ta;
-    })
-    .map(prog => {
-      const rowTotal = allProjs.reduce((s,p)=>s+(infraCosts[p]?.[prog]||0),0);
-      return `<tr>
-        <td style="${tdS};text-align:left;padding-left:14px;font-weight:500">${esc(prog)}</td>
-        ${allProjs.map(proj => {
-          const v = infraCosts[proj]?.[prog];
-          return v
-            ? `<td style="${tdS};cursor:pointer" onclick="openInfraModal('${esc(proj)}','${esc(prog)}')" title="Click to edit">${money(v)}</td>`
-            : `<td style="${tdS};color:var(--text-3)">—</td>`;
-        }).join('')}
-        <td style="${tdS};font-weight:700;color:var(--blue)">${money(rowTotal)}</td>
-        <td style="${tdS};text-align:center;white-space:nowrap">
-          <button class="btn-sm" style="padding:2px 7px;font-size:11px" onclick="openInfraModalForProgram('${esc(prog)}')">✎</button>
-          <button class="btn-sm" style="padding:2px 7px;font-size:11px;color:var(--red)" onclick="deleteInfraProgram('${esc(prog)}')">✕</button>
-        </td>
-      </tr>`;
-    }).join('')
-    + `<tr style="background:var(--bg)">
-      <td style="${tdS};text-align:left;padding-left:14px;font-weight:600;color:var(--text-2)">Total</td>
-      ${allProjs.map(proj => {
-        const t = allProgs.reduce((s,prog)=>s+(infraCosts[proj]?.[prog]||0),0);
-        return `<td style="${tdS};font-weight:600">${t ? money(t) : '—'}</td>`;
-      }).join('')}
-      <td style="${tdS};font-weight:700;color:var(--blue)">${money(allProgs.reduce((s,prog)=>s+allProjs.reduce((ss,p)=>ss+(infraCosts[p]?.[prog]||0),0),0))}</td>
-      <td></td>
-    </tr>`;
+  const tdS = 'padding:7px 12px;border-bottom:1px solid var(--border);font-size:12px';
+  const tdR = tdS + ';text-align:right';
+  infraBody.innerHTML = infraEntries.map(entry => `<tr>
+    <td style="${tdS};font-weight:500">${esc(entry.project)}</td>
+    <td style="${tdS}">${esc(entry.program)}</td>
+    <td style="${tdR};font-weight:600">${money(entry.monthly_cost)}</td>
+    <td style="${tdS};color:var(--text-2)">${entry.start_month || '—'}</td>
+    <td style="${tdS};color:var(--text-2)">${entry.end_month || 'ongoing'}</td>
+    <td style="${tdS};white-space:nowrap">
+      <button class="btn-sm" style="padding:2px 7px;font-size:11px" onclick="openInfraModal('${esc(entry.id)}')">✎</button>
+      <button class="btn-sm" style="padding:2px 7px;font-size:11px;color:var(--red)" onclick="deleteInfraEntry('${esc(entry.id)}')">✕</button>
+    </td>
+  </tr>`).join('');
 }
 
 // ══════════════════════════════════════════
-// INFRA MODAL (shared)
+// INFRA MODAL — Add / Edit entry
 // ══════════════════════════════════════════
-function openInfraModal(project, program) {
+function openInfraModal(entryId) {
   const s = typeof loadSettings === 'function' ? loadSettings() : null;
   const projects = s?.projects || ['AOA-MP','TTB','Geo9','Release 2.1','Release 3'];
-  const infraCosts = loadInfraCosts();
+  const entry = entryId ? loadInfraCosts().find(e => e.id === entryId) : null;
 
   document.getElementById('infra-modal').style.display = 'flex';
   document.getElementById('infra-form').innerHTML = `
+    <input type="hidden" id="inf-entry-id" value="${esc(entry?.id||'')}">
     <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px">
       <div class="fg"><label>Project *</label>
         <select id="inf-project" class="ri">
           <option value="">— เลือกโครงการ —</option>
-          ${projects.map(p=>`<option value="${esc(p)}" ${p===project?'selected':''}>${esc(p)}</option>`).join('')}
+          ${projects.map(p=>`<option value="${esc(p)}" ${p===(entry?.project||'')?'selected':''}>${esc(p)}</option>`).join('')}
         </select>
       </div>
       <div class="fg"><label>Program *</label>
-        <input id="inf-program" class="ri" placeholder="เช่น AWS, DataDog" value="${esc(program||'')}">
+        <input id="inf-program" class="ri" placeholder="เช่น AWS, DataDog" value="${esc(entry?.program||'')}">
       </div>
       <div class="fg"><label>Monthly Cost (THB) *</label>
-        <input id="inf-monthly" class="ri" type="number" min="0" placeholder="0"
-          value="${project && program ? (infraCosts[project]?.[program]||'') : ''}">
+        <input id="inf-monthly" class="ri" type="number" min="0" placeholder="0" value="${entry?.monthly_cost||''}">
+      </div>
+      <div class="fg"></div>
+      <div class="fg"><label>Start Month (YYYY-MM)</label>
+        <input id="inf-start" class="ri" type="month" value="${entry?.start_month||''}">
+      </div>
+      <div class="fg"><label>End Month (YYYY-MM) — ว่างไว้ = ongoing</label>
+        <input id="inf-end" class="ri" type="month" value="${entry?.end_month||''}">
       </div>
     </div>`;
 }
 
-function openInfraModalForProgram(prog) {
-  const s = typeof loadSettings === 'function' ? loadSettings() : null;
-  const projects = s?.projects || ['AOA-MP','TTB','Geo9','Release 2.1','Release 3'];
-  const infraCosts = loadInfraCosts();
-  const existingProjs = Object.keys(infraCosts).filter(p => infraCosts[p]?.[prog] !== undefined);
-  const allP = [...new Set([...projects, ...existingProjs])].sort();
-
-  document.getElementById('infra-modal').style.display = 'flex';
-  document.getElementById('infra-form').innerHTML = `
-    <p style="font-size:12px;color:var(--text-2);margin-bottom:12px">แก้ค่า <strong>${esc(prog)}</strong> ต่อโครงการ (THB/เดือน)</p>
-    <input type="hidden" id="inf-program" value="${esc(prog)}">
-    <input type="hidden" id="inf-project" value="__multi__">
-    ${allP.map(p => `
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-        <div style="width:130px;font-size:12px;font-weight:500">${esc(p)}</div>
-        <input class="ri" type="number" min="0" placeholder="0 = ลบ"
-          data-proj="${esc(p)}" style="flex:1" value="${infraCosts[p]?.[prog]||''}">
-      </div>`).join('')}`;
-}
-
 function closeInfraModal() { document.getElementById('infra-modal').style.display = 'none'; }
 
-function deleteInfraProgram(prog) {
-  if(!confirm(`ลบ "${prog}" ออกจากทุกโครงการ?`)) return;
-  const costs = loadInfraCosts();
-  Object.keys(costs).forEach(proj => { delete costs[proj][prog]; });
-  storeInfraCostsAsync(costs).catch(e => console.warn('Supabase infra delete failed', e));
+function deleteInfraEntry(id) {
+  if(!confirm('ลบรายการนี้?')) return;
+  deleteInfraEntryAsync(id).catch(e => console.warn('Supabase infra delete failed', e));
   renderBudgetSLInfra();
 }
 
 function saveInfraCost() {
-  const projectVal = document.getElementById('inf-project')?.value;
-  const program    = document.getElementById('inf-program')?.value?.trim();
+  const project = document.getElementById('inf-project')?.value;
+  const program = document.getElementById('inf-program')?.value?.trim();
+  const monthly = parseFloat(document.getElementById('inf-monthly')?.value)||0;
+  const start   = document.getElementById('inf-start')?.value || null;
+  const end     = document.getElementById('inf-end')?.value   || null;
+  const editId  = document.getElementById('inf-entry-id')?.value;
+
+  if(!project) { alert('กรุณาเลือก Project'); return; }
   if(!program) { alert('กรุณากรอก Program'); return; }
+  if(!monthly) { alert('กรุณากรอก Monthly Cost'); return; }
 
-  const costs = loadInfraCosts();
+  const entry = {
+    id:           editId || infraEntryId(project, program),
+    project, program,
+    monthly_cost: monthly,
+    start_month:  start,
+    end_month:    end,
+  };
 
-  if(projectVal === '__multi__') {
-    document.querySelectorAll('#infra-form input[data-proj]').forEach(inp => {
-      const proj = inp.dataset.proj;
-      const val  = parseFloat(inp.value)||0;
-      if(!costs[proj]) costs[proj] = {};
-      if(val > 0) costs[proj][program] = val;
-      else delete costs[proj][program];
-    });
-  } else {
-    const project = projectVal;
-    const monthly = parseFloat(document.getElementById('inf-monthly')?.value)||0;
-    if(!project) { alert('กรุณากรอก Project'); return; }
-    if(!costs[project]) costs[project] = {};
-    if(monthly > 0) costs[project][program] = monthly;
-    else delete costs[project][program];
-  }
-
-  storeInfraCostsAsync(costs).catch(e => console.warn('Supabase infra save failed', e));
+  saveInfraEntryAsync(entry).catch(e => console.warn('Supabase infra save failed', e));
   closeInfraModal();
   renderBudgetSLInfra();
 }
@@ -860,17 +844,23 @@ function handleInfraBulkUpload(event) {
 
       const costs = loadInfraCosts();
       let added = 0;
+      const currentEntries = loadInfraCosts();
       rows.forEach(row => {
-        const proj = String(row['Project']||row['project']||'').trim();
-        const prog = String(row['Program']||row['program']||row['Program Name']||'').trim();
-        const amt  = parseFloat(row['Monthly Cost']||row['monthly_cost']||row['Cost']||0)||0;
+        const proj  = String(row['Project']||row['project']||'').trim();
+        const prog  = String(row['Program']||row['program']||row['Program Name']||'').trim();
+        const amt   = parseFloat(row['Monthly Cost']||row['monthly_cost']||row['Cost']||0)||0;
+        const start = String(row['Start Month']||row['start_month']||'').trim() || null;
+        const end   = String(row['End Month']||row['end_month']||'').trim() || null;
         if(!proj || !prog || !amt) return;
-        if(!costs[proj]) costs[proj] = {};
-        costs[proj][prog] = amt;
+        const id = infraEntryId(proj, prog);
+        currentEntries.push({ id, project: proj, program: prog, monthly_cost: amt, start_month: start, end_month: end });
         added++;
       });
 
-      storeInfraCostsAsync(costs).catch(e => console.warn('Supabase infra bulk save failed', e));
+      storeInfraCosts(currentEntries);
+      _infraCache = null;
+      // Push all new entries to Supabase
+      Promise.all(currentEntries.slice(-added).map(e => saveInfraEntryAsync(e))).catch(e => console.warn('Supabase bulk save failed', e));
       renderBudgetSLInfra();
       alert(`✓ Import Infra สำเร็จ — อัปเดต ${added} รายการ`);
     } catch(err) {
@@ -882,7 +872,7 @@ function handleInfraBulkUpload(event) {
 }
 
 // ── Budget vs Actual ──
-function _renderBudgetVsActual(allProjects, infraCosts, licByProj) {
+function _renderBudgetVsActual(allProjects, infraEntries, licByProj) {
   const summary = document.getElementById('sl-bva-summary');
   const body    = document.getElementById('sl-bva-body');
   if(!body) return;
@@ -924,10 +914,23 @@ function _renderBudgetVsActual(allProjects, infraCosts, licByProj) {
   // licByProj comes from getLicenseCostByProject() which reads active license records directly —
   // this is the monthly cost we *expect* to keep paying, making Budget vs Actual meaningful.
   const projData = allProjects.map(proj => {
-    const infraMo    = Object.values(infraCosts[proj]||{}).reduce((s,v)=>s+v,0);
+    // Infra: sum monthly costs for entries active within the range
+    const rangeFrom = infraMonthKey(new Date(now.getFullYear(), now.getMonth() - rangeVal, 1));
+    const rangeTo   = infraMonthKey(now);
+    const infraActual = infraEntries
+      .filter(e => e.project === proj)
+      .reduce((s, e) => s + (e.monthly_cost || 0) * infraOverlapMonths(e.start_month, e.end_month, rangeFrom, rangeTo), 0);
+
+    // Budget: same entries but projected forward rangeVal months from today
+    const budgetFrom = infraMonthKey(now);
+    const budgetTo   = infraMonthKey(new Date(now.getFullYear(), now.getMonth() + rangeVal - 1, 1));
+    const infraBudget = infraEntries
+      .filter(e => e.project === proj)
+      .reduce((s, e) => s + (e.monthly_cost || 0) * infraOverlapMonths(e.start_month, e.end_month, budgetFrom, budgetTo), 0);
+
     const licMonthly = licByProj[proj] || 0;
-    const budget     = (licMonthly + infraMo) * rangeVal;
-    const actual     = (actualByProj[proj]||0) + infraMo * rangeVal;
+    const budget     = (licMonthly * rangeVal) + infraBudget;
+    const actual     = (actualByProj[proj]||0) + infraActual;
     const pct        = budget > 0 ? Math.round(actual/budget*100) : 0;
     const color      = pct > 100 ? 'var(--red)' : pct >= 90 ? 'var(--amber)' : 'var(--green)';
     const barW       = Math.min(pct, 100);
