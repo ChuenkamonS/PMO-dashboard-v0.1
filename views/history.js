@@ -124,9 +124,45 @@ function histMatchesAmount(memo, preset, minVal, maxVal) {
   return true;
 }
 
-// ── Filter / sort (backend-ready: swap loadMemos() for API later) ──
+// ── All-memo tab state ──
+let _histTab = 'all';
+
+function switchHistTab(status, btn) {
+  _histTab = status;
+  document.querySelectorAll('.hist-tab-btn').forEach(b => {
+    const active = b.dataset.status === status;
+    b.classList.toggle('active', active);
+    b.style.background = active ? 'var(--surface)' : 'transparent';
+    b.style.color      = active ? 'var(--blue)' : 'var(--text-2)';
+    b.style.fontWeight = active ? '600' : '500';
+  });
+  // Sync hidden status select so filteredHistoryMemos still works
+  const sel = document.getElementById('hist-status');
+  if (sel) sel.value = status;
+  renderHistoryMemos();
+}
+
+// ── Filter / sort (all statuses now) ──
 function getHistoryMemos() {
-  return loadMemos().filter(m => m.status === 'completed' || m.status === 'rejected');
+  // Return ALL memos — not just completed/rejected
+  return loadMemos();
+}
+
+function populateHistTabCounts() {
+  const all = loadMemos();
+  const counts = {
+    all:       all.length,
+    draft:     all.filter(m => m.status === 'draft').length,
+    pending:   all.filter(m => !m.status || m.status === 'pending').length,
+    completed: all.filter(m => m.status === 'completed').length,
+    rejected:  all.filter(m => m.status === 'rejected').length,
+  };
+  document.querySelectorAll('.hist-tab-btn').forEach(btn => {
+    const countEl = btn.querySelector('.hist-tab-count');
+    if (!countEl) return;
+    const n = counts[btn.dataset.status] || 0;
+    countEl.textContent = n > 0 ? n : '';
+  });
 }
 
 function filteredHistoryMemos() {
@@ -379,9 +415,14 @@ const HIST_ICON_PDF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor
 
 function histActionButtons(memo) {
   const no = esc(memo.memoNo);
+  const isDraft    = memo.status === 'draft';
+  const isRejected = memo.status === 'rejected';
   return `<div class="hist-actions">
     <button type="button" class="btn-sm hist-act-btn" data-hist-action="detail" data-memo="${no}" title="ดูรายละเอียด">${HIST_ICON_VIEW}</button>
-    <button type="button" class="btn-sm hist-act-btn" data-hist-action="pdf" data-memo="${no}" title="Download PDF">${HIST_ICON_PDF}</button>
+    ${isDraft ? `<button type="button" class="btn-sm hist-act-btn" data-hist-action="draft-edit" data-memo="${no}" title="แก้ไข Draft" style="color:var(--blue)">✎</button>
+    <button type="button" class="btn-sm hist-act-btn" data-hist-action="draft-delete" data-memo="${no}" title="ลบ Draft" style="color:var(--red)">✕</button>` : ''}
+    ${isRejected ? `<button type="button" class="btn-sm hist-act-btn" data-hist-action="duplicate" data-memo="${no}" title="Duplicate เป็น Memo ใหม่">⊕</button>` : ''}
+    ${!isDraft ? `<button type="button" class="btn-sm hist-act-btn" data-hist-action="pdf" data-memo="${no}" title="Download PDF">${HIST_ICON_PDF}</button>` : ''}
   </div>`;
 }
 
@@ -397,6 +438,13 @@ function handleHistoryTableClick(e) {
       else alert('ระบบดาวน์โหลด PDF ยังไม่พร้อมใช้งาน');
     }
     else if (action === 'reject-reason') showRejectionReason(memoNo, e);
+    else if (action === 'draft-edit') {
+      if (typeof editDraft === 'function') editDraft(memoNo);
+    }
+    else if (action === 'draft-delete') {
+      if (typeof deleteDraft === 'function') deleteDraft(memoNo);
+    }
+    else if (action === 'duplicate') duplicateMemo(memoNo);
     return;
   }
   const row = e.target.closest('tr[data-memo]');
@@ -406,6 +454,7 @@ function handleHistoryTableClick(e) {
 // ── Render table ──
 function renderHistoryMemos() {
   populateHistFilterOptions();
+  populateHistTabCounts();
   const body = document.getElementById('history-body');
   const countEl = document.getElementById('hist-result-count');
   if (!body) return;
@@ -444,6 +493,26 @@ function renderHistoryMemos() {
   body.querySelectorAll('tr[data-memo]').forEach(row => {
     row.addEventListener('click', handleHistoryTableClick);
   });
+}
+
+function duplicateMemo(memoNo) {
+  const memo = loadMemos().find(m => m.memoNo === memoNo);
+  if (!memo) return;
+  if (!confirm(`Duplicate "${memoNo}" เป็น Draft ใหม่?`)) return;
+  try {
+    localStorage.setItem('orbit-pmo-edit-draft', JSON.stringify({
+      ...memo,
+      id: undefined, memoNo: undefined, // will be regenerated
+      status: 'draft',
+      createdAt: undefined, updatedAt: undefined,
+      approvedAt: undefined, rejectedAt: undefined,
+      approvedBy: undefined, rejectedBy: undefined,
+      approvalNote: undefined, rejectionReason: undefined,
+      auditLog: [],
+    }));
+  } catch(e) {}
+  swView('create', document.querySelector('.sb-sub-item[onclick*="create"]'), 'Create Memo');
+  setTimeout(() => { if (typeof applyDraftEdit === 'function') applyDraftEdit(); }, 100);
 }
 
 document.addEventListener('click', e => {
