@@ -201,9 +201,7 @@ const OV_PROJ_COLORS = ['#185FA5','#1D9E75','#EF9F27','#7F77DD','#5DCAA5','#D85A
 const OV_TYPE_COLORS = { sl:'#185FA5', hw:'#1D9E75', int:'#EF9F27', ent:'#7F77DD', dep:'#D85A30' };
 
 const _ov = {
-  mode: 'spend',
   groupBy: 'type',
-  stackMode: 'stacked', // always stacked
   preset: 12,
   fromIdx: 0,
   toIdx: 11,
@@ -219,6 +217,7 @@ function renderBudgetOverview() {
   _ovUpdateKPIs();
   _ovRenderChips();
   _ovRenderChart();
+  _ovRenderBvA();
 }
 
 function _ovBuildMonths() {
@@ -255,48 +254,25 @@ function _ovInitState() {
 function _ovApplyPresetIdxs(n) {
   _ov.toIdx   = _ov.allMonths.length - 1;
   _ov.fromIdx = Math.max(0, _ov.toIdx - n + 1);
-  _ovUpdatePeriodLabel();
+  _ovUpdatePeriodLabels();
 }
 
-function _ovUpdatePeriodLabel() {
-  const el = document.getElementById('ov-period-label');
-  if (!el || !_ov.allMonths.length) return;
-  const n = _ov.toIdx - _ov.fromIdx + 1;
-  el.textContent = `${_ov.allMonths[_ov.fromIdx]?.label} – ${_ov.allMonths[_ov.toIdx]?.label} · ${n} เดือน`;
-}
-
-// ── Controls ──
-function ovSetMode(m) {
-  _ov.mode = m;
-  document.querySelectorAll('.ov-mode-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('ov-mbtn-' + m)?.classList.add('active');
-  const svw = document.getElementById('ov-spend-view-wrap');
-  const tc  = document.getElementById('ov-type-col');
-  if (svw) svw.style.display = m === 'bva' ? 'none' : '';
-  if (tc)  tc.style.display  = m === 'bva' ? 'none' : '';
-  _ovUpdateKPIs();
-  _ovRenderChart();
-}
-
-function ovSetGroup(g) {
-  _ov.groupBy = g;
-  // Update group buttons
-  document.querySelectorAll('.ov-group-btn').forEach(b => {
-    const active = b.id === 'ov-gbtn-' + g;
-    b.style.background = active ? 'var(--blue)' : 'transparent';
-    b.style.color      = active ? '#fff' : 'var(--text-2)';
+function _ovUpdatePeriodLabels() {
+  if (!_ov.allMonths.length) return;
+  const from = _ov.allMonths[_ov.fromIdx];
+  const to   = _ov.allMonths[_ov.toIdx];
+  const n    = _ov.toIdx - _ov.fromIdx + 1;
+  const txt  = `${from?.label} – ${to?.label} · ${n} เดือน`;
+  ['ov-period-label','ov-period-label-a','ov-bva-period-label'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = txt;
   });
-  // Fix 3: Hide type chips when group by project (not relevant)
-  const typeCol = document.getElementById('ov-type-col');
-  if (typeCol) typeCol.style.display = g === 'type' ? '' : 'none';
-  _ovRenderChart();
+  // Update donut title
+  const dt = document.getElementById('ov-donut-title');
+  if (dt) dt.textContent = `สัดส่วนรวม ${n} เดือน`;
 }
 
-function ovSetStack(s) {
-  // Side by side removed — always stacked
-  _ov.stackMode = 'stacked';
-}
-
+// ── Period controls ──
 function ovSetPreset(n) {
   _ov.preset = n;
   document.querySelectorAll('.ov-preset-btn').forEach(b => b.classList.remove('active'));
@@ -306,26 +282,49 @@ function ovSetPreset(n) {
     if (cr) cr.style.display = 'flex';
   } else {
     if (cr) cr.style.display = 'none';
-    _ovApplyPresetIdxs(n);
+    // Cap at 12 months
+    _ovApplyPresetIdxs(Math.min(n, 12));
     _ovUpdateKPIs();
     _ovRenderChart();
+    _ovRenderBvA();
   }
 }
 
 function ovApplyCustomRange() {
   const f = parseInt(document.getElementById('ov-from-sel')?.value ?? 0);
   const t = parseInt(document.getElementById('ov-to-sel')?.value ?? _ov.allMonths.length - 1);
+  // Cap range at 12 months
+  const cappedT = Math.min(Math.max(f, t), f + 11);
   _ov.fromIdx = f;
-  _ov.toIdx   = Math.max(f, t);
-  _ovUpdatePeriodLabel();
+  _ov.toIdx   = cappedT;
+  // Sync to-sel if capped
+  const toSel = document.getElementById('ov-to-sel');
+  if (toSel) toSel.value = cappedT;
+  _ovUpdatePeriodLabels();
   _ovUpdateKPIs();
+  _ovRenderChart();
+  _ovRenderBvA();
+}
+
+// ── Group by ──
+function ovSetGroup(g) {
+  _ov.groupBy = g;
+  document.querySelectorAll('.ov-group-btn').forEach(b => {
+    const active = b.id === 'ov-gbtn-' + g;
+    b.style.background = active ? 'var(--blue)' : 'transparent';
+    b.style.color      = active ? '#fff' : 'var(--text-2)';
+  });
+  // Hide type chips when grouping by project
+  const typeCol = document.getElementById('ov-type-col');
+  if (typeCol) typeCol.style.display = g === 'type' ? '' : 'none';
   _ovRenderChart();
 }
 
+// ── Chip toggles ──
 function ovToggleProj(k) {
   if (_ov.activeProjKeys.has(k)) { if (_ov.activeProjKeys.size > 1) _ov.activeProjKeys.delete(k); }
   else _ov.activeProjKeys.add(k);
-  _ovRenderChips(); _ovUpdateKPIs(); _ovRenderChart();
+  _ovRenderChips(); _ovUpdateKPIs(); _ovRenderChart(); _ovRenderBvA();
 }
 function ovToggleType(k) {
   if (_ov.activeTypeKeys.has(k)) { if (_ov.activeTypeKeys.size > 1) _ov.activeTypeKeys.delete(k); }
@@ -333,20 +332,21 @@ function ovToggleType(k) {
   _ovRenderChips(); _ovUpdateKPIs(); _ovRenderChart();
 }
 
-// ── Chips — simple 2-state, no dots ──
+// ── Chips ──
 function _ovRenderChips() {
   const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
   const projKeys = [...new Set(approved.map(m => m.project || '(ไม่ระบุ)'))].sort();
   const typeKeys = ['sl','hw','int','ent','dep'];
   const chip = (label, on, onclick) =>
     `<span onclick="${onclick}" style="display:inline-flex;align-items:center;font-size:11px;padding:4px 11px;border-radius:20px;cursor:pointer;user-select:none;margin-bottom:3px;transition:all 0.12s;border:0.5px solid ${on ? 'transparent' : 'var(--border)'};background:${on ? 'var(--blue)' : 'transparent'};color:${on ? '#fff' : 'var(--text-2)'}">${label}</span>`;
+
   const projChips = document.getElementById('ov-proj-chips');
   if (projChips) projChips.innerHTML = projKeys.map(k => chip(esc(k), _ov.activeProjKeys.has(k), `ovToggleProj('${esc(k)}')`)).join('');
+
   const typeChips = document.getElementById('ov-type-chips');
   if (typeChips) typeChips.innerHTML = typeKeys.map(k => chip(BGT_TYPE_LABELS[k], _ov.activeTypeKeys.has(k), `ovToggleType('${k}')`)).join('');
-  const pc = document.getElementById('ov-proj-count');
+
   const tc = document.getElementById('ov-type-count');
-  if (pc) pc.textContent = _ov.activeProjKeys.size === projKeys.length ? '(all)' : `(${_ov.activeProjKeys.size}/${projKeys.length})`;
   if (tc) tc.textContent = _ov.activeTypeKeys.size === typeKeys.length ? '(all)' : `(${_ov.activeTypeKeys.size}/${typeKeys.length})`;
 }
 
@@ -356,405 +356,29 @@ function _ovUpdateKPIs() {
   const numMonths = months.length;
   const fromKey   = months[0]?.key;
   const toKey     = months[months.length - 1]?.key;
-  const approved  = loadMemos().filter(m => memoStatusKey(m) === 'completed');
+  const projArr   = [..._ov.activeProjKeys];
+  const typeArr   = [..._ov.activeTypeKeys];
 
-  let filtered = approved.filter(m => {
-    const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
-    const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-    return k >= fromKey && k <= toKey;
-  }).filter(m =>
-    _ov.activeProjKeys.has(m.project || '(ไม่ระบุ)') &&
-    (_ov.mode === 'bva' || _ov.activeTypeKeys.has(m.type))
-  );
-
-  const total = filtered.reduce((s, m) => s + (Number(m.total) || 0), 0);
-  const currentYear   = String(new Date().getFullYear() + 543);
-  const slBudgets     = loadSLBudgets()?.[currentYear] || {};
-  const annualBudget  = [..._ov.activeProjKeys].reduce((s, p) => s + (slBudgets[p] || 0), 0);
-  const budgetTotal   = annualBudget > 0 ? (annualBudget / 12) * numMonths : 0;
-  const monthlyRate   = numMonths > 0 ? total / numMonths : 0;
-  const monthsLeft    = 12 - new Date().getMonth();
-  const forecastTotal = total + monthlyRate * monthsLeft;
-
-  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  setText('bgt-kpi-total', money(Math.round(total)));
-  setText('bgt-kpi-actual-sub', `จาก memo ที่อนุมัติแล้ว (${numMonths} เดือน)`);
-
-  if (budgetTotal > 0) {
-    const pct      = Math.round(total / budgetTotal * 100);
-    const remColor = total > budgetTotal ? 'var(--red)' : pct >= 90 ? 'var(--amber)' : 'var(--green)';
-    setText('bgt-kpi-budget', money(Math.round(budgetTotal)));
-    setText('bgt-kpi-budget-sub', `ตั้งไว้ ${numMonths} เดือน`);
-    const remEl = document.getElementById('bgt-kpi-remaining');
-    if (remEl) { remEl.textContent = money(Math.round(budgetTotal - total)); remEl.style.color = remColor; }
-    setText('bgt-kpi-remaining-sub', `${pct}% utilized`);
-    const fColor = forecastTotal > annualBudget ? 'var(--red)' : forecastTotal / annualBudget >= 0.9 ? 'var(--amber)' : 'var(--green)';
-    const fEl = document.getElementById('bgt-kpi-forecast');
-    if (fEl) { fEl.textContent = money(Math.round(forecastTotal)); fEl.style.color = fColor; }
-    setText('bgt-kpi-forecast-sub', 'คาดการณ์ถึงสิ้นปี');
-  } else {
-    setText('bgt-kpi-budget', '—');
-    setText('bgt-kpi-budget-sub', 'ยังไม่ได้ตั้งงบใน Budget Settings');
-    setText('bgt-kpi-remaining', '—');
-    setText('bgt-kpi-remaining-sub', 'ต้องตั้งงบก่อน');
-    const fEl = document.getElementById('bgt-kpi-forecast');
-    if (fEl) { fEl.textContent = money(Math.round(forecastTotal)); fEl.style.color = 'var(--amber)'; }
-    setText('bgt-kpi-forecast-sub', 'คาดการณ์ถึงสิ้นปี (ไม่มีงบอ้างอิง)');
-  }
-}
-
-// ── Main chart ──
-function _ovRenderChart() {
-  const canvas = document.getElementById('ov-main-chart');
-  if (!canvas || typeof Chart === 'undefined') return;
-  if (canvas._chart) { canvas._chart.destroy(); canvas._chart = null; }
-
-  const months   = _ov.allMonths.slice(_ov.fromIdx, _ov.toIdx + 1);
-  const labels   = months.map(m => m.label);
-  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
-  const projKeys = [..._ov.activeProjKeys];
-  const typeKeys = [..._ov.activeTypeKeys];
-
-  const getMemoVal = (memo, monthKey) => {
-    const d = parseThaiDate(memo.date) || new Date(memo.updatedAt || memo.createdAt);
-    const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-    return k === monthKey ? (Number(memo.total) || 0) : 0;
-  };
-
-  // ── Budget vs Actual ──
-  if (_ov.mode === 'bva') {
-    const currentYear  = String(new Date().getFullYear() + 543);
-    const slBudgets    = loadSLBudgets()?.[currentYear] || {};
-    const annualBudget = projKeys.reduce((s, p) => s + (slBudgets[p] || 0), 0);
-    const monthlyBgt   = annualBudget / 12;
-
-    const actualVals = months.map(m =>
-      approved.filter(memo => projKeys.includes(memo.project || '(ไม่ระบุ)'))
-        .reduce((s, memo) => s + getMemoVal(memo, m.key), 0)
-    );
-    const budgetVals = months.map(() => Math.round(monthlyBgt));
-
-    canvas._chart = new Chart(canvas, {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [
-          { label: 'Budget',  data: budgetVals, backgroundColor: '#B5D4F4', borderRadius: 3, borderSkipped: false },
-          { label: 'Actual',  data: actualVals, backgroundColor: actualVals.map((v, i) => {
-              const pct = budgetVals[i] > 0 ? v / budgetVals[i] : 0;
-              return pct > 1 ? '#E24B4A' : pct >= 0.9 ? '#EF9F27' : '#185FA5';
-            }), borderRadius: 3, borderSkipped: false },
-        ],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: {
-          legend: { position: 'bottom', labels: { font: { size: 11 } } },
-          tooltip: {
-            callbacks: {
-              label: ctx => {
-                const val    = ctx.raw || 0;
-                const budget = budgetVals[ctx.dataIndex] || 0;
-                if (ctx.datasetIndex === 1 && budget > 0) {
-                  const pct = Math.round(val / budget * 100);
-                  return ` Actual: ${money(Math.round(val))}  (${pct}% of budget)`;
-                }
-                return ` ${ctx.dataset.label}: ${money(Math.round(val))}`;
-              },
-            },
-          },
-        },
-        scales: {
-          x: { grid: { display: false }, ticks: { font: { size: 10 } } },
-          y: { ticks: { callback: v => '฿' + Number(v).toLocaleString('th-TH'), font: { size: 10 } } },
-        },
-      },
-    });
-    return;
-  }
-
-  // ── Spend mode ──
-  const isStacked = _ov.stackMode === 'stacked';
-  let datasets;
-
-  if (_ov.groupBy === 'type') {
-    datasets = typeKeys.map(tk => ({
-      label: BGT_TYPE_LABELS[tk] || tk.toUpperCase(),
-      backgroundColor: OV_TYPE_COLORS[tk],
-      borderRadius: 3, borderSkipped: false,
-      data: months.map(m =>
-        approved.filter(memo => projKeys.includes(memo.project || '(ไม่ระบุ)') && memo.type === tk)
-          .reduce((s, memo) => s + getMemoVal(memo, m.key), 0)
-      ),
-    }));
-  } else {
-    datasets = projKeys.map((pk, pi) => ({
-      label: pk,
-      backgroundColor: OV_PROJ_COLORS[pi % OV_PROJ_COLORS.length],
-      borderRadius: 3, borderSkipped: false,
-      data: months.map(m =>
-        approved.filter(memo => (memo.project || '(ไม่ระบุ)') === pk && typeKeys.includes(memo.type))
-          .reduce((s, memo) => s + getMemoVal(memo, m.key), 0)
-      ),
-    }));
-  }
-
-  canvas._chart = new Chart(canvas, {
-    type: 'bar',
-    data: { labels, datasets },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'bottom', labels: { font: { size: 11 } } },
-        tooltip: {
-          callbacks: {
-            label: ctx => {
-              const val = ctx.raw || 0;
-              if (val === 0) return null;
-              if (isStacked) {
-                const monthTotal = datasets.reduce((s, ds) => s + (ds.data[ctx.dataIndex] || 0), 0);
-                const pct = monthTotal > 0 ? Math.round(val / monthTotal * 100) : 0;
-                return ` ${ctx.dataset.label}: ${money(Math.round(val))}  (${pct}%)`;
-              }
-              return ` ${ctx.dataset.label}: ${money(Math.round(val))}`;
-            },
-            footer: ctx => {
-              if (!isStacked || !ctx.length) return '';
-              const mIdx = ctx[0].dataIndex;
-              const total = datasets.reduce((s, ds) => s + (ds.data[mIdx] || 0), 0);
-              return total > 0 ? `Total: ${money(Math.round(total))}` : '';
-            },
-          },
-        },
-      },
-      scales: {
-        x: { stacked: isStacked, grid: { display: false }, ticks: { font: { size: 10 } } },
-        y: { stacked: isStacked, ticks: { callback: v => '฿' + Number(v).toLocaleString('th-TH'), font: { size: 10 } } },
-      },
-    },
-  });
-}
-
-function renderBudgetOverview() {
-  _ovBuildMonths();
-  _ovInitState();
-  _ovUpdateKPIs();
-  _ovRenderChips();
-  _ovRenderChart();
-}
-
-// ── Build month list from actual memo data (past 24 months + next 3) ──
-function _ovBuildMonths() {
-  const now = new Date();
-  _ov.allMonths = [];
-  for (let i = 23; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    _ov.allMonths.push({
-      key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,
-      label: d.toLocaleString('th-TH', { month:'short', year:'2-digit' }),
-    });
-  }
-  // Populate custom range selects
-  const fromSel = document.getElementById('ov-from-sel');
-  const toSel   = document.getElementById('ov-to-sel');
-  if (fromSel && !fromSel.options.length) {
-    _ov.allMonths.forEach((m, i) => {
-      const o1 = document.createElement('option'); o1.value = i; o1.textContent = m.label; fromSel.appendChild(o1);
-      const o2 = document.createElement('option'); o2.value = i; o2.textContent = m.label; toSel.appendChild(o2);
-    });
-    toSel.value = _ov.allMonths.length - 1;
-  }
-}
-
-// ── Init state once (projects/types from real data) ──
-function _ovInitState() {
-  if (_ov.initialized) return;
-  _ov.initialized = true;
-
-  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
-  const projKeys = [...new Set(approved.map(m => m.project || '(ไม่ระบุ)'))].sort();
-  const typeKeys = ['sl','hw','int','ent','dep'];
-
-  _ov.activeProjKeys    = new Set(projKeys);
-  _ov.activeTypeKeys    = new Set(typeKeys);
-  _ov.activeBvaProjKeys = new Set(projKeys);
-
-  // Default: last 12 months
-  _ov.toIdx   = _ov.allMonths.length - 1;
-  _ov.fromIdx = Math.max(0, _ov.toIdx - 11);
-  _ovApplyPresetIdxs(12);
-}
-
-function _ovApplyPresetIdxs(n) {
-  _ov.toIdx   = _ov.allMonths.length - 1;
-  _ov.fromIdx = Math.max(0, _ov.toIdx - n + 1);
-  _ovUpdatePeriodLabel();
-}
-
-function _ovUpdatePeriodLabel() {
-  const el = document.getElementById('ov-period-label');
-  if (!el || !_ov.allMonths.length) return;
-  const from = _ov.allMonths[_ov.fromIdx];
-  const to   = _ov.allMonths[_ov.toIdx];
-  const n    = _ov.toIdx - _ov.fromIdx + 1;
-  if (el) el.textContent = `${from?.label} – ${to?.label} · ${n} เดือน`;
-}
-
-// ── Controls ──
-function ovSetMode(m) {
-  _ov.mode = m;
-  document.querySelectorAll('.ov-mode-btn').forEach(b => b.classList.remove('active'));
-  const btn = document.getElementById('ov-mbtn-' + m);
-  if (btn) btn.classList.add('active');
-  // Show/hide spend-only controls
-  const svw = document.getElementById('ov-spend-view-wrap');
-  const tc  = document.getElementById('ov-type-col');
-  if (svw) svw.style.display = m === 'bva' ? 'none' : 'flex';
-  if (tc)  tc.style.display  = (m === 'bva' || _ov.groupBy === 'project') ? 'none' : '';
-  _ovUpdateKPIs();
-  _ovRenderChart();
-}
-
-function ovSetGroup(g) {
-  _ov.groupBy = g;
-  // Update group buttons
-  document.querySelectorAll('.ov-group-btn').forEach(b => {
-    const active = b.id === 'ov-gbtn-' + g;
-    b.style.background = active ? 'var(--blue)' : 'transparent';
-    b.style.color      = active ? '#fff' : 'var(--text-2)';
-  });
-  // Fix 3: Hide type chips when group by project (not relevant)
-  const typeCol = document.getElementById('ov-type-col');
-  if (typeCol) typeCol.style.display = g === 'type' ? '' : 'none';
-  _ovRenderChart();
-}
-
-function ovSetStack(s) {
-  // Side by side removed — always stacked
-  _ov.stackMode = 'stacked';
-}
-
-function ovSetPreset(n) {
-  _ov.preset = n;
-  document.querySelectorAll('.ov-preset-btn').forEach(b => b.classList.remove('active'));
-  const id = n === 0 ? 'ov-pbtn-0' : 'ov-pbtn-' + n;
-  const btn = document.getElementById(id);
-  if (btn) btn.classList.add('active');
-  const cr = document.getElementById('ov-custom-range');
-  if (n === 0) {
-    if (cr) cr.style.display = 'flex';
-  } else {
-    if (cr) cr.style.display = 'none';
-    _ovApplyPresetIdxs(n);
-    _ovUpdateKPIs();
-    _ovRenderChart();
-  }
-}
-
-function ovApplyCustomRange() {
-  const f = parseInt(document.getElementById('ov-from-sel')?.value ?? 0);
-  const t = parseInt(document.getElementById('ov-to-sel')?.value ?? _ov.allMonths.length - 1);
-  _ov.fromIdx = f;
-  _ov.toIdx   = Math.max(f, t);
-  _ovUpdatePeriodLabel();
-  _ovUpdateKPIs();
-  _ovRenderChart();
-}
-
-function ovToggleProj(k) {
-  if (_ov.activeProjKeys.has(k)) { if (_ov.activeProjKeys.size > 1) _ov.activeProjKeys.delete(k); }
-  else _ov.activeProjKeys.add(k);
-  _ovRenderChips(); _ovUpdateKPIs(); _ovRenderChart();
-}
-function ovToggleType(k) {
-  if (_ov.activeTypeKeys.has(k)) { if (_ov.activeTypeKeys.size > 1) _ov.activeTypeKeys.delete(k); }
-  else _ov.activeTypeKeys.add(k);
-  _ovRenderChips(); _ovUpdateKPIs(); _ovRenderChart();
-}
-function ovToggleBvaProj(k) {
-  if (_ov.activeBvaProjKeys.has(k)) { if (_ov.activeBvaProjKeys.size > 1) _ov.activeBvaProjKeys.delete(k); }
-  else _ov.activeBvaProjKeys.add(k);
-  _ovRenderChips(); _ovUpdateKPIs(); _ovRenderChart();
-}
-
-// ── Chips ──
-function _ovRenderChips() {
-  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
-  const projKeys = [...new Set(approved.map(m => m.project || '(ไม่ระบุ)'))].sort();
-  const typeKeys = ['sl','hw','int','ent','dep'];
-
-  // 2-color only: selected = blue solid, unselected = gray outline
-  const chip = (label, on, onclick) =>
-    `<span onclick="${onclick}" style="display:inline-flex;align-items:center;font-size:11px;padding:4px 11px;border-radius:20px;cursor:pointer;user-select:none;margin-bottom:3px;transition:all 0.12s;border:0.5px solid ${on ? 'transparent' : 'var(--border)'};background:${on ? 'var(--blue)' : 'transparent'};color:${on ? '#fff' : 'var(--text-2)'}">${label}</span>`;
-
-  const projChips = document.getElementById('ov-proj-chips');
-  if (projChips) {
-    projChips.innerHTML = projKeys.map(k =>
-      chip(esc(k), _ov.activeProjKeys.has(k), `ovToggleProj('${esc(k)}')`)
-    ).join('');
-  }
-
-  const typeChips = document.getElementById('ov-type-chips');
-  if (typeChips) {
-    typeChips.innerHTML = typeKeys.map(k =>
-      chip(BGT_TYPE_LABELS[k], _ov.activeTypeKeys.has(k), `ovToggleType('${k}')`)
-    ).join('');
-  }
-
-  const bvaChips = document.getElementById('ov-bva-proj-chips');
-  if (bvaChips) {
-    bvaChips.innerHTML = projKeys.map(k =>
-      chip(esc(k), _ov.activeBvaProjKeys.has(k), `ovToggleBvaProj('${esc(k)}')`)
-    ).join('');
-  }
-
-  const pEl = document.getElementById('ov-proj-count');
-  const tEl = document.getElementById('ov-type-count');
-  if (pEl) pEl.textContent = _ov.activeProjKeys.size === projKeys.length ? '(all)' : `(${_ov.activeProjKeys.size}/${projKeys.length})`;
-  if (tEl) tEl.textContent = _ov.activeTypeKeys.size === typeKeys.length ? '(all)' : `(${_ov.activeTypeKeys.size}/${typeKeys.length})`;
-}
-
-// ── KPIs ──
-function _ovUpdateKPIs() {
-  const months    = _ov.allMonths.slice(_ov.fromIdx, _ov.toIdx + 1);
-  const numMonths = months.length;
-  const fromKey   = months[0]?.key;
-  const toKey     = months[months.length - 1]?.key;
-
-  const activeProjArr = _ov.mode === 'bva' ? [..._ov.activeBvaProjKeys] : [..._ov.activeProjKeys];
-  const activeTypeArr = [..._ov.activeTypeKeys];
-
-  // ── Actual: distribute SL memo items by month (same logic as Forecast tab) ──
-  // This avoids the lump-sum spike problem where a 12-month memo inflates one month
+  // Actual: distribute SL by month, lump-sum others
   let total = 0;
-  activeProjArr.forEach(proj => {
-    const byMonth = buildActualByMonth(proj); // { 'YYYY-MM': { total, memos } }
-    Object.entries(byMonth).forEach(([k, v]) => {
-      if (k >= fromKey && k <= toKey) total += v.total;
-    });
+  projArr.forEach(proj => {
+    const byMonth = buildActualByMonth(proj);
+    Object.entries(byMonth).forEach(([k, v]) => { if (k >= fromKey && k <= toKey) total += v.total; });
   });
-  // For non-SL types (HW/INT/ENT/DEP) still use memo.total filtered by approval date
-  if (_ov.mode === 'spend') {
-    const nonSLTypes = activeTypeArr.filter(t => t !== 'sl');
-    if (nonSLTypes.length) {
-      const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
-      approved.forEach(m => {
-        if (!nonSLTypes.includes(m.type)) return;
-        if (!activeProjArr.includes(m.project || '(ไม่ระบุ)')) return;
-        const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
-        const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-        if (k >= fromKey && k <= toKey) total += Number(m.total) || 0;
-      });
-    }
+  const nonSLTypes = typeArr.filter(t => t !== 'sl');
+  if (nonSLTypes.length) {
+    loadMemos().filter(m => memoStatusKey(m) === 'completed' && nonSLTypes.includes(m.type) && projArr.includes(m.project || '(ไม่ระบุ)')).forEach(m => {
+      const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
+      const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      if (k >= fromKey && k <= toKey) total += Number(m.total) || 0;
+    });
   }
 
-  // Budget from settings
   const currentYear  = String(new Date().getFullYear() + 543);
   const slBudgets    = loadSLBudgets()?.[currentYear] || {};
-  const annualBudget = activeProjArr.reduce((s, p) => s + (slBudgets[p] || 0), 0);
+  const annualBudget = projArr.reduce((s, p) => s + (slBudgets[p] || 0), 0);
   const budgetTotal  = annualBudget > 0 ? (annualBudget / 12) * numMonths : 0;
 
-  // Forecast: use last 3 months avg rate (smoothed) × months remaining in year
   const now = new Date();
   const smooth3Keys = [];
   for (let i = 3; i >= 1; i--) {
@@ -762,16 +386,19 @@ function _ovUpdateKPIs() {
     smooth3Keys.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
   }
   let smooth3Total = 0;
-  activeProjArr.forEach(proj => {
+  projArr.forEach(proj => {
     const byMonth = buildActualByMonth(proj);
     smooth3Keys.forEach(k => { smooth3Total += byMonth[k]?.total || 0; });
   });
   const smoothMonthlyRate = smooth3Total / 3;
   const monthsLeft        = 12 - now.getMonth();
-  const ytdTotal          = getActualInRange(null,
-    `${now.getFullYear()}-01`,
-    `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`
-  );
+  const ytdStart = `${now.getFullYear()}-01`;
+  const ytdEnd   = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  let ytdTotal = 0;
+  projArr.forEach(proj => {
+    const byMonth = buildActualByMonth(proj);
+    Object.entries(byMonth).forEach(([k, v]) => { if (k >= ytdStart && k <= ytdEnd) ytdTotal += v.total; });
+  });
   const forecastTotal = ytdTotal + smoothMonthlyRate * monthsLeft;
 
   const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
@@ -790,128 +417,57 @@ function _ovUpdateKPIs() {
     const fColor = forecastTotal > annualBudget ? 'var(--red)' : forecastTotal / annualBudget >= 0.9 ? 'var(--amber)' : 'var(--green)';
     const fEl = document.getElementById('bgt-kpi-forecast');
     if (fEl) { fEl.textContent = money(Math.round(forecastTotal)); fEl.style.color = fColor; }
-    setText('bgt-kpi-forecast-sub', 'คาดการณ์ถึงสิ้นปี (avg 3 เดือนล่าสุด)');
+    setText('bgt-kpi-forecast-sub', 'avg 3 เดือนล่าสุด');
   } else {
     setText('bgt-kpi-budget', '—');
     const budEl = document.getElementById('bgt-kpi-budget-sub');
-    if (budEl) {
-      budEl.innerHTML = `ยังไม่ได้ตั้งงบ — <span style="color:var(--blue);cursor:pointer;text-decoration:underline" onclick="switchSLNav('budgetsettings')">ตั้งค่าที่นี่</span>`;
-    }
+    if (budEl) budEl.innerHTML = `ยังไม่ได้ตั้งงบ — <span style="color:var(--blue);cursor:pointer;text-decoration:underline" onclick="switchSLNav('budgetsettings')">ตั้งค่าที่นี่</span>`;
     setText('bgt-kpi-remaining', '—');
     setText('bgt-kpi-remaining-sub', 'ต้องตั้งงบก่อน');
     const fEl = document.getElementById('bgt-kpi-forecast');
     if (fEl) { fEl.textContent = money(Math.round(forecastTotal)); fEl.style.color = 'var(--amber)'; }
-    setText('bgt-kpi-forecast-sub', 'คาดการณ์ถึงสิ้นปี (ไม่มีงบอ้างอิง)');
+    setText('bgt-kpi-forecast-sub', 'avg 3 เดือนล่าสุด (ไม่มีงบอ้างอิง)');
   }
 }
 
-// ── Main chart ──
+// ── Bar chart ──
 function _ovRenderChart() {
   const canvas = document.getElementById('ov-main-chart');
   if (!canvas || typeof Chart === 'undefined') return;
   if (canvas._chart) { canvas._chart.destroy(); canvas._chart = null; }
 
-  const months    = _ov.allMonths.slice(_ov.fromIdx, _ov.toIdx + 1);
-  const labels    = months.map(m => m.label);
-  const approved  = loadMemos().filter(m => memoStatusKey(m) === 'completed');
-  const typeKeys  = [..._ov.activeTypeKeys];
-  const projKeys  = [..._ov.activeProjKeys];
+  const months   = _ov.allMonths.slice(_ov.fromIdx, _ov.toIdx + 1);
+  const labels   = months.map(m => m.label);
+  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
+  const typeKeys = [..._ov.activeTypeKeys];
+  const projKeys = [..._ov.activeProjKeys];
 
-  // ── Budget vs Actual mode ──
-  if (_ov.mode === 'bva') {
-    const bvaProjs = [..._ov.activeBvaProjKeys];
-    const currentYear = String(new Date().getFullYear() + 543);
-    const slBudgets   = loadSLBudgets()?.[currentYear] || {};
-    const annualBudget = bvaProjs.reduce((s, p) => s + (slBudgets[p] || 0), 0);
-    const monthlyBudget = annualBudget / 12;
+  const getVal = (memo, monthKey) => {
+    const d = parseThaiDate(memo.date) || new Date(memo.updatedAt || memo.createdAt);
+    const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    return k === monthKey ? (Number(memo.total) || 0) : 0;
+  };
 
-    const actualVals = months.map(m => {
-      return approved
-        .filter(memo => {
-          const d = parseThaiDate(memo.date) || new Date(memo.updatedAt || memo.createdAt);
-          const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-          return k === m.key && bvaProjs.includes(memo.project || '(ไม่ระบุ)');
-        })
-        .reduce((s, memo) => s + (Number(memo.total) || 0), 0);
-    });
-
-    const budgetVals = months.map(() => Math.round(monthlyBudget));
-
-    canvas._chart = new Chart(canvas, {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [
-          { label: 'Budget', data: budgetVals, backgroundColor: '#B5D4F4', borderRadius: 3, borderSkipped: false },
-          { label: 'Actual', data: actualVals, backgroundColor: '#185FA5', borderRadius: 3, borderSkipped: false },
-        ],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: {
-          legend: { position: 'bottom', labels: { font: { size: 11 } } },
-          tooltip: {
-            callbacks: {
-              label: ctx => {
-                const val   = ctx.raw || 0;
-                const mIdx  = ctx.dataIndex;
-                const budget = budgetVals[mIdx] || 0;
-                if (ctx.datasetIndex === 1 && budget > 0) {
-                  const pct = Math.round(val / budget * 100);
-                  return ` Actual: ${money(Math.round(val))}  (${pct}% of budget)`;
-                }
-                return ` ${ctx.dataset.label}: ${money(Math.round(val))}`;
-              },
-            },
-          },
-        },
-        scales: {
-          x: { grid: { display: false }, ticks: { font: { size: 10 } } },
-          y: { ticks: { callback: v => '฿' + Number(v).toLocaleString('th-TH'), font: { size: 10 } } },
-        },
-      },
-    });
-    return;
-  }
-
-  // ── Spend mode ──
-  // Build datasets based on groupBy
   let datasets;
   if (_ov.groupBy === 'type') {
     datasets = typeKeys.map(tk => ({
       label: BGT_TYPE_LABELS[tk] || tk.toUpperCase(),
-      backgroundColor: BGT_TYPE_COLORS[tk],
-      borderRadius: 3,
-      borderSkipped: false,
-      data: months.map(m =>
-        approved
-          .filter(memo => {
-            const d = parseThaiDate(memo.date) || new Date(memo.updatedAt || memo.createdAt);
-            const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-            return k === m.key && memo.type === tk && projKeys.includes(memo.project || '(ไม่ระบุ)');
-          })
-          .reduce((s, memo) => s + (Number(memo.total) || 0), 0)
-      ),
+      backgroundColor: OV_TYPE_COLORS[tk],
+      borderRadius: 3, borderSkipped: false,
+      data: months.map(m => approved
+        .filter(memo => projKeys.includes(memo.project || '(ไม่ระบุ)') && memo.type === tk)
+        .reduce((s, memo) => s + getVal(memo, m.key), 0)),
     }));
   } else {
     datasets = projKeys.map((pk, pi) => ({
       label: pk,
-      backgroundColor: BGT_PROJ_COLORS[pi % BGT_PROJ_COLORS.length],
-      borderRadius: 3,
-      borderSkipped: false,
-      data: months.map(m =>
-        approved
-          .filter(memo => {
-            const d = parseThaiDate(memo.date) || new Date(memo.updatedAt || memo.createdAt);
-            const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-            return k === m.key && (memo.project || '(ไม่ระบุ)') === pk && typeKeys.includes(memo.type);
-          })
-          .reduce((s, memo) => s + (Number(memo.total) || 0), 0)
-      ),
+      backgroundColor: OV_PROJ_COLORS[pi % OV_PROJ_COLORS.length],
+      borderRadius: 3, borderSkipped: false,
+      data: months.map(m => approved
+        .filter(memo => (memo.project || '(ไม่ระบุ)') === pk && typeKeys.includes(memo.type))
+        .reduce((s, memo) => s + getVal(memo, m.key), 0)),
     }));
   }
-
-  const isStacked = _ov.stackMode === 'stacked';
 
   canvas._chart = new Chart(canvas, {
     type: 'bar',
@@ -919,37 +475,32 @@ function _ovRenderChart() {
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'bottom', labels: { font: { size: 11 } } },
+        legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 12 } },
         tooltip: {
           callbacks: {
             label: ctx => {
-              const val = ctx.raw || 0;
-              if (val === 0) return null;
-              if (isStacked) {
-                const mIdx      = ctx.dataIndex;
-                const monthTotal = datasets.reduce((s, ds) => s + (ds.data[mIdx] || 0), 0);
-                const pct        = monthTotal > 0 ? Math.round(val / monthTotal * 100) : 0;
-                return ` ${ctx.dataset.label}: ${money(Math.round(val))}  (${pct}%)`;
-              }
-              return ` ${ctx.dataset.label}: ${money(Math.round(val))}`;
+              const val = ctx.raw || 0; if (!val) return null;
+              const mIdx = ctx.dataIndex;
+              const monthTotal = datasets.reduce((s, ds) => s + (ds.data[mIdx] || 0), 0);
+              const pct = monthTotal > 0 ? Math.round(val / monthTotal * 100) : 0;
+              return ` ${ctx.dataset.label}: ${money(Math.round(val))} (${pct}%)`;
             },
             footer: ctx => {
-              if (!isStacked || !ctx.length) return '';
-              const mIdx      = ctx[0].dataIndex;
-              const monthTotal = datasets.reduce((s, ds) => s + (ds.data[mIdx] || 0), 0);
-              return `Total: ${money(Math.round(monthTotal))}`;
+              if (!ctx.length) return '';
+              const mIdx = ctx[0].dataIndex;
+              const t = datasets.reduce((s, ds) => s + (ds.data[mIdx] || 0), 0);
+              return t > 0 ? `Total: ${money(Math.round(t))}` : '';
             },
           },
         },
       },
       scales: {
-        x: { stacked: isStacked, grid: { display: false }, ticks: { font: { size: 10 } } },
-        y: { stacked: isStacked, ticks: { callback: v => '฿' + Number(v).toLocaleString('th-TH'), font: { size: 10 } } },
+        x: { stacked: true, grid: { display: false }, ticks: { font: { size: 10 } } },
+        y: { stacked: true, ticks: { callback: v => '฿' + Number(v).toLocaleString('th-TH'), font: { size: 10 } } },
       },
     },
   });
 
-  // ── Fix 2: Donut chart — proportion summary for current period ──
   _ovRenderDonut(datasets);
 }
 
@@ -959,24 +510,20 @@ function _ovRenderDonut(datasets) {
   if (!donutCanvas || typeof Chart === 'undefined') return;
   if (donutCanvas._chart) { donutCanvas._chart.destroy(); donutCanvas._chart = null; }
 
-  // Sum all months per dataset
   const totals = datasets.map(ds => ds.data.reduce((s, v) => s + (v || 0), 0));
   const grand  = totals.reduce((s, v) => s + v, 0);
-  if (grand === 0) { if (legendEl) legendEl.innerHTML = ''; return; }
+  if (!grand) { if (legendEl) legendEl.innerHTML = ''; return; }
 
-  // Filter out zero datasets
-  const visible = datasets.map((ds, i) => ({ label: ds.label, color: ds.backgroundColor, total: totals[i] }))
-    .filter(d => d.total > 0);
+  const visible = datasets.map((ds, i) => ({ label: ds.label, color: ds.backgroundColor, total: totals[i] })).filter(d => d.total > 0);
 
   donutCanvas._chart = new Chart(donutCanvas, {
     type: 'doughnut',
     data: {
       labels: visible.map(d => d.label),
-      datasets: [{ data: visible.map(d => d.total), backgroundColor: visible.map(d => Array.isArray(d.color) ? d.color[0] : d.color), borderWidth: 1.5, borderColor: '#fff', hoverOffset: 4 }],
+      datasets: [{ data: visible.map(d => d.total), backgroundColor: visible.map(d => d.color), borderWidth: 1.5, borderColor: '#fff', hoverOffset: 4 }],
     },
     options: {
-      responsive: true, maintainAspectRatio: false,
-      cutout: '65%',
+      responsive: true, maintainAspectRatio: false, cutout: '65%',
       plugins: {
         legend: { display: false },
         tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${money(Math.round(ctx.raw))} (${Math.round(ctx.raw/grand*100)}%)` } },
@@ -984,19 +531,79 @@ function _ovRenderDonut(datasets) {
     },
   });
 
-  // Custom legend
   if (legendEl) {
-    legendEl.innerHTML = visible.map(d => {
-      const pct = Math.round(d.total / grand * 100);
-      const col = Array.isArray(d.color) ? d.color[0] : d.color;
-      return `<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text-2)">
-        <span style="width:8px;height:8px;border-radius:2px;background:${col};flex-shrink:0"></span>
+    legendEl.innerHTML = visible.map(d => `
+      <div style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text-2)">
+        <span style="width:8px;height:8px;border-radius:2px;background:${d.color};flex-shrink:0"></span>
         <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.label}</span>
-        <span style="font-weight:600;color:var(--text)">${pct}%</span>
-      </div>`;
-    }).join('');
+        <span style="font-weight:500;color:var(--text)">${Math.round(d.total/grand*100)}%</span>
+      </div>`).join('');
   }
 }
+
+// ── Section B: Budget vs Actual rows ──
+function _ovRenderBvA() {
+  const container = document.getElementById('ov-bva-rows');
+  if (!container) return;
+
+  const months    = _ov.allMonths.slice(_ov.fromIdx, _ov.toIdx + 1);
+  const fromKey   = months[0]?.key;
+  const toKey     = months[months.length - 1]?.key;
+  const numMonths = months.length;
+  const projKeys  = [..._ov.activeProjKeys];
+  const currentYear = String(new Date().getFullYear() + 543);
+  const slBudgets   = loadSLBudgets()?.[currentYear] || {};
+
+  // Render BvA project chips
+  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
+  const allProjKeys = [...new Set(approved.map(m => m.project || '(ไม่ระบุ)'))].sort();
+  const bvaChips = document.getElementById('ov-bva-proj-chips');
+  if (bvaChips) {
+    bvaChips.innerHTML = allProjKeys.map(k => {
+      const on = _ov.activeProjKeys.has(k);
+      return `<span onclick="ovToggleProj('${esc(k)}')" style="display:inline-flex;align-items:center;font-size:11px;padding:3px 10px;border-radius:20px;cursor:pointer;user-select:none;border:0.5px solid ${on ? 'transparent' : 'var(--border)'};background:${on ? 'var(--blue)' : 'transparent'};color:${on ? '#fff' : 'var(--text-2)'}">${esc(k)}</span>`;
+    }).join('');
+  }
+
+  const rows = projKeys.map(proj => {
+    let actual = 0;
+    const byMonth = buildActualByMonth(proj);
+    Object.entries(byMonth).forEach(([k, v]) => { if (k >= fromKey && k <= toKey) actual += v.total; });
+
+    const annualBgt = slBudgets[proj] || 0;
+    const budget    = annualBgt > 0 ? (annualBgt / 12) * numMonths : null;
+    const hasBudget = budget !== null && budget > 0;
+    const pct       = hasBudget ? Math.round(actual / budget * 100) : null;
+    const color     = pct === null ? 'var(--text-3)' : pct > 100 ? 'var(--red)' : pct >= 90 ? 'var(--amber)' : 'var(--blue)';
+    const barW      = pct !== null ? Math.min(pct, 100) : 0;
+    return { proj, actual, budget, hasBudget, pct, color, barW };
+  }).filter(d => d.actual > 0 || d.hasBudget);
+
+  if (!rows.length) {
+    container.innerHTML = `<div style="padding:20px;text-align:center;font-size:12px;color:var(--text-3)">ยังไม่มีข้อมูล — Approve SL Memo หรือตั้งงบประมาณก่อน</div>`;
+    return;
+  }
+
+  container.innerHTML = rows.map(d => `
+    <div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+        <span style="font-weight:500;color:var(--text)">${esc(d.proj)}</span>
+        <span style="color:var(--text-2)">
+          ${money(Math.round(d.actual))} / ${d.hasBudget ? money(Math.round(d.budget)) : '— (ไม่มีงบ)'}
+          ${d.pct !== null ? `<span style="margin-left:6px;font-weight:500;color:${d.color}">${d.pct}%</span>` : ''}
+        </span>
+      </div>
+      <div style="height:8px;background:var(--border);border-radius:4px;overflow:hidden">
+        <div style="width:${d.barW}%;height:100%;background:${d.color};border-radius:4px;transition:width .3s"></div>
+      </div>
+      ${d.hasBudget ? `<div style="font-size:10px;color:${d.color};margin-top:3px">${d.pct > 100 ? `เกินงบ ${money(Math.round(d.actual - d.budget))}` : d.pct >= 90 ? `เหลือ ${money(Math.round(d.budget - d.actual))} — ใกล้ limit` : `เหลือ ${money(Math.round(d.budget - d.actual))}`}</div>` : ''}
+    </div>`).join('');
+}
+
+// Stubs kept for backward compat
+function ovSetMode(m) { _ovUpdateKPIs(); _ovRenderChart(); _ovRenderBvA(); }
+function ovSetStack(s) {}
+
 
 // ══════════════════════════════════════════
 // SUB-TAB 2: SL + INFRA
