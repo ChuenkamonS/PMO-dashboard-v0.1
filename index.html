@@ -709,9 +709,9 @@ svg.icon { display: inline-block; vertical-align: middle; }
           Pending Approval
           <span class="sb-badge">2</span>
         </div>
-        <div class="sb-sub-item" onclick="swView('history',this,'Memo History')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.95"/></svg>
-          History
+        <div class="sb-sub-item" onclick="swView('history',this,'All Memos')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          All Memos
         </div>
       </div>
 
@@ -1081,40 +1081,26 @@ svg.icon { display: inline-block; vertical-align: middle; }
 
       <!-- ════ PENDING ════ -->
       <div id="view-pending" class="view">
+        <!-- KPI: single focus — how many need action -->
         <div class="metric-row" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
           <div class="metric-card">
-            <div class="metric-label">Awaiting My Approval</div>
+            <div class="metric-label">Awaiting Approval</div>
             <div class="metric-val" id="pending-count" style="color:var(--amber)">0</div>
-            <div class="metric-sub">ต้องดำเนินการ</div>
+            <div class="metric-sub">รอตัดสินใจ</div>
           </div>
           <div class="metric-card">
-            <div class="metric-label">My Requests Pending Approval</div>
-            <div class="metric-val" id="pending-my-submitted" style="color:var(--blue)">0</div>
-            <div class="metric-sub">รอผู้อื่นอนุมัติ</div>
+            <div class="metric-label">Waiting longest</div>
+            <div class="metric-val" id="pending-oldest-days" style="color:var(--red)">—</div>
+            <div class="metric-sub">วัน (นานสุด)</div>
           </div>
           <div class="metric-card">
-            <div class="metric-label">Drafts</div>
-            <div class="metric-val" id="pending-draft-count" style="color:var(--text-2)">0</div>
-            <div class="metric-sub">บันทึกไว้ยังไม่ส่ง</div>
+            <div class="metric-label">Total Amount</div>
+            <div class="metric-val" id="pending-total-amt" style="color:var(--blue);font-size:18px">—</div>
+            <div class="metric-sub">รวมวงเงินที่รออนุมัติ</div>
           </div>
         </div>
 
-        <!-- Tabs -->
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-          <div style="display:flex;gap:4px;background:var(--bg);border-radius:var(--r);padding:4px">
-            <button class="pend-tab-btn active" data-tab="submitted" onclick="switchPendingTab('submitted')" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:var(--surface);color:var(--text)">
-              My Submitted <span class="tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
-            </button>
-            <button class="pend-tab-btn" data-tab="awaiting" onclick="switchPendingTab('awaiting')" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
-              Awaiting My Approval <span class="tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
-            </button>
-            <button class="pend-tab-btn" data-tab="drafts" onclick="switchPendingTab('drafts')" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
-              Drafts <span class="tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Search & Filters -->
+        <!-- Filters -->
         <div class="filter-row" style="margin-bottom:12px">
           <input type="text" id="pend-search" placeholder="🔍 ค้นหา Memo No, Project, Requester..."
             style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:220px;outline:none"
@@ -1128,21 +1114,41 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <option value="all">ทุกโครงการ</option>
           </select>
           <select id="pend-sort" onchange="renderPendingContent()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+            <option value="wait-desc">รอนานสุด</option>
             <option value="date-desc">วันที่ล่าสุด</option>
             <option value="amount-desc">วงเงิน มาก→น้อย</option>
             <option value="amount-asc">วงเงิน น้อย→มาก</option>
-            <option value="wait-desc">รอนานสุด</option>
           </select>
         </div>
 
         <div id="pending-list"></div>
       </div>
 
-      <!-- ════ HISTORY ════ -->
+      <!-- ════ ALL MEMOS (History) ════ -->
       <div id="view-history" class="view">
+        <!-- Status tabs -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <div style="display:flex;gap:4px;background:var(--bg);border-radius:var(--r);padding:4px">
+            <button class="hist-tab-btn active" data-status="all" onclick="switchHistTab('all',this)" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:var(--surface);color:var(--blue)">
+              All <span class="hist-tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
+            </button>
+            <button class="hist-tab-btn" data-status="draft" onclick="switchHistTab('draft',this)" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
+              Draft <span class="hist-tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
+            </button>
+            <button class="hist-tab-btn" data-status="pending" onclick="switchHistTab('pending',this)" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
+              Pending <span class="hist-tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
+            </button>
+            <button class="hist-tab-btn" data-status="completed" onclick="switchHistTab('completed',this)" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
+              Approved <span class="hist-tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
+            </button>
+            <button class="hist-tab-btn" data-status="rejected" onclick="switchHistTab('rejected',this)" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
+              Rejected <span class="hist-tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
+            </button>
+          </div>
+        </div>
         <div class="filter-row" style="margin-bottom:12px">
           <input type="search" id="hist-search" placeholder="🔍 ค้นหา Memo, ผู้ขอ, โครงการ…" oninput="renderHistoryMemos()">
-          <select id="hist-status" onchange="renderHistoryMemos()">
+          <select id="hist-status" onchange="renderHistoryMemos()" style="display:none">
             <option value="all">ทุกสถานะ</option>
             <option value="completed">Completed</option>
             <option value="rejected">Rejected</option>
