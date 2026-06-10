@@ -188,11 +188,16 @@ async function savePurchaseOrderAsync(po) {
   const idx = all.findIndex(p => p.id === po.id);
   if (idx >= 0) all[idx] = po; else all.push(po);
   storePurchaseOrders(all);
-  _poCache = all;
+  _poCache = [...all]; // keep local cache updated
   if (await checkSupa()) {
     try {
-      await supaFetch('purchase_orders', 'POST', poToDb(po), '?on_conflict=id');
-      _poCache = null;
+      // Use PATCH to update existing PO, POST for new ones
+      const existing = await supaFetch('purchase_orders', 'GET', null, `?id=eq.${encodeURIComponent(po.id)}&select=id`);
+      if (existing && existing.length > 0) {
+        await supaFetch('purchase_orders', 'PATCH', poToDb(po), `?id=eq.${encodeURIComponent(po.id)}`);
+      } else {
+        await supaFetch('purchase_orders', 'POST', poToDb(po), '');
+      }
     } catch(e) { console.warn('Supabase PO save failed', e.message); }
   }
 }
@@ -237,11 +242,16 @@ function createPurchaseOrdersFromMemo(memo) {
       updatedAt:   new Date().toISOString(),
     };
     existing.push(po);
-    // Use upsert — on_conflict=id means if PO already exists, skip (no update needed)
+    // Save to Supabase only if not already there
     if (checkSupa) {
-      checkSupa().then(ok => {
-        if (ok) supaFetch('purchase_orders', 'POST', poToDb(po), '?on_conflict=id&ignore_duplicates=true')
-          .catch(e => console.warn('PO upsert skipped (likely duplicate):', e.message));
+      checkSupa().then(async ok => {
+        if (!ok) return;
+        try {
+          // Check if PO already exists in Supabase
+          const existing_supa = await supaFetch('purchase_orders', 'GET', null, `?id=eq.${encodeURIComponent(poId)}&select=id`);
+          if (existing_supa && existing_supa.length > 0) return; // already exists, skip
+          await supaFetch('purchase_orders', 'POST', poToDb(po), '');
+        } catch(e) { console.warn('PO save failed:', e.message); }
       });
     }
   });
@@ -906,8 +916,12 @@ function submitMarkArrived() {
   if (!qty || qty < 1) { alert('กรุณากรอกจำนวนที่มาถึง'); return; }
   closeMarkArrivedModal();
   markArrived(poId, qty, serials).then(() => {
-    renderPurchaseOrders();
-    renderDevice();
+    // Render from local cache immediately — don't re-fetch from Supabase
+    // (async save is in-flight but local state is already updated)
+    _poCache = null; // clear cache so loadPurchaseOrders reads fresh localStorage
+    _devCache = null;
+    _renderPOTable();
+    _renderDeviceTable();
   });
 }
 
