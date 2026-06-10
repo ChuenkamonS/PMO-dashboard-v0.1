@@ -1269,61 +1269,66 @@ svg.icon { display: inline-block; vertical-align: middle; }
           <!-- Interactive chart card -->
           <div class="card" style="padding:16px">
 
-            <!-- Top row: title + mode toggle -->
-            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+            <!-- Title + mode -->
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:14px">
               <div>
                 <div style="font-size:12px;font-weight:600;color:var(--text)">Monthly Spend</div>
                 <div style="font-size:11px;color:var(--text-3);margin-top:2px" id="ov-period-label"></div>
               </div>
-              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                <span style="font-size:11px;color:var(--text-2)">Mode</span>
+              <div style="display:flex;gap:5px;">
                 <button class="btn-sm ov-mode-btn active" id="ov-mbtn-spend" onclick="ovSetMode('spend')">Spend</button>
                 <button class="btn-sm ov-mode-btn" id="ov-mbtn-bva" onclick="ovSetMode('bva')">Budget vs Actual</button>
               </div>
             </div>
 
-            <!-- Period + grouping controls -->
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+            <!-- Period + view controls -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px">
               <div>
                 <div style="font-size:11px;font-weight:500;color:var(--text-2);margin-bottom:5px">Period</div>
-                <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">
+                <div style="display:flex;gap:5px;flex-wrap:wrap;">
                   <button class="btn-sm ov-preset-btn" id="ov-pbtn-3" onclick="ovSetPreset(3)">3M</button>
                   <button class="btn-sm ov-preset-btn" id="ov-pbtn-6" onclick="ovSetPreset(6)">6M</button>
                   <button class="btn-sm ov-preset-btn active" id="ov-pbtn-12" onclick="ovSetPreset(12)">12M</button>
                   <button class="btn-sm ov-preset-btn" id="ov-pbtn-0" onclick="ovSetPreset(0)">Custom</button>
                 </div>
-                <div id="ov-custom-range" style="display:none;margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                <div id="ov-custom-range" style="display:none;margin-top:7px;gap:6px;align-items:center;">
                   <select id="ov-from-sel" onchange="ovApplyCustomRange()" class="ri" style="font-size:11px;padding:3px 6px;width:auto"></select>
                   <span style="font-size:11px;color:var(--text-3)">→</span>
                   <select id="ov-to-sel" onchange="ovApplyCustomRange()" class="ri" style="font-size:11px;padding:3px 6px;width:auto"></select>
                 </div>
               </div>
-              <div id="ov-spend-grouping">
-                <div style="font-size:11px;font-weight:500;color:var(--text-2);margin-bottom:5px">Group by</div>
-                <div style="display:flex;gap:5px;flex-wrap:wrap">
-                  <button class="btn-sm ov-group-btn active" id="ov-gbtn-type" onclick="ovSetGroup('type')">Type</button>
-                  <button class="btn-sm ov-group-btn" id="ov-gbtn-project" onclick="ovSetGroup('project')">Project</button>
-                  <button class="btn-sm ov-stack-btn active" id="ov-sbtn-stacked" onclick="ovSetStack('stacked')" style="margin-left:6px">Stacked</button>
-                  <button class="btn-sm ov-stack-btn" id="ov-sbtn-grouped" onclick="ovSetStack('grouped')">Grouped</button>
+
+              <div id="ov-spend-view-wrap">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                  <div style="font-size:11px;font-weight:500;color:var(--text-2)">แสดงแต่ละแท่งเป็น</div>
+                  <div style="display:flex;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden;">
+                    <button id="ov-sbtn-stacked" onclick="ovSetStack('stacked')" style="font-size:10px;padding:3px 8px;border:none;background:var(--blue);color:#fff;cursor:pointer;">Stacked</button>
+                    <button id="ov-sbtn-grouped" onclick="ovSetStack('grouped')" style="font-size:10px;padding:3px 8px;border:none;background:transparent;color:var(--text-2);cursor:pointer;">Side by side</button>
+                  </div>
+                </div>
+                <div style="display:flex;gap:8px;">
+                  <div id="ov-vcard-type" onclick="ovSetGroup('type')" style="flex:1;padding:10px 12px;border-radius:var(--r-sm);border:1.5px solid var(--blue);cursor:pointer;background:var(--card-bg)">
+                    <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:2px">แยกตาม Type</div>
+                    <div style="font-size:10px;color:var(--text-3);line-height:1.4">แต่ละสี = SL / HW / INT...<br>เห็นว่าจ่ายไปกับอะไร</div>
+                  </div>
+                  <div id="ov-vcard-project" onclick="ovSetGroup('project')" style="flex:1;padding:10px 12px;border-radius:var(--r-sm);border:0.5px solid var(--border);cursor:pointer;background:var(--card-bg)">
+                    <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:2px">แยกตาม Project</div>
+                    <div style="font-size:10px;color:var(--text-3);line-height:1.4">แต่ละสี = Geo9 / AOA-MP...<br>เห็นว่าโปรเจคไหนใช้เงิน</div>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <!-- Project + Type chips -->
-            <div id="ov-spend-filters" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+            <!-- Project chips (always shown) + Type chips (spend only) -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
               <div>
                 <div style="font-size:11px;font-weight:500;color:var(--text-2);margin-bottom:5px">Projects <span id="ov-proj-count" style="color:var(--text-3);font-weight:400"></span></div>
                 <div style="display:flex;gap:5px;flex-wrap:wrap" id="ov-proj-chips"></div>
               </div>
-              <div>
+              <div id="ov-type-col">
                 <div style="font-size:11px;font-weight:500;color:var(--text-2);margin-bottom:5px">Types <span id="ov-type-count" style="color:var(--text-3);font-weight:400"></span></div>
                 <div style="display:flex;gap:5px;flex-wrap:wrap" id="ov-type-chips"></div>
               </div>
-            </div>
-
-            <div id="ov-bva-filters" style="display:none;margin-bottom:12px">
-              <div style="font-size:11px;font-weight:500;color:var(--text-2);margin-bottom:5px">Projects</div>
-              <div style="display:flex;gap:5px;flex-wrap:wrap" id="ov-bva-proj-chips"></div>
             </div>
 
             <div style="height:260px"><canvas id="ov-main-chart"></canvas></div>
