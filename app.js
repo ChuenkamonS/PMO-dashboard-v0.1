@@ -1,2150 +1,557 @@
-<!DOCTYPE html>
-<html lang="th">
-<head>
-<meta charset="UTF-8">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23185FA5'/><circle cx='16' cy='16' r='8' fill='white'/></svg>">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PMO Dashboard — Orbit Digital</title>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<style>
-:root {
-  --blue:        #185FA5;
-  --blue-50:     #E6F1FB;
-  --blue-100:    #B5D4F4;
-  --blue-600:    #185FA5;
-  --blue-800:    #0C447C;
-  --blue-900:    #042C53;
-  --green:       #3B6D11;
-  --green-50:    #EAF3DE;
-  --green-200:   #97C459;
-  --amber:       #854F0B;
-  --amber-50:    #FAEEDA;
-  --amber-200:   #EF9F27;
-  --red:         #A32D2D;
-  --red-50:      #FCEBEB;
-  --red-200:     #F09595;
-  --gray:        #5F5E5A;
-  --gray-50:     #F1EFE8;
-  --gray-200:    #B4B2A9;
-  --purple:      #3C3489;
-  --purple-50:   #EEEDFE;
-  --bg:          #F4F3EF;
-  --surface:     #FFFFFF;
-  --border:      rgba(0,0,0,0.07);
-  --border-md:   rgba(0,0,0,0.12);
-  --text:        #1C1C1A;
-  --text-2:      #5F5E5A;
-  --text-3:      #A09E98;
-  --r:           10px;
-  --r-sm:        6px;
-  --sidebar-w:   196px;
+// ─────────────────────────────────────────
+// Supabase client + storage layer
+// Replaces localStorage for memos, licenses, devices
+// ─────────────────────────────────────────
+const SUPA_URL = 'https://wokqtivoytzgfuelgeho.supabase.co';
+const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indva3F0aXZveXR6Z2Z1ZWxnZWhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyNTU1NjIsImV4cCI6MjA5NDgzMTU2Mn0.oGoGLusBPA-P3dIDANOrqdgV9aqiAdPhVE9dGcE0H-Q';
+
+// ── Supabase REST helper ──
+async function supaFetch(table, method='GET', body=null, query='') {
+  const url = SUPA_URL + '/rest/v1/' + table + query;
+  const headers = {
+    'apikey': SUPA_KEY,
+    'Authorization': 'Bearer ' + SUPA_KEY,
+    'Content-Type': 'application/json',
+    'Prefer': method === 'POST' ? 'return=representation' : 'return=representation',
+  };
+  if(method === 'GET') headers['Accept'] = 'application/json';
+  const resp = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : null });
+  if(!resp.ok) {
+    const err = await resp.text();
+    throw new Error('Supabase ' + method + ' ' + table + ': ' + err);
+  }
+  const text = await resp.text();
+  return text ? JSON.parse(text) : null;
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; }
-
-body {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  font-size: 14px;
-  line-height: 1.6;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
+// ── Memo field mapping: JS camelCase ↔ DB snake_case ──
+function memoToDb(m) {
+  return {
+    id: m.id || m.memoNo,
+    memo_no: m.memoNo,
+    type: m.type, type_label: m.typeLabel,
+    status: m.status || 'pending',
+    project: m.project, subject: m.subject, reason: m.reason,
+    to: m.to, date: m.date, total: Number(m.total)||0,
+    amount_words: m.amountWords,
+    requester_name: m.requesterName, requester_title: m.requesterTitle,
+    reviewer_name: m.reviewerName, reviewer_title: m.reviewerTitle, reviewer_date: m.reviewerDate,
+    approver_name: m.approverName, approver_title: m.approverTitle, approver_date: m.approverDate,
+    approved_by: m.approvedBy, rejected_by: m.rejectedBy,
+    approval_note: m.approvalNote, rejection_reason: m.rejectionReason,
+    fx_rate: m.fxRate || null,
+    sections: m.sections || [], sl_items: m.slItems || [], audit_log: m.auditLog || [],
+    budget_source: m.budgetSource || null,
+    submitted_at: m.submittedAt || null,
+    approved_at: m.approvedAt || null, rejected_at: m.rejectedAt || null,
+    created_at: m.createdAt || new Date().toISOString(),
+    updated_at: m.updatedAt || new Date().toISOString(),
+  };
+}
+function dbToMemo(r) {
+  return {
+    id: r.memo_no, memoNo: r.memo_no,
+    type: r.type, typeLabel: r.type_label,
+    status: r.status, project: r.project, subject: r.subject, reason: r.reason,
+    to: r.to, date: r.date, total: Number(r.total)||0, amountWords: r.amount_words,
+    requesterName: r.requester_name, requesterTitle: r.requester_title,
+    reviewerName: r.reviewer_name, reviewerTitle: r.reviewer_title, reviewerDate: r.reviewer_date,
+    approverName: r.approver_name, approverTitle: r.approver_title, approverDate: r.approver_date,
+    approvedBy: r.approved_by, rejectedBy: r.rejected_by,
+    approvalNote: r.approval_note, rejectionReason: r.rejection_reason,
+    fxRate: r.fx_rate, sections: r.sections || [], slItems: r.sl_items || [], auditLog: r.audit_log || [],
+    budgetSource: r.budget_source || null,
+    submittedAt: r.submitted_at, approvedAt: r.approved_at, rejectedAt: r.rejected_at,
+    createdAt: r.created_at, updatedAt: r.updated_at,
+  };
 }
 
-/* ── LAYOUT ── */
-.layout { display: flex; flex: 1; overflow: hidden; }
+// ── Memo storage (async, with localStorage fallback) ──
+const MEMO_KEY = 'orbit-pmo-memos-v1';
+let _memCache = null;
+let _supaAvailable = null;
 
-/* ── SIDEBAR ── */
-.sidebar {
-  width: var(--sidebar-w);
-  flex-shrink: 0;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
-.sb-logo {
-  padding: 16px 14px 14px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-.sb-dot {
-  width: 28px; height: 28px;
-  border-radius: 7px;
-  background: var(--blue);
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-}
-.sb-dot svg { width: 14px; height: 14px; fill: #fff; }
-.sb-brand { font-size: 12px; font-weight: 600; color: var(--text); line-height: 1.3; }
-.sb-brand-sub { font-size: 10px; color: var(--text-3); font-weight: 400; }
-
-.sb-nav { padding: 10px 8px; flex: 1; }
-.sb-section {
-  font-size: 9px; font-weight: 600;
-  color: var(--text-3);
-  letter-spacing: .7px;
-  text-transform: uppercase;
-  padding: 0 8px;
-  margin: 12px 0 4px;
-}
-.sb-section:first-child { margin-top: 0; }
-
-.sb-item {
-  display: flex; align-items: center; gap: 8px;
-  padding: 7px 8px;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  color: var(--text-2);
-  font-size: 12px;
-  font-weight: 500;
-  margin-bottom: 1px;
-  transition: background .12s, color .12s;
-  user-select: none;
-}
-.sb-item svg { width: 15px; height: 15px; flex-shrink: 0; opacity: .7; }
-.sb-item:hover { background: var(--bg); color: var(--text); }
-.sb-item:hover svg { opacity: 1; }
-.sb-item.active { background: var(--blue-50); color: var(--blue-800); }
-.sb-item.active svg { opacity: 1; fill: var(--blue-800); stroke: var(--blue-800); }
-.sb-item .sb-badge {
-  margin-left: auto;
-  font-size: 9px; font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 10px;
-  background: var(--amber-50);
-  color: var(--amber);
+async function checkSupa() {
+  if(_supaAvailable !== null) return _supaAvailable;
+  try {
+    await supaFetch('memos', 'GET', null, '?limit=1');
+    _supaAvailable = true;
+  } catch(e) {
+    console.warn('Supabase unavailable, using localStorage', e.message);
+    _supaAvailable = false;
+  }
+  return _supaAvailable;
 }
 
-.sb-sub { margin-left: 4px; }
-.sb-sub-item {
-  display: flex; align-items: center; gap: 7px;
-  padding: 5px 8px 5px 20px;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  color: var(--text-3);
-  font-size: 11px;
-  margin-bottom: 1px;
-  border-left: 2px solid transparent;
-  transition: all .12s;
-  user-select: none;
-}
-.sb-sub-item svg { width: 13px; height: 13px; flex-shrink: 0; }
-.sb-sub-item:hover { background: var(--bg); color: var(--text-2); }
-.sb-sub-item.active {
-  color: var(--blue);
-  font-weight: 600;
-  border-left-color: var(--blue);
-  background: var(--blue-50);
-}
-.sb-sub-item .sb-badge {
-  margin-left: auto;
-  font-size: 9px; font-weight: 700;
-  padding: 1px 6px; border-radius: 10px;
-  background: var(--amber-50); color: var(--amber);
+async function loadMemosAsync() {
+  if(await checkSupa()) {
+    try {
+      const rows = await supaFetch('memos', 'GET', null, '?order=created_at.desc&limit=500');
+      _memCache = (rows||[]).map(dbToMemo);
+      // Sync to localStorage as backup
+      try { localStorage.setItem(MEMO_KEY, JSON.stringify(_memCache)); } catch(e) {}
+      return _memCache;
+    } catch(e) {
+      console.warn('Supabase read failed, fallback to localStorage');
+    }
+  }
+  // localStorage fallback
+  try { const p = JSON.parse(localStorage.getItem(MEMO_KEY)||'[]'); return Array.isArray(p)?p:[]; }
+  catch(e) { return []; }
 }
 
-.sb-footer {
-  padding: 8px;
-  border-top: 1px solid var(--border);
-}
-.sb-user {
-  display: flex; align-items: center; gap: 8px;
-  padding: 7px 8px;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  transition: background .12s;
-}
-.sb-user:hover { background: var(--bg); }
-.sb-avatar {
-  width: 28px; height: 28px; border-radius: 50%;
-  background: var(--blue-50); color: var(--blue-800);
-  font-size: 10px; font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-}
-.sb-uname { font-size: 12px; font-weight: 600; color: var(--text); }
-.sb-urole { font-size: 10px; color: var(--text-3); }
+async function saveMemoAsync(data) {
+  const now = new Date().toISOString();
+  const existing = (await loadMemosAsync()).find(m => m.memoNo === data.memoNo);
+  const saved = { ...data, id:data.memoNo, status:data.status||'pending',
+    createdAt: existing ? existing.createdAt : now, updatedAt: now };
 
-/* ── MAIN ── */
-.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
-
-.topbar {
-  height: 48px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0 20px;
-  flex-shrink: 0;
-}
-.topbar-left { display: flex; align-items: center; gap: 10px; }
-.topbar-title { font-size: 14px; font-weight: 600; color: var(--text); }
-.topbar-crumb { font-size: 12px; color: var(--text-3); }
-.topbar-right { display: flex; align-items: center; gap: 8px; }
-.topbar-btn {
-  width: 32px; height: 32px;
-  border-radius: var(--r-sm);
-  border: 1px solid var(--border-md);
-  background: transparent;
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  color: var(--text-2);
-  transition: background .12s;
-}
-.topbar-btn:hover { background: var(--bg); }
-.topbar-btn svg { width: 16px; height: 16px; }
-
-/* ── CONTENT ── */
-.content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px;
+  if(await checkSupa()) {
+    try {
+      const db = memoToDb(saved);
+      await supaFetch('memos', 'POST', db, '?on_conflict=memo_no');
+      _memCache = null; // invalidate cache
+      return saved;
+    } catch(e) { console.warn('Supabase save failed', e.message); }
+  }
+  // localStorage fallback
+  const memos = loadMemos();
+  const idx = memos.findIndex(m => m.memoNo === data.memoNo);
+  if(idx>=0) memos[idx]=saved; else memos.push(saved);
+  storeMemos(memos);
+  return saved;
 }
 
-/* ── VIEWS ── */
-.view { display: none; }
-.view.active { display: block; }
-
-/* ── CARDS ── */
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r);
-  padding: 16px 18px;
-  margin-bottom: 12px;
-}
-.card-head {
-  display: flex; align-items: center; gap: 9px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 14px;
-}
-.card-num {
-  width: 22px; height: 22px; border-radius: 50%;
-  background: var(--blue-50); color: var(--blue-800);
-  font-size: 11px; font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-}
-.card-title { font-size: 13px; font-weight: 600; color: var(--text); }
-.card-subtitle { font-size: 11px; color: var(--text-3); margin-left: 4px; }
-
-/* ── TYPE SELECTOR ── */
-.type-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 8px;
-}
-.type-btn {
-  padding: 12px 8px;
-  border: 1.5px solid var(--border-md);
-  border-radius: var(--r);
-  background: var(--surface);
-  cursor: pointer;
-  text-align: center;
-  transition: all .15s;
-}
-.type-btn:hover {
-  border-color: var(--blue-100);
-  background: var(--blue-50);
-}
-.type-btn.selected {
-  border-color: var(--blue);
-  background: var(--blue-50);
-  box-shadow: 0 0 0 3px rgba(24,95,165,.1);
-}
-.type-code {
-  display: block;
-  font-size: 15px; font-weight: 700;
-  color: var(--blue-800);
-  margin-bottom: 3px;
-  font-family: 'IBM Plex Mono', monospace;
-}
-.type-name {
-  display: block;
-  font-size: 10px;
-  color: var(--text-3);
-  line-height: 1.3;
-}
-.type-btn.selected .type-name { color: var(--blue-600); }
-
-/* ── FORM ── */
-.form-grid   { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
-.form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
-.fg { display: flex; flex-direction: column; gap: 4px; }
-.fg label { font-size: 11px; font-weight: 600; color: var(--text-2); letter-spacing: .1px; }
-.fg input, .fg select, .fg textarea {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 13px;
-  padding: 7px 10px;
-  border: 1px solid var(--border-md);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--text);
-  width: 100%;
-  transition: border-color .15s, box-shadow .15s;
-  outline: none;
-}
-.fg input:focus, .fg select:focus, .fg textarea:focus {
-  border-color: var(--blue);
-  box-shadow: 0 0 0 3px rgba(24,95,165,.08);
-}
-.fg input[readonly] {
-  background: var(--bg);
-  color: var(--text-3);
-  border-color: var(--border);
-  cursor: default;
-}
-.fg input[readonly]:focus { box-shadow: none; border-color: var(--border); }
-.fg textarea { resize: vertical; min-height: 64px; }
-.form-note { font-size: 11px; color: var(--text-3); margin-top: 6px; }
-
-/* ── ITEMS TABLE ── */
-.items-hdr {
-  display: grid; gap: 7px;
-  padding-bottom: 6px;
-  margin-bottom: 6px;
-  border-bottom: 1px solid var(--border);
-}
-.items-hdr span { font-size: 10px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .3px; }
-.item-row { display: grid; gap: 7px; align-items: center; margin-bottom: 6px; }
-.ri {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 13px;
-  padding: 6px 9px;
-  border: 1px solid var(--border-md);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--text);
-  width: 100%;
-  transition: border-color .15s;
-  outline: none;
-}
-.ri:focus { border-color: var(--blue); }
-.rm-btn {
-  width: 30px; height: 30px;
-  border: 1px solid var(--border-md);
-  border-radius: var(--r-sm);
-  background: none;
-  color: var(--red);
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: background .12s;
-  flex-shrink: 0;
-}
-.rm-btn:hover { background: var(--red-50); }
-.rm-btn svg { width: 13px; height: 13px; }
-
-.add-btn {
-  width: 100%; margin-top: 6px;
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 12px; font-weight: 500;
-  color: var(--blue);
-  background: var(--blue-50);
-  border: 1px dashed var(--blue-100);
-  border-radius: var(--r-sm);
-  padding: 7px;
-  cursor: pointer;
-  transition: background .12s;
-  text-align: center;
-}
-.add-btn:hover { background: var(--blue-100); }
-
-.total-box {
-  display: flex; align-items: center; justify-content: space-between;
-  background: var(--blue-50);
-  border: 1px solid var(--blue-100);
-  border-radius: var(--r-sm);
-  padding: 10px 14px;
-  margin-top: 10px;
-}
-.total-label { font-size: 12px; font-weight: 600; color: var(--blue-800); }
-.total-val { font-size: 18px; font-weight: 600; color: var(--blue-900); font-family: 'IBM Plex Mono', monospace; }
-
-/* ── ROW NAME ── */
-.row-name { display: grid; grid-template-columns: 20px 1fr 30px; gap: 6px; align-items: center; margin-bottom: 5px; }
-.name-num { font-size: 11px; color: var(--text-3); text-align: center; }
-
-/* ── FIELD SECTIONS ── */
-.fs { display: none; }
-.fs.active { display: block; }
-
-/* ── ACTIONS ── */
-.action-row { display: flex; gap: 8px; justify-content: flex-end; padding-top: 6px; }
-.btn-primary {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 13px; font-weight: 600;
-  padding: 9px 20px;
-  background: var(--blue);
-  color: #fff;
-  border: none;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  display: inline-flex; align-items: center; gap: 6px;
-  transition: background .15s;
-}
-.btn-primary:hover { background: var(--blue-800); }
-.btn-ghost {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 13px; font-weight: 500;
-  padding: 9px 16px;
-  background: transparent;
-  color: var(--text-2);
-  border: 1px solid var(--border-md);
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  transition: background .15s;
-}
-.btn-ghost:hover { background: var(--bg); }
-
-/* ── HINT ── */
-.form-hint {
-  text-align: center;
-  padding: 40px 20px;
-  color: var(--text-3);
-}
-.form-hint svg { width: 36px; height: 36px; margin-bottom: 10px; opacity: .4; }
-.form-hint p { font-size: 13px; }
-
-/* ── BADGES ── */
-.badge {
-  font-size: 10px; font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 20px;
-  display: inline-block; white-space: nowrap;
-}
-.badge-blue   { background: var(--blue-50);   color: var(--blue-800); }
-.badge-green  { background: var(--green-50);  color: var(--green); }
-.badge-amber  { background: var(--amber-50);  color: var(--amber); }
-.badge-red    { background: var(--red-50);    color: var(--red); }
-.badge-gray   { background: var(--gray-50);   color: var(--gray); }
-.badge-purple { background: var(--purple-50); color: var(--purple); }
-.mono { font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
-
-/* ── METRICS ── */
-.metric-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
-.metric-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r);
-  padding: 14px 16px;
-}
-.metric-label { font-size: 11px; color: var(--text-3); margin-bottom: 4px; }
-.metric-val { font-size: 24px; font-weight: 600; }
-.metric-sub { font-size: 11px; color: var(--text-3); margin-top: 2px; }
-
-/* ── PENDING CARDS ── */
-.sec-label {
-  font-size: 10px; font-weight: 700;
-  color: var(--text-3);
-  text-transform: uppercase; letter-spacing: .5px;
-  margin-bottom: 8px; margin-top: 16px;
-}
-.sec-label:first-child { margin-top: 0; }
-.pend-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r);
-  padding: 14px 16px;
-  margin-bottom: 8px;
-  transition: border-color .15s;
-}
-.pend-card:hover { border-color: var(--blue-100); }
-.pend-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
-.pend-title { font-size: 13px; font-weight: 600; color: var(--text); }
-.pend-meta { font-size: 11px; color: var(--text-3); margin-top: 3px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.pend-amount { font-size: 14px; font-weight: 700; color: var(--blue-800); font-family: 'IBM Plex Mono', monospace; }
-.pend-detail {
-  font-size: 12px; color: var(--text-2);
-  background: var(--bg);
-  border-radius: var(--r-sm);
-  padding: 8px 12px;
-  margin-bottom: 10px;
-  line-height: 1.6;
-}
-.pend-actions { display: flex; gap: 6px; }
-.btn-approve {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 12px; font-weight: 600;
-  padding: 6px 14px;
-  background: var(--green-50); color: var(--green);
-  border: 1px solid var(--green-200);
-  border-radius: var(--r-sm); cursor: pointer;
-  display: inline-flex; align-items: center; gap: 5px;
-  transition: background .12s;
-}
-.btn-approve:hover { background: #C0DD97; }
-.btn-reject {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 12px; font-weight: 500;
-  padding: 6px 14px;
-  background: var(--red-50); color: var(--red);
-  border: 1px solid var(--red-200);
-  border-radius: var(--r-sm); cursor: pointer;
-  display: inline-flex; align-items: center; gap: 5px;
-  transition: background .12s;
-}
-.btn-reject:hover { background: #F7C1C1; }
-.btn-sm {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 12px;
-  padding: 6px 12px;
-  background: transparent; color: var(--text-3);
-  border: 1px solid var(--border-md);
-  border-radius: var(--r-sm); cursor: pointer;
-  display: inline-flex; align-items: center; gap: 5px;
-  transition: background .12s;
-}
-.btn-sm:hover { background: var(--bg); color: var(--text-2); }
-.btn-sm.active { background: var(--blue); color: #fff; border-color: var(--blue); }
-
-/* ── DIVIDER ── */
-.divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
-
-/* ── FILTER ROW ── */
-.filter-row { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
-.filter-row select {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 12px; padding: 6px 10px;
-  border: 1px solid var(--border-md);
-  border-radius: var(--r-sm);
-  background: var(--surface); color: var(--text);
-  cursor: pointer; outline: none;
-}
-.btn-export {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 12px; font-weight: 500;
-  padding: 6px 12px;
-  background: var(--surface); color: var(--text-2);
-  border: 1px solid var(--border-md);
-  border-radius: var(--r-sm); cursor: pointer;
-  display: inline-flex; align-items: center; gap: 5px;
-  margin-left: auto; transition: background .12s;
-}
-.btn-export:hover { background: var(--bg); }
-
-/* ── HISTORY TABLE ── */
-.hist-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
-.hist-table th {
-  text-align: left; padding: 8px 12px;
-  font-size: 10px; font-weight: 700; color: var(--text-3);
-  text-transform: uppercase; letter-spacing: .4px;
-  border-bottom: 1px solid var(--border);
-}
-.hist-table td {
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--border);
-  vertical-align: middle;
-}
-.hist-table tr:last-child td { border-bottom: none; }
-.hist-table tbody tr.hist-row { transition: background .1s; cursor: pointer; }
-.hist-table tbody tr.hist-row:hover td { background: var(--bg); }
-.filter-row input[type="search"],
-.filter-row input[type="text"] {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 12px; padding: 6px 10px;
-  border: 1px solid var(--border-md); border-radius: var(--r-sm);
-  background: var(--surface); color: var(--text); outline: none;
-  min-width: 200px; flex: 1 1 200px;
-}
-.filter-row input[type="date"],
-.filter-row input[type="number"] {
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-  font-size: 12px; padding: 6px 10px;
-  border: 1px solid var(--border-md); border-radius: var(--r-sm);
-  background: var(--surface); color: var(--text);
-}
-.hist-adv-panel {
-  display: none; flex-wrap: wrap; gap: 8px; align-items: center;
-  margin-bottom: 12px; padding: 10px 12px;
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--r);
-}
-.hist-adv-panel.is-open { display: flex; }
-.hist-adv-sep { font-size: 11px; color: var(--text-3); }
-.hist-amt-input { width: 96px; }
-.hist-actions { display: inline-flex; align-items: center; gap: 4px; justify-content: center; }
-.hist-act-btn { padding: 4px 7px !important; min-width: 28px; justify-content: center; }
-.hist-act-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
-.hist-memo-no { font-weight: 600; color: var(--blue-800); }
-.hist-cell-clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hist-table tbody tr.hist-row { cursor: pointer; }
-.hist-amt { text-align: right; white-space: nowrap; }
-.hist-dt { font-size: 11px; color: var(--text-2); white-space: nowrap; }
-.hist-reject-btn {
-  background: none; border: none; padding: 0; margin: 0; cursor: pointer;
-  font-size: 11px; color: var(--red); text-align: left;
-  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.hist-reject-btn:hover { text-decoration: underline; }
-.hist-reject-popover {
-  display: none; position: fixed; z-index: 400; max-width: 320px;
-  padding: 10px 12px; background: var(--surface);
-  border: 1px solid var(--border-md); border-radius: var(--r-sm);
-  box-shadow: 0 8px 24px rgba(0,0,0,.12); font-size: 12px; line-height: 1.5;
-}
-.hist-empty { text-align: center; padding: 32px 16px !important; color: var(--text-3); }
-.hist-detail-meta {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 10px; margin-bottom: 14px; padding: 12px;
-  background: var(--bg); border-radius: var(--r-sm);
-}
-.hist-detail-meta .lbl { display: block; font-size: 9px; font-weight: 700; color: var(--text-3); text-transform: uppercase; margin-bottom: 2px; }
-.hist-detail-block { margin-bottom: 14px; }
-.hist-detail-block-title { font-size: 11px; font-weight: 700; color: var(--text-3); text-transform: uppercase; margin-bottom: 8px; }
-.hist-detail-note { padding: 10px; border-radius: var(--r-sm); font-size: 12px; margin-bottom: 10px; }
-.hist-detail-note--ok { background: var(--green-50); }
-.hist-detail-note--err { background: var(--red-50); }
-.hist-timeline { border-left: 2px solid var(--border-md); margin-left: 6px; padding-left: 14px; }
-.hist-timeline-item { position: relative; margin-bottom: 12px; }
-.hist-timeline-dot { position: absolute; left: -21px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--blue); border: 2px solid var(--surface); }
-.hist-timeline-dot.reject { background: var(--red); }
-.hist-timeline-dot.done { background: var(--green); }
-.hist-audit-log { max-height: 160px; overflow-y: auto; }
-.hist-audit-row { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 11px; }
-.hist-audit-time { color: var(--text-3); white-space: nowrap; min-width: 100px; }
-.hist-linked-row { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
-
-/* ── PLACEHOLDER ── */
-.placeholder {
-  text-align: center; padding: 60px 20px; color: var(--text-3);
-}
-.placeholder svg { width: 40px; height: 40px; margin-bottom: 12px; opacity: .3; }
-.placeholder h3 { font-size: 15px; font-weight: 600; color: var(--text-2); margin-bottom: 4px; }
-.placeholder p { font-size: 13px; }
-
-
-/* ── PDF TEMPLATE ── */
-.pdf-stage {
-  position: fixed;
-  left: -9999px;
-  top: 0;
-  width: 794px;
-  background: #fff;
-  color: #111;
-  font-family: 'IBM Plex Sans Thai', sans-serif;
-}
-.pdf-page {
-  width: 794px;
-  min-height: 1123px;
-  padding: 54px 64px;
-  background: #fff;
-  font-size: 13px;
-  line-height: 1.72;
-}
-.pdf-head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #185FA5; padding-bottom: 14px; margin-bottom: 18px; }
-.pdf-brand { font-size: 18px; font-weight: 700; color: #185FA5; }
-.pdf-subbrand { font-size: 11px; color: #5F5E5A; }
-.pdf-memo-no { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5F5E5A; text-align: right; }
-.pdf-title { text-align: center; font-size: 18px; font-weight: 700; margin: 18px 0; }
-.pdf-meta { display: grid; grid-template-columns: 86px 1fr; gap: 5px 12px; margin-bottom: 18px; }
-.pdf-label { font-weight: 700; color: #444; }
-.pdf-section { margin-top: 14px; }
-.pdf-section-title { font-weight: 700; color: #185FA5; margin-bottom: 6px; }
-.pdf-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
-.pdf-table th, .pdf-table td { border: 1px solid #d9d9d9; padding: 6px 8px; vertical-align: top; }
-.pdf-table th { background: #E6F1FB; color: #0C447C; font-weight: 700; text-align: left; }
-.pdf-table .num { text-align: right; font-family: 'IBM Plex Mono', monospace; white-space: nowrap; }
-.pdf-total { display: flex; justify-content: flex-end; gap: 14px; margin-top: 10px; font-weight: 700; color: #042C53; }
-.pdf-signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 54px; }
-.pdf-sign-box { text-align: center; min-height: 110px; }
-.pdf-sign-line { border-top: 1px solid #222; margin: 54px 18px 8px; }
-.pdf-muted { color: #666; }
-.pdf-alert { margin-top: 10px; padding: 8px 10px; border: 1px solid #B5D4F4; background: #E6F1FB; border-radius: 6px; color: #0C447C; font-size: 12px; }
-@media print {
-  body.printing-pdf .layout { display: none; }
-  body.printing-pdf .pdf-stage { position: static; width: auto; }
-  body.printing-pdf .pdf-page { width: auto; min-height: auto; padding: 32px; }
-}
-
-/* ── SVG ICONS ── */
-svg.icon { display: inline-block; vertical-align: middle; }
-
-/* ── Cost Dashboard Sub-tabs ── */
-.cost-tab-bar { display:flex; align-items:flex-end; justify-content:space-between; border-bottom:1px solid rgba(0,0,0,0.12); margin-bottom:0; }
-#cost-subtab-bar { display:flex; gap:4px; }
-.cost-stab { padding:7px 18px; font-size:12px; font-weight:500; font-family:inherit; border:1px solid rgba(0,0,0,0.12); border-bottom:none; border-radius:6px 6px 0 0; background:#ECEAE4; color:#5F5E5A; cursor:pointer; }
-.cost-stab:hover { background:#E2E0DA; color:#1C1C1A; }
-.cost-stab.active { background:#FFFFFF; color:#185FA5; font-weight:600; position:relative; top:1px; }
-.cost-stab.active::after { content:""; position:absolute; left:-1px; right:-1px; bottom:-2px; height:2px; background:#FFFFFF; }
-.cost-tab-panel { border:1px solid rgba(0,0,0,0.12); border-top:none; border-radius:0 6px 6px 6px; padding:14px; background:#FFFFFF; margin-bottom:14px; }
-</style>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous"></script>
-</head>
-<body>
-
-<div class="layout">
-  <!-- ════════ SIDEBAR ════════ -->
-  <div class="sidebar">
-    <div class="sb-logo">
-      <div class="sb-dot">
-        <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5"/></svg>
-      </div>
-      <div>
-        <div class="sb-brand">Orbit Digital</div>
-        <div class="sb-brand-sub">PMO Dashboard</div>
-      </div>
-    </div>
-
-    <div class="sb-nav">
-      <div class="sb-section">Memo</div>
-      <div class="sb-item active" id="nav-memo" onclick="toggleMemoSub(this)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-        Memo
-      </div>
-      <div class="sb-sub" id="memo-sub">
-        <div class="sb-sub-item active" onclick="swView('create',this,'Create Memo')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Create Memo
-        </div>
-        <div class="sb-sub-item" onclick="swView('pending',this,'Pending Approval')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          Pending Approval
-          <span class="sb-badge">2</span>
-        </div>
-        <div class="sb-sub-item" onclick="swView('history',this,'All Memos')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-          All Memos
-        </div>
-      </div>
-
-      <div class="sb-section">Dashboard & Monitor</div>
-      <div class="sb-item" onclick="swView('budget',this,'Budget & Spend')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-        Budget & Spend
-      </div>
-      <div class="sb-item" onclick="swView('license',this,'License Management')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-        License Management
-        <span class="sb-badge" id="lic-renewal-badge" style="display:none"></span>
-      </div>
-      <div class="sb-item" onclick="swView('device',this,'Device Management')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
-        Device Management
-      </div>
-
-      <div class="sb-section">Resource</div>
-      <div class="sb-item" onclick="swView('resource',this,'Resource Management')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        Resource
-      </div>
-      <div class="sb-item" onclick="swView('settings',this,'Settings')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        Settings
-      </div>
-    </div>
-
-    <div class="sb-footer">
-      <div id="sb-user-btn" class="sb-user" onclick="toggleAccountMenu()" style="cursor:pointer;position:relative">
-        <div class="sb-avatar" id="sb-avatar">CK</div>
-        <div style="flex:1">
-          <div class="sb-uname" id="sb-uname">Chuen K.</div>
-          <div class="sb-urole" id="sb-urole">PMO</div>
-        </div>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;color:var(--text-3)"><polyline points="6 9 12 15 18 9"/></svg>
-      </div>
-      <div id="account-menu" style="display:none;position:absolute;bottom:56px;left:8px;right:8px;background:var(--surface);border:1px solid var(--border-md);border-radius:var(--r);box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:100;overflow:hidden">
-        <div style="padding:6px 10px;font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)">Switch Account</div>
-        <div onclick="switchAccount('Chuen K.','PMO','CK')" class="account-opt" style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px">
-          <div style="width:26px;height:26px;border-radius:6px;background:var(--blue-50);color:var(--blue-800);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0">CK</div>
-          <div><div style="font-weight:600;color:var(--text)">Chuen K.</div><div style="color:var(--text-3);font-size:10px">PMO · Requester</div></div>
-        </div>
-        <div onclick="switchAccount('นวพล ง.','Project Director','NW')" class="account-opt" style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px;border-top:1px solid var(--border)">
-          <div style="width:26px;height:26px;border-radius:6px;background:var(--green-50);color:var(--green);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0">NW</div>
-          <div><div style="font-weight:600;color:var(--text)">นวพล ง.</div><div style="color:var(--text-3);font-size:10px">Project Director · Approver</div></div>
-        </div>
-        <div onclick="switchAccount('ปกรณ์ จ.','CEO','PK')" class="account-opt" style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px;border-top:1px solid var(--border)">
-          <div style="width:26px;height:26px;border-radius:6px;background:var(--amber-50);color:var(--amber);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0">PK</div>
-          <div><div style="font-weight:600;color:var(--text)">ปกรณ์ จ.</div><div style="color:var(--text-3);font-size:10px">CEO · Approver</div></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ════════ MAIN ════════ -->
-  <div class="main">
-    <div class="topbar">
-      <div class="topbar-left">
-        <div class="topbar-title" id="page-title">Create Memo</div>
-      </div>
-      <div class="topbar-right">
-        <button class="topbar-btn" title="Notifications">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-        </button>
-      </div>
-    </div>
-
-    <div class="content">
-
-      <!-- ════ CREATE ════ -->
-      <div id="view-create" class="view active">
-
-        <!-- Type selector -->
-        <div class="card">
-          <div class="card-head">
-            <div class="card-num">1</div>
-            <span class="card-title">เลือกประเภท Memo</span>
-          </div>
-          <div class="type-grid">
-            <div class="type-btn" onclick="selectType('sl',this)">
-              <span class="type-code">SL</span>
-              <span class="type-name">Software License</span>
-            </div>
-            <div class="type-btn" onclick="selectType('hw',this)">
-              <span class="type-code">HW</span>
-              <span class="type-name">Hardware</span>
-            </div>
-            <div class="type-btn" onclick="selectType('int',this)">
-              <span class="type-code">INT</span>
-              <span class="type-name">Team Activity</span>
-            </div>
-            <div class="type-btn" onclick="selectType('ent',this)">
-              <span class="type-code">ENT</span>
-              <span class="type-name">Client Expense</span>
-            </div>
-            <div class="type-btn" onclick="selectType('dep',this)">
-              <span class="type-code">DEP</span>
-              <span class="type-name">Deployment</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Hint before type selected -->
-        <div id="form-hint" class="form-hint">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-          <p>เลือกประเภท Memo ด้านบนเพื่อเริ่มกรอกข้อมูล</p>
-        </div>
-
-        <!-- Form body (hidden until type selected) -->
-        <div id="form-body" style="display:none">
-
-          <!-- General info -->
-          <div class="card">
-            <div class="card-head">
-              <div class="card-num">2</div>
-              <span class="card-title">ข้อมูลทั่วไป</span>
-            </div>
-            <div class="form-grid" style="margin-bottom:10px">
-              <div class="fg"><label>เลข Memo</label><input type="text" id="f-memo-no" placeholder=""></div>
-              <div class="fg"><label>ลงวันที่ *</label><input type="date" id="f-date"></div>
-              <div class="fg">
-                <label>โครงการ *</label>
-                <select id="f-project" onchange="toggleOtherProject();updateSubjectPreview()">
-                  <option value="">— เลือกโครงการ —</option>
-                  <option>AOA-MP</option><option>TTB</option><option>Geo9</option>
-                  <option>Release 2.1</option><option>Release 3</option>
-                  <option value="other">อื่นๆ (กรอกเอง)</option>
-                </select>
-              </div>
-              <div class="fg" id="project-other-wrap" style="display:none">
-                <label>ชื่อโครงการ *</label>
-                <input type="text" id="f-project-other" placeholder="กรอกชื่อโครงการ">
-              </div>
-              <div class="fg">
-                <label>เรียน *</label>
-                <select id="f-to" onchange="toggleToOther()">
-                  <option value="">— เลือก —</option>
-                  <option>ผู้อำนวยการโครงการ</option>
-                  <option>ประธานเจ้าหน้าที่บริหาร</option>
-                  <option>ผู้อำนวยการ</option>
-                  <option value="other">อื่นๆ (กรอกเอง)</option>
-                </select>
-                <div id="to-other-wrap" style="display:none;margin-top:6px">
-                  <input type="text" id="f-to-other" placeholder="ระบุ ชื่อผู้ที่เรียนถึง">
-                </div>
-              </div>
-            </div>
-            <div class="fg" style="margin-bottom:8px">
-              <label>หัวข้อเรื่อง * <span style="font-weight:400;color:var(--text-3)">(สร้างอัตโนมัติ — แก้ไขได้)</span></label>
-              <input type="text" id="f-subject" placeholder="เว้นว่างเพื่อใช้อัตโนมัติ" oninput="this.dataset.manualEdit=this.value?'true':'false'" onfocus="if(!this.value)this.placeholder=memoSubject({type:selectedType,project:document.getElementById('f-project')?.value==='other'?document.getElementById('f-project-other')?.value:document.getElementById('f-project')?.value})">
-            </div>
-            <div class="fg">
-              <label>เหตุผลในการขอ *</label>
-              <select id="f-reason" onchange="toggleOther()">
-                <option value="">— เลือกเหตุผล —</option>
-              </select>
-            </div>
-            <div id="other-wrap" style="display:none;margin-top:8px">
-              <div class="fg"><label>ระบุเหตุผล *</label><textarea id="f-reason-other" placeholder="กรอกเหตุผล..."></textarea></div>
-            </div>
-          </div>
-
-          <!-- Dynamic detail card -->
-          <div class="card">
-            <div class="card-head">
-              <div class="card-num">3</div>
-              <span class="card-title" id="detail-title">รายละเอียด</span>
-            </div>
-
-            <!-- SL fields -->
-            <div class="fs" id="fs-sl">
-              <div class="items-hdr" style="grid-template-columns:2.5fr 1.2fr 0.8fr 0.8fr 1fr 1fr 30px">
-                <span>ชื่อ Software *</span><span>฿/เดือน *</span><span>เดือน *</span><span>จำนวน *</span><span>เริ่ม (เดือน)</span><span>สิ้นสุด (เดือน)</span><span></span>
-              </div>
-              <div id="sl-rows">
-                <div class="item-row" style="grid-template-columns:2.5fr 1.2fr 0.8fr 0.8fr 1fr 1fr 30px">
-                  <input class="ri" type="text" placeholder="GitHub Copilot">
-                  <input class="ri sl-price" type="number" placeholder="600" oninput="calcSL()">
-                  <input class="ri sl-mo" type="number" value="12" oninput="calcSL()">
-                  <input class="ri sl-qty" type="number" placeholder="15" oninput="calcSL()">
-                  <input class="ri sl-start" type="month" placeholder="YYYY-MM">
-                  <input class="ri sl-end" type="month" placeholder="YYYY-MM">
-                  <button class="rm-btn" onclick="rmRow(this,'sl-rows');calcSL()" title="ลบ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></button>
-                </div>
-              </div>
-              <button class="add-btn" onclick="addSLRow()">+ เพิ่ม Software</button>
-              <div class="form-grid" style="margin-top:12px">
-                <div class="fg"><label>วันที่แปลงเรท USD→THB</label><input type="date" id="sl-ratedate"></div>
-                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร *</label><input type="text" placeholder="เช่น สองแสนห้าหมื่นบาทถ้วน"></div>
-              </div>
-              <div class="total-box"><span class="total-label">Total Amount</span><span class="total-val" id="sl-total">฿0</span></div>
-            </div>
-
-            <!-- HW fields -->
-            <div class="fs" id="fs-hw">
-              <div class="items-hdr" style="grid-template-columns:3fr 1.4fr 1fr 30px">
-                <span>ชื่ออุปกรณ์ *</span><span>ราคา/ชิ้น (THB) *</span><span>จำนวน *</span><span></span>
-              </div>
-              <div id="hw-rows">
-                <div class="item-row" style="grid-template-columns:3fr 1.4fr 1fr 30px">
-                  <input class="ri" type="text" placeholder="MacBook Pro 14">
-                  <input class="ri hw-price" type="number" placeholder="79000" oninput="calcHW()">
-                  <input class="ri hw-qty" type="number" placeholder="2" oninput="calcHW()">
-                  <button class="rm-btn" onclick="rmRow(this,'hw-rows');calcHW()" title="ลบ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
-                </div>
-              </div>
-              <button class="add-btn" onclick="addHWRow()">+ เพิ่มอุปกรณ์</button>
-              <div class="form-grid" style="margin-top:12px">
-                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร *</label><input type="text" placeholder="เช่น หนึ่งแสนห้าหมื่นแปดพันบาทถ้วน"></div>
-                <div class="fg"><label>ผู้รับผิดชอบดูแลอุปกรณ์</label><input type="text" placeholder="ชื่อ-นามสกุล"></div>
-              </div>
-              <div class="total-box"><span class="total-label">Total Amount</span><span class="total-val" id="hw-total">฿0</span></div>
-            </div>
-
-            <!-- INT fields -->
-            <div class="fs" id="fs-int">
-              <div class="form-grid" style="margin-bottom:12px">
-                <div class="fg"><label>ไตรมาส / ครั้งที่ *</label><input type="text" placeholder="เช่น Q2 / 2568"></div>
-                <div class="fg"><label>วันที่จัดกิจกรรม *</label><input type="date"></div>
-                <div class="fg"><label>วงเงินต่อคน (บาท) *</label><input type="number" id="int-pp" value="1500" oninput="calcINT()"></div>
-                <div class="fg"><label>จำนวนเงินต่อคนเป็นตัวอักษร *</label><input type="text" placeholder="หนึ่งพันห้าร้อยบาทถ้วน"></div>
-              </div>
-              <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:7px">รายชื่อผู้เข้าร่วม *</div>
-              <div id="int-names">
-                <div class="row-name"><span class="name-num">1.</span><input class="ri int-name" type="text" placeholder="ชื่อ-นามสกุล ตำแหน่ง" oninput="calcINT()"><button class="rm-btn" onclick="rmName(this,'int-names');calcINT()" title="ลบ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button></div>
-              </div>
-              <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-                <button class="add-btn" onclick="addName('int-names','int-name',true)" style="margin-top:0">+ เพิ่มรายชื่อ</button>
-                <button class="btn-sm" onclick="openBulkNameModal('int-names','int-name',true)" style="font-size:11px;padding:5px 10px">⬆ Bulk Upload</button>
-              </div>
-              <div class="total-box"><span class="total-label">Total Amount</span><span class="total-val" id="int-total">฿0</span></div>
-            </div>
-
-            <!-- ENT fields -->
-            <div class="fs" id="fs-ent">
-              <div class="form-grid">
-                <div class="fg" style="grid-column:1/-1"><label>ชื่อลูกค้า / บริษัทที่เลี้ยง *</label><input type="text" placeholder="เช่น บริษัท ปตท. น้ำมันและการค้าปลีก จำกัด (มหาชน)"></div>
-                <div class="fg"><label>วันที่จัดงาน *</label><input type="date"></div>
-                <div class="fg"><label>เวลา *</label><input type="time" value="12:00"></div>
-                <div class="fg"><label>สถานที่ *</label><input type="text" placeholder="เช่น ร้านอาหาร The River Café"></div>
-                <div class="fg"><label>จำนวนผู้เข้าร่วม (คน) *</label><input type="number" placeholder="10"></div>
-                <div class="fg"><label>วงเงินรวม (บาท) *</label><input type="number" placeholder="50000"></div>
-                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร</label><input type="text" placeholder="เช่น ห้าหมื่นบาทถ้วน"></div>
-              </div>
-            </div>
-
-            <!-- DEP fields -->
-            <div class="fs" id="fs-dep">
-              <div class="form-grid" style="margin-bottom:12px">
-                <div class="fg"><label>วันที่ Deploy (Start) *</label><input type="date"></div>
-                <div class="fg"><label>วันที่ Deploy (End) *</label><input type="date"></div>
-                <div class="fg"><label>สถานที่ Deploy *</label><input type="text" placeholder="เช่น สำนักงานลูกค้า"></div>
-                <div class="fg"><label>รูปแบบ</label>
-                  <select><option>Onsite</option><option>Online</option><option>Online / Onsite</option></select>
-                </div>
-                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร</label><input type="text" placeholder="เช่น หนึ่งร้อยบาทถ้วน"></div>
-                <div class="fg"><label>วงเงินอำนาจอนุมัติ (บาท)</label><input type="text" value="500,000"></div>
-              </div>
-              <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:7px">รายชื่อพนักงานที่ Deploy <span style="font-weight:400;color:var(--text-3)">(optional)</span></div>
-              <div id="dep-names">
-                <div class="row-name"><span class="name-num">1.</span><input class="ri dep-name" type="text" placeholder="ชื่อ-นามสกุล ตำแหน่ง"><button class="rm-btn" onclick="rmName(this,'dep-names')" title="ลบ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button></div>
-              </div>
-              <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-                <button class="add-btn" onclick="addName('dep-names','dep-name',false)" style="margin-top:0">+ เพิ่มรายชื่อ</button>
-                <button class="btn-sm" onclick="openBulkNameModal('dep-names','dep-name',false)" style="font-size:11px;padding:5px 10px">⬆ Bulk Upload</button>
-              </div>
-            </div>
-
-          </div><!-- /dynamic card -->
-
-          <!-- Optional: Account table (SL only) -->
-          <div class="card" id="acct-card" style="display:none">
-            <div class="card-head">
-              <div class="card-num">4</div>
-              <span class="card-title">ตาราง Account</span>
-              <span class="card-subtitle">(optional)</span>
-            </div>
-            <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:10px">
-              <input class="ri acct-col" type="text" placeholder="Col 1 เช่น GitHub" style="font-size:11px;padding:5px 7px" oninput="rebuildAcct()">
-              <input class="ri acct-col" type="text" placeholder="Col 2" style="font-size:11px;padding:5px 7px" oninput="rebuildAcct()">
-              <input class="ri acct-col" type="text" placeholder="Col 3" style="font-size:11px;padding:5px 7px" oninput="rebuildAcct()">
-              <input class="ri acct-col" type="text" placeholder="Col 4" style="font-size:11px;padding:5px 7px" oninput="rebuildAcct()">
-              <input class="ri acct-col" type="text" placeholder="Col 5" style="font-size:11px;padding:5px 7px" oninput="rebuildAcct()">
-            </div>
-            <div style="overflow-x:auto">
-              <table style="width:100%;border-collapse:collapse;font-size:12px">
-                <thead id="acct-head"></thead>
-                <tbody id="acct-body"></tbody>
-              </table>
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-              <button class="add-btn" onclick="addAcctRow()" style="margin-top:0">+ เพิ่ม Account</button>
-              <button class="btn-sm" onclick="openBulkAcctModal()" style="font-size:11px;padding:5px 10px">⬆ Bulk Upload</button>
-            </div>
-          </div>
-
-          <!-- Reviewer & Approver -->
-          <div class="card">
-            <div class="card-head">
-              <div class="card-num" id="rev-num">4</div>
-              <span class="card-title">Reviewer & Approver</span>
-            </div>
-            <div style="font-size:11px;font-weight:600;color:var(--text-3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px">Reviewer</div>
-            <div class="form-grid-3" style="margin-bottom:14px">
-              <div class="fg">
-                <label>ชื่อ Reviewer *</label>
-                <select id="f-reviewer-name" onchange="toggleReviewerNameOther()">
-                  <option value="">— เลือก —</option>
-                  <option>นาย นวพล งามวรโรจน์สกุล</option>
-                  <option>นาย ปกรณ์ เจียมสกุลทิพย์</option>
-                  <option value="other">อื่นๆ (กรอกเอง)</option>
-                </select>
-                <input type="text" id="f-reviewer-name-other" placeholder="กรอกชื่อ-นามสกุล" style="display:none;margin-top:6px">
-              </div>
-              <div class="fg">
-                <label>ตำแหน่ง *</label>
-                <select id="f-reviewer-title" onchange="toggleReviewerTitleOther()">
-                  <option value="">— เลือก —</option>
-                  <option>ผู้อำนวยการโครงการ</option>
-                  <option>ประธานเจ้าหน้าที่บริหาร</option>
-                  <option>ผู้อำนวยการ</option>
-                  <option value="other">อื่นๆ (กรอกเอง)</option>
-                </select>
-                <input type="text" id="f-reviewer-title-other" placeholder="กรอกตำแหน่ง" style="display:none;margin-top:6px">
-              </div>
-              <div class="fg"><label>วันที่ลงนาม *</label><input type="date" id="f-signdate"></div>
-            </div>
-            <div style="font-size:11px;font-weight:600;color:var(--text-3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px">Approver</div>
-            <div class="form-grid-3">
-              <div class="fg">
-                <label>ชื่อ Approver *</label>
-                <select id="f-approver-name" onchange="toggleApproverNameOther()">
-                  <option value="">— เลือก —</option>
-                  <option>นาย นวพล งามวรโรจน์สกุล</option>
-                  <option>นาย ปกรณ์ เจียมสกุลทิพย์</option>
-                  <option value="other">อื่นๆ (กรอกเอง)</option>
-                </select>
-                <input type="text" id="f-approver-name-other" placeholder="กรอกชื่อ-นามสกุล" style="display:none;margin-top:6px">
-              </div>
-              <div class="fg">
-                <label>ตำแหน่ง *</label>
-                <select id="f-appr-title" onchange="toggleApproverTitleOther()">
-                  <option value="">— เลือก —</option>
-                  <option>ผู้อำนวยการโครงการ</option>
-                  <option>ประธานเจ้าหน้าที่บริหาร</option>
-                  <option>ผู้อำนวยการ</option>
-                  <option value="other">อื่นๆ (กรอกเอง)</option>
-                </select>
-                <input type="text" id="f-appr-title-other" placeholder="กรอกตำแหน่ง" style="display:none;margin-top:6px">
-              </div>
-              <div class="fg"><label>วันที่ลงนาม *</label><input type="date" id="f-apprdate"></div>
-            </div>
-          </div>
-
-          <div class="action-row">
-            <button class="btn-ghost" onclick="resetMemoForm()">ยกเลิก</button>
-            <button class="btn-sm" onclick="saveDraft()" style="font-size:13px;padding:8px 16px" id="btn-save-draft" style="display:none">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-              Save to Draft
-            </button>
-            <button class="btn-primary" onclick="generateMemoPdf()">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              Save & Generate PDF
-            </button>
-          </div>
-
-        </div><!-- /form-body -->
-      </div><!-- /view-create -->
-
-      <!-- ════ PENDING ════ -->
-      <div id="view-pending" class="view">
-        <!-- KPI: single focus — how many need action -->
-        <div class="metric-row" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
-          <div class="metric-card">
-            <div class="metric-label">Awaiting Approval</div>
-            <div class="metric-val" id="pending-count" style="color:var(--amber)">0</div>
-            <div class="metric-sub">รอตัดสินใจ</div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-label">Waiting longest</div>
-            <div class="metric-val" id="pending-oldest-days" style="color:var(--red)">—</div>
-            <div class="metric-sub">วัน (นานสุด)</div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-label">Total Amount</div>
-            <div class="metric-val" id="pending-total-amt" style="color:var(--blue);font-size:18px">—</div>
-            <div class="metric-sub">รวมวงเงินที่รออนุมัติ</div>
-          </div>
-        </div>
-
-        <!-- Filters -->
-        <div class="filter-row" style="margin-bottom:12px">
-          <input type="text" id="pend-search" placeholder="🔍 ค้นหา Memo No, Project, Requester..."
-            style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:220px;outline:none"
-            oninput="_pendingSearch=this.value;renderPendingContent()">
-          <select id="pend-filter-type" onchange="renderPendingContent()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกประเภท</option>
-            <option value="sl">SL</option><option value="hw">HW</option>
-            <option value="int">INT</option><option value="ent">ENT</option><option value="dep">DEP</option>
-          </select>
-          <select id="pend-filter-project" onchange="renderPendingContent()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกโครงการ</option>
-          </select>
-          <select id="pend-sort" onchange="renderPendingContent()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="wait-desc">รอนานสุด</option>
-            <option value="date-desc">วันที่ล่าสุด</option>
-            <option value="amount-desc">วงเงิน มาก→น้อย</option>
-            <option value="amount-asc">วงเงิน น้อย→มาก</option>
-          </select>
-        </div>
-
-        <div id="pending-list"></div>
-      </div>
-
-      <!-- ════ ALL MEMOS (History) ════ -->
-      <div id="view-history" class="view">
-        <!-- Status tabs -->
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-          <div style="display:flex;gap:4px;background:var(--bg);border-radius:var(--r);padding:4px">
-            <button class="hist-tab-btn active" data-status="all" onclick="switchHistTab('all',this)" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:var(--surface);color:var(--blue)">
-              All <span class="hist-tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
-            </button>
-            <button class="hist-tab-btn" data-status="draft" onclick="switchHistTab('draft',this)" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
-              Draft <span class="hist-tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
-            </button>
-            <button class="hist-tab-btn" data-status="pending" onclick="switchHistTab('pending',this)" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
-              Pending <span class="hist-tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
-            </button>
-            <button class="hist-tab-btn" data-status="completed" onclick="switchHistTab('completed',this)" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
-              Approved <span class="hist-tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
-            </button>
-            <button class="hist-tab-btn" data-status="rejected" onclick="switchHistTab('rejected',this)" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
-              Rejected <span class="hist-tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
-            </button>
-          </div>
-        </div>
-        <div class="filter-row" style="margin-bottom:12px">
-          <input type="search" id="hist-search" placeholder="🔍 ค้นหา Memo, ผู้ขอ, โครงการ…" oninput="renderHistoryMemos()">
-          <select id="hist-status" onchange="renderHistoryMemos()" style="display:none">
-            <option value="all">ทุกสถานะ</option>
-            <option value="completed">Completed</option>
-            <option value="rejected">Rejected</option>
-            <option value="pending">Pending</option>
-            <option value="pending_a1">Pending A1</option>
-            <option value="pending_a2">Pending A2</option>
-            <option value="draft">Draft</option>
-            <option value="cancelled">Cancelled</option>
-            <option value="expired">Expired</option>
-          </select>
-          <select id="hist-type" onchange="renderHistoryMemos()"><option value="all">ทุกประเภท</option><option value="sl">SL</option><option value="hw">HW</option><option value="int">INT</option><option value="ent">ENT</option><option value="dep">DEP</option></select>
-          <select id="hist-project" onchange="renderHistoryMemos()"><option value="all">ทุกโครงการ</option></select>
-          <select id="hist-range" onchange="renderHistoryMemos()"><option value="month">เดือนนี้</option><option value="last-month">เดือนที่แล้ว</option><option value="3-months">3 เดือน</option><option value="all">ทั้งหมด</option></select>
-          <select id="hist-sort" onchange="renderHistoryMemos()">
-            <option value="updated-desc">อัปเดตล่าสุด</option>
-            <option value="updated-asc">อัปเดตเก่าสุด</option>
-            <option value="created-desc">สร้างล่าสุด</option>
-            <option value="created-asc">สร้างเก่าสุด</option>
-            <option value="amount-desc">วงเงินมาก→น้อย</option>
-            <option value="amount-asc">วงเงินน้อย→มาก</option>
-            <option value="project-asc">โครงการ A-Z</option>
-            <option value="status-asc">สถานะ</option>
-          </select>
-          <button type="button" class="btn-sm" id="hist-filter-toggle" onclick="toggleHistFilters()" aria-expanded="false">ตัวกรองเพิ่มเติม</button>
-          <button type="button" class="btn-export" onclick="exportHistoryCsv()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Export CSV
-          </button>
-        </div>
-        <div id="hist-filters-advanced" class="hist-adv-panel filter-row" style="margin-bottom:12px">
-          <input type="date" id="hist-date-from" title="จากวันที่" onchange="renderHistoryMemos()">
-          <span class="hist-adv-sep">–</span>
-          <input type="date" id="hist-date-to" title="ถึงวันที่" onchange="renderHistoryMemos()">
-          <select id="hist-amt-preset" onchange="renderHistoryMemos()">
-            <option value="all">ทุกวงเงิน</option>
-            <option value="gt100k">&gt; 100k</option>
-            <option value="50k-100k">50k – 100k</option>
-            <option value="lt50k">&lt; 50k</option>
-          </select>
-          <input type="number" id="hist-amt-min" class="hist-amt-input" placeholder="ขั้นต่ำ ฿" min="0" onchange="renderHistoryMemos()">
-          <input type="number" id="hist-amt-max" class="hist-amt-input" placeholder="สูงสุด ฿" min="0" onchange="renderHistoryMemos()">
-          <select id="hist-requester" onchange="renderHistoryMemos()"><option value="all">— กรองตามผู้ขอ —</option></select>
-          <select id="hist-approver" onchange="renderHistoryMemos()"><option value="all">— กรองตามผู้อนุมัติ —</option></select>
-        </div>
-        <div class="card" style="padding:0;overflow:hidden" id="hist-table-wrap">
-          <div class="card-head" style="padding:14px 16px 12px;border-bottom:1px solid var(--border);margin:0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-            <span class="card-title">Memo History</span>
-            <span id="hist-result-count" style="font-size:11px;color:var(--text-3);font-weight:400">แสดง 0 รายการ · คลิกแถวเพื่อดูรายละเอียด</span>
-          </div>
-          <div style="overflow-x:auto">
-            <table class="hist-table">
-              <thead><tr>
-                <th style="width:10%;padding-left:16px">เลข Memo</th>
-                <th style="width:6%">Type</th>
-                <th style="width:9%">โครงการ</th>
-                <th style="width:9%">ผู้ขอ</th>
-                <th style="width:8%">วงเงิน</th>
-                <th style="width:7%">สถานะ</th>
-                <th style="width:9%">ผู้อนุมัติ</th>
-                <th style="width:6%">สร้าง</th>
-                <th style="width:6%">อัปเดต</th>
-                <th style="width:7%">ระยะเวลา</th>
-                <th style="width:8%">เหตุผล Reject</th>
-                <th style="width:10%;text-align:center">Budget</th>
-                <th style="width:10%;text-align:center">จัดการ</th>
-              </tr></thead>
-              <tbody id="history-body"></tbody>
-            </table>
-          </div>
-        </div>
-        <div id="hist-reject-popover" class="hist-reject-popover" role="tooltip"></div>
-      </div>
-
-      <!-- ════ BUDGET ════ -->
-      <div id="view-budget" class="view">
-
-        <!-- Sub-tab bar -->
-        <div class="cost-tab-bar" style="margin-bottom:12px">
-          <div style="display:flex;gap:4px">
-            <button class="cost-stab active" data-tab="overview" onclick="switchBudgetTab('overview',this)">Overview</button>
-            <button class="cost-stab" data-tab="sl-infra" onclick="switchBudgetTab('sl-infra',this)">SL + Infra</button>
-            <button class="cost-stab" data-tab="others" onclick="switchBudgetTab('others',this)">Others</button>
-          </div>
-        </div>
-
-        <!-- ── SUB-TAB: OVERVIEW ── -->
-        <div id="bgt-tab-overview" class="cost-tab-panel">
-
-          <!-- 4-card KPI row -->
-          <div class="metric-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px">
-            <div class="metric-card">
-              <div class="metric-label">งบประมาณ (ช่วงนี้)</div>
-              <div class="metric-val" id="bgt-kpi-budget" style="color:var(--text)">฿0</div>
-              <div class="metric-sub" id="bgt-kpi-budget-sub">ตั้งไว้สำหรับช่วงนี้</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">ใช้จ่ายจริง</div>
-              <div class="metric-val" id="bgt-kpi-total" style="color:var(--blue)">฿0</div>
-              <div class="metric-sub" id="bgt-kpi-actual-sub">จาก memo ที่อนุมัติแล้ว</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">คงเหลือ</div>
-              <div class="metric-val" id="bgt-kpi-remaining" style="color:var(--green)">—</div>
-              <div class="metric-sub" id="bgt-kpi-remaining-sub">จากงบประมาณที่ตั้งไว้</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">Forecast (ถึงสิ้นปี)</div>
-              <div class="metric-val" id="bgt-kpi-forecast" style="color:var(--amber)">—</div>
-              <div class="metric-sub" id="bgt-kpi-forecast-sub">คาดการณ์จากอัตราปัจจุบัน</div>
-            </div>
-          </div>
-
-          <!-- Interactive chart card -->
-          <div class="card" style="padding:16px">
-
-            <!-- Title + mode -->
-            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-              <div>
-                <div style="font-size:12px;font-weight:600;color:var(--text)">Monthly Spend</div>
-                <div style="font-size:11px;color:var(--text-3);margin-top:2px" id="ov-period-label"></div>
-              </div>
-              <div style="display:flex;gap:5px;">
-                <button class="btn-sm ov-mode-btn active" id="ov-mbtn-spend" onclick="ovSetMode('spend')">Spend</button>
-                <button class="btn-sm ov-mode-btn" id="ov-mbtn-bva" onclick="ovSetMode('bva')">Budget vs Actual</button>
-              </div>
-            </div>
-
-            <!-- Period + view controls -->
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px">
-              <div>
-                <div style="font-size:11px;font-weight:500;color:var(--text-2);margin-bottom:5px">Period</div>
-                <div style="display:flex;gap:5px;flex-wrap:wrap;">
-                  <button class="btn-sm ov-preset-btn" id="ov-pbtn-3" onclick="ovSetPreset(3)">3M</button>
-                  <button class="btn-sm ov-preset-btn" id="ov-pbtn-6" onclick="ovSetPreset(6)">6M</button>
-                  <button class="btn-sm ov-preset-btn active" id="ov-pbtn-12" onclick="ovSetPreset(12)">12M</button>
-                  <button class="btn-sm ov-preset-btn" id="ov-pbtn-0" onclick="ovSetPreset(0)">Custom</button>
-                </div>
-                <div id="ov-custom-range" style="display:none;margin-top:7px;gap:6px;align-items:center;">
-                  <select id="ov-from-sel" onchange="ovApplyCustomRange()" class="ri" style="font-size:11px;padding:3px 6px;width:auto"></select>
-                  <span style="font-size:11px;color:var(--text-3)">→</span>
-                  <select id="ov-to-sel" onchange="ovApplyCustomRange()" class="ri" style="font-size:11px;padding:3px 6px;width:auto"></select>
-                </div>
-              </div>
-
-              <div id="ov-spend-view-wrap">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                  <div style="font-size:11px;font-weight:500;color:var(--text-2)">แสดงแต่ละแท่งเป็น</div>
-                  <div style="display:flex;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden;">
-                    <button id="ov-sbtn-stacked" onclick="ovSetStack('stacked')" style="font-size:10px;padding:3px 8px;border:none;background:var(--blue);color:#fff;cursor:pointer;">Stacked</button>
-                    <button id="ov-sbtn-grouped" onclick="ovSetStack('grouped')" style="font-size:10px;padding:3px 8px;border:none;background:transparent;color:var(--text-2);cursor:pointer;">Side by side</button>
-                  </div>
-                </div>
-                <div style="display:flex;gap:8px;">
-                  <div id="ov-vcard-type" onclick="ovSetGroup('type')" style="flex:1;padding:10px 12px;border-radius:var(--r-sm);border:1.5px solid var(--blue);cursor:pointer;background:var(--card-bg)">
-                    <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:2px">แยกตาม Type</div>
-                    <div style="font-size:10px;color:var(--text-3);line-height:1.4">แต่ละสี = SL / HW / INT...<br>เห็นว่าจ่ายไปกับอะไร</div>
-                  </div>
-                  <div id="ov-vcard-project" onclick="ovSetGroup('project')" style="flex:1;padding:10px 12px;border-radius:var(--r-sm);border:0.5px solid var(--border);cursor:pointer;background:var(--card-bg)">
-                    <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:2px">แยกตาม Project</div>
-                    <div style="font-size:10px;color:var(--text-3);line-height:1.4">แต่ละสี = Geo9 / AOA-MP...<br>เห็นว่าโปรเจคไหนใช้เงิน</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Project chips (always shown) + Type chips (spend only) -->
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
-              <div>
-                <div style="font-size:11px;font-weight:500;color:var(--text-2);margin-bottom:5px">Projects <span id="ov-proj-count" style="color:var(--text-3);font-weight:400"></span></div>
-                <div style="display:flex;gap:5px;flex-wrap:wrap" id="ov-proj-chips"></div>
-              </div>
-              <div id="ov-type-col">
-                <div style="font-size:11px;font-weight:500;color:var(--text-2);margin-bottom:5px">Types <span id="ov-type-count" style="color:var(--text-3);font-weight:400"></span></div>
-                <div style="display:flex;gap:5px;flex-wrap:wrap" id="ov-type-chips"></div>
-              </div>
-            </div>
-
-            <div style="height:260px"><canvas id="ov-main-chart"></canvas></div>
-          </div>
-
-        </div>
-
-        <!-- ── SUB-TAB: SL + INFRA ── -->
-        <div id="bgt-tab-sl-infra" class="cost-tab-panel" style="display:none">
-
-          <!-- KPI row -->
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:12px">
-            <div style="padding:12px 16px;border-right:1px solid var(--border)">
-              <div style="font-size:11px;color:var(--text-3);margin-bottom:3px">Total Monthly</div>
-              <div style="font-size:18px;font-weight:600;color:var(--text)" id="sl-kpi-total">฿0</div>
-              <div style="font-size:11px;color:var(--text-3)">License + Infra</div>
-            </div>
-            <div style="padding:12px 16px;border-right:1px solid var(--border)">
-              <div style="font-size:11px;color:var(--text-3);margin-bottom:3px">License</div>
-              <div style="font-size:18px;font-weight:600;color:var(--blue)" id="sl-kpi-license">฿0</div>
-            </div>
-            <div style="padding:12px 16px">
-              <div style="font-size:11px;color:var(--text-3);margin-bottom:3px">Infra</div>
-              <div style="font-size:18px;font-weight:600;color:var(--amber)" id="sl-kpi-infra">฿0</div>
-            </div>
-          </div>
-
-          <!-- Sidebar nav + content -->
-          <div style="display:grid;grid-template-columns:160px 1fr;border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
-
-            <!-- Left nav -->
-            <div style="border-right:1px solid var(--border);background:var(--bg)">
-              <div id="sl-nav-bva" class="sl-nav-item active" onclick="switchSLNav('bva',this)"
-                style="padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid var(--blue);background:var(--blue-50)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#185FA5" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-                <span style="font-size:12px;font-weight:600;color:var(--blue)">Budget vs Actual</span>
-              </div>
-              <div id="sl-nav-forecast" class="sl-nav-item" onclick="switchSLNav('forecast',this)"
-                style="padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid transparent">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-                <span style="font-size:12px;color:var(--text-2)">Forecast</span>
-              </div>
-              <div id="sl-nav-infra" class="sl-nav-item" onclick="switchSLNav('infra',this)"
-                style="padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid transparent">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6" y2="6"/><line x1="6" y1="18" x2="6" y2="18"/></svg>
-                <span style="font-size:12px;color:var(--text-2)">Infra Cost</span>
-              </div>
-              <div id="sl-nav-budgetsettings" class="sl-nav-item" onclick="switchSLNav('budgetsettings',this)"
-                style="padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid transparent">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                <span style="font-size:12px;color:var(--text-2)">Budget Settings</span>
-              </div>
-            </div>
-
-            <!-- Content panels -->
-            <div>
-
-              <!-- Forecast vs Actual -->
-              <div id="sl-panel-forecast" style="display:none;padding:0">
-                <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-                  <span style="font-size:11px;color:var(--text-3)">Forecast = avg actual (SL memo) · คลิก Actual cell เพื่อดู memo</span>
-                  <div style="display:flex;gap:8px;align-items:center">
-                    <select id="sl-forecast-proj" onchange="renderBudgetSLInfra()" style="font-size:11px;padding:3px 8px">
-                      <option value="all">ทุกโปรเจค</option>
-                    </select>
-                    <select id="sl-forecast-months" onchange="renderBudgetSLInfra()" style="font-size:11px;padding:3px 8px">
-                      <option value="6">6 เดือน</option>
-                      <option value="12">12 เดือน</option>
-                    </select>
-                  </div>
-                </div>
-                <div style="overflow-x:auto">
-                  <table class="hist-table">
-                    <thead id="sl-forecast-thead"></thead>
-                    <tbody id="sl-forecast-body"></tbody>
-                  </table>
-                </div>
-                <!-- Memo breakdown panel -->
-                <div id="sl-memo-breakdown" style="display:none;border-top:1px solid var(--border)">
-                  <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--bg)">
-                    <div style="display:flex;align-items:center;gap:8px">
-                      <span style="font-size:12px;font-weight:600">Memo breakdown</span>
-                      <span id="sl-breakdown-title" style="font-size:11px;background:var(--blue-50);color:var(--blue);padding:2px 8px;border-radius:4px"></span>
-                    </div>
-                    <button class="btn-sm" onclick="document.getElementById('sl-memo-breakdown').style.display='none'" style="font-size:11px;padding:3px 8px">✕</button>
-                  </div>
-                  <table class="hist-table">
-                    <thead><tr>
-                      <th>Memo No</th><th>Software</th><th>฿/เดือน</th><th>Qty</th><th>Monthly (฿)</th>
-                    </tr></thead>
-                    <tbody id="sl-breakdown-body"></tbody>
-                  </table>
-                </div>
-              </div>
-
-              <!-- Infra Cost Matrix -->
-              <div id="sl-panel-infra" style="display:none;padding:0">
-                <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:flex-end;gap:8px">
-                  <label style="cursor:pointer">
-                    <input type="file" id="infra-bulk-input" accept=".xlsx,.xls" style="display:none" onchange="handleInfraBulkUpload(event)">
-                    <span class="btn-sm" style="font-size:11px;padding:4px 10px;display:inline-block">⬆ Bulk Upload</span>
-                  </label>
-                  <button class="btn-primary" onclick="openInfraModal()" style="font-size:11px;padding:4px 12px">+ Add Infra Cost</button>
-                </div>
-                <div style="overflow-x:auto">
-                  <table class="hist-table"><thead id="sl-infra-thead"></thead><tbody id="sl-infra-body"></tbody></table>
-                </div>
-              </div>
-
-              <!-- Budget vs Actual panel -->
-              <div id="sl-panel-bva" style="padding:0">
-                <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-                  <span style="font-size:11px;color:var(--text-3)">Budget = Forecast avg · Actual = SL memo spend ในช่วงที่เลือก</span>
-                  <select id="sl-bva-range" onchange="renderBudgetSLInfra()" style="font-size:11px;padding:3px 8px">
-                    <option value="3">3 เดือน</option>
-                    <option value="6" selected>6 เดือน</option>
-                    <option value="12">12 เดือน</option>
-                  </select>
-                </div>
-                <!-- Summary cards -->
-                <div id="sl-bva-summary" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)"></div>
-                <!-- Per project table -->
-                <table class="hist-table">
-                  <thead><tr>
-                    <th style="padding-left:14px">Project</th>
-                    <th style="text-align:right">Budget (฿)</th>
-                    <th style="text-align:right">Actual (฿)</th>
-                    <th style="text-align:right">Remaining (฿)</th>
-                    <th>Utilization</th>
-                  </tr></thead>
-                  <tbody id="sl-bva-body"></tbody>
-                </table>
-                <div style="padding:8px 14px;background:var(--bg);font-size:11px;color:var(--text-3);display:flex;gap:16px">
-                  <span style="color:var(--green)">● &lt;90% On track</span>
-                  <span style="color:var(--amber)">● 90–100% Near limit</span>
-                  <span style="color:var(--red)">● &gt;100% Over budget</span>
-                </div>
-              </div>
-
-
-              <!-- Budget Settings panel -->
-              <div id="sl-panel-budgetsettings" style="display:none;padding:0">
-                <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-                  <div>
-                    <span style="font-size:12px;font-weight:600">Budget Settings — SL + Infra</span>
-                    <span style="font-size:11px;color:var(--text-3);margin-left:8px">ตั้งงบรายปีต่อโปรเจค ระบบคำนวณรายเดือนให้เอง</span>
-                  </div>
-                  <div style="display:flex;gap:8px;align-items:center">
-                    <select id="sl-bgt-year" onchange="renderBudgetSettings()" style="font-size:11px;padding:3px 8px">
-                      <option value="2568">2568</option>
-                      <option value="2569" selected>2569</option>
-                      <option value="2570">2570</option>
-                    </select>
-                    <button class="btn-primary" onclick="addBudgetRow()" style="font-size:11px;padding:4px 10px">+ เพิ่มโปรเจค</button>
-                  </div>
-                </div>
-                <div id="sl-budget-settings-body" style="padding:14px 16px"></div>
-              </div>
-
-            </div>
-          </div>
-        </div>
-
-        <!-- ── SUB-TAB: OTHERS (Phase 2) ── -->
-        <div id="bgt-tab-others" class="cost-tab-panel" style="display:none">
-          <div class="card" style="padding:48px;text-align:center">
-            <div style="font-size:36px;margin-bottom:12px">🚧</div>
-            <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:8px">Coming Soon — Phase 2</div>
-            <div style="font-size:13px;color:var(--text-3);max-width:400px;margin:0 auto;line-height:1.8">Budget vs Actual สำหรับ HW / INT / ENT / DEP<br>อยู่ระหว่างรอ confirm budget structure กับทีม</div>
-          </div>
-        </div>
-
-      </div>
-      <!-- ════ LICENSE ════ -->
-      <div id="view-license" class="view">
-
-        <!-- Metric cards -->
-        <div class="metric-row" style="grid-template-columns:repeat(5,1fr);margin-bottom:14px">
-          <div class="metric-card"><div class="metric-label">Active Licenses</div><div class="metric-val" id="lic-active" style="color:var(--blue)">0</div><div class="metric-sub" id="lic-active-cost"></div></div>
-          <div class="metric-card"><div class="metric-label">Expiring Soon (≤30d)</div><div class="metric-val" id="lic-expiring" style="color:var(--amber)">0</div><div class="metric-sub">ต้องต่ออายุเร็วๆ นี้</div></div>
-          <div class="metric-card"><div class="metric-label">Expired</div><div class="metric-val" id="lic-expired" style="color:var(--red)">0</div><div class="metric-sub">หมดอายุแล้ว</div></div>
-          <div class="metric-card"><div class="metric-label">ค่าใช้จ่าย/เดือน</div><div class="metric-val" id="lic-monthly" style="font-size:18px;margin-top:4px">฿0</div><div class="metric-sub">รวมทุก active</div></div>
-          <div class="metric-card"><div class="metric-label">ค่าใช้จ่าย/ปี</div><div class="metric-val" id="lic-annual" style="font-size:18px;margin-top:4px">฿0</div><div class="metric-sub" id="lic-renewal-3m"></div></div>
-        </div>
-
-
-        <!-- Search & Filters + Add button -->
-        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
-          <input type="text" id="lic-search" placeholder="🔍 ค้นหา Software, Project, Owner..."
-            style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px;outline:none"
-            oninput="renderLicense()">
-          <select id="lic-filter-status" onchange="renderLicense()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกสถานะ</option>
-            <option value="active">Active</option>
-            <option value="expiring">Expiring (≤30d)</option>
-            <option value="expiring-7">≤ 7 วัน</option>
-            <option value="expiring-15">≤ 15 วัน</option>
-            <option value="expiring-30">≤ 30 วัน</option>
-            <option value="expired">Expired</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-          <select id="lic-filter-project" onchange="renderLicense()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกโครงการ</option>
-          </select>
-          <select id="lic-sort" onchange="renderLicense()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="expiry-asc">หมดอายุใกล้สุด</option>
-            <option value="cost-desc">ราคา มาก→น้อย</option>
-            <option value="seats-desc">Seats มาก→น้อย</option>
-            <option value="purchase-desc">ซื้อล่าสุด</option>
-          </select>
-          <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="downloadTemplate('license')" title="Download Template">⬇ Template</button>
-          <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="importBulk('license')" title="Import from Excel">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Import Excel
-          </button>
-          <button class="btn-primary" style="font-size:12px;padding:6px 14px" onclick="openLicenseModal()">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add License
-          </button>
-        </div>
-
-        <!-- Registry table -->
-        <div class="card" style="padding:0;overflow:hidden">
-          <table class="hist-table">
-            <thead><tr>
-              <th style="width:15%;padding-left:16px">Software</th>
-              <th style="width:7%">Seats</th>
-              <th style="width:9%">฿/เดือน</th>
-              <th style="width:9%">Owner</th>
-              <th style="width:8%">Department</th>
-              <th style="width:8%">โครงการ</th>
-              <th style="width:8%">วันที่ซื้อ</th>
-              <th style="width:8%">หมดอายุ</th>
-              <th style="width:9%;text-align:center">สถานะ</th>
-              <th style="width:7%;text-align:center">Source</th>
-              <th style="width:8%;text-align:center">Actions</th>
-            </tr></thead>
-            <tbody id="lic-table-body"></tbody>
-          </table>
-        </div>
-
-      </div>
-
-      <!-- License Add/Edit Modal -->
-      <div id="license-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:300;align-items:center;justify-content:center">
-        <div style="background:var(--surface);border-radius:var(--r);padding:24px;width:540px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.2)">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
-            <div style="font-size:15px;font-weight:700" id="lic-modal-title">Add License</div>
-            <button onclick="closeLicenseModal()" style="background:none;border:none;cursor:pointer;color:var(--text-3);font-size:20px">&#x2715;</button>
-          </div>
-          <input type="hidden" id="lic-edit-id">
-          <div id="lic-memo-hint" style="display:none;background:#FEF9E7;border:0.5px solid #F0C27F;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:#854F0B">
-            🔒 License นี้มาจาก SL Memo — ราคา, Seats, วันที่, และ Memo Ref แก้ไขไม่ได้ แก้ได้เฉพาะ Owner, Department, Status, และ Note
-          </div>
-          <div class="form-grid" style="margin-bottom:10px">
-            <div class="fg"><label>Software Name *</label><input type="text" id="lic-name" placeholder="เช่น Figma, GitHub Copilot"></div>
-            <div class="fg"><label>Vendor</label><input type="text" id="lic-vendor" placeholder="เช่น Adobe, Microsoft"></div>
-            <div class="fg"><label>Seats</label><input type="number" id="lic-seats" placeholder="1" min="1"></div>
-            <div class="fg"><label>ราคา/เดือน (บาท)</label><input type="number" id="lic-price" placeholder="0"></div>
-          </div>
-          <div class="form-grid" style="margin-bottom:10px">
-            <div class="fg"><label>Owner</label><input type="text" id="lic-owner" placeholder="ชื่อผู้รับผิดชอบ"></div>
-            <div class="fg"><label>Department / Team</label><input type="text" id="lic-dept" placeholder="เช่น PMO, Design Team"></div>
-            <div class="fg"><label>โครงการ</label>
-              <select id="lic-project"><option value="">— ไม่ระบุ —</option></select>
-            </div>
-            <div class="fg"><label>License Type</label>
-              <select id="lic-type-field"><option value="subscription">Subscription</option><option value="perpetual">Perpetual</option><option value="trial">Trial</option></select>
-            </div>
-          </div>
-          <div class="form-grid" style="margin-bottom:10px">
-            <div class="fg"><label>วันที่ซื้อ</label><input type="date" id="lic-purchase-date"></div>
-            <div class="fg"><label>วันหมดอายุ</label><input type="date" id="lic-expiry-date"></div>
-            <div class="fg"><label>Billing Frequency</label>
-              <select id="lic-billing"><option value="monthly">Monthly</option><option value="annual">Annual</option><option value="one-time">One-time</option></select>
-            </div>
-            <div class="fg"><label>สถานะ</label>
-              <select id="lic-status-field"><option value="active">Active</option><option value="renew-soon">Renew Soon</option><option value="cancelled">Cancelled</option></select>
-            </div>
-          </div>
-          <div class="form-grid" style="margin-bottom:16px">
-            <div class="fg"><label>Link Memo No.</label><input type="text" id="lic-memo-ref" placeholder="เช่น ORB-2605-001"></div>
-            <div class="fg"><label>หมายเหตุ</label><input type="text" id="lic-note" placeholder="รายละเอียดเพิ่มเติม"></div>
-          </div>
-          <div style="display:flex;gap:8px;justify-content:flex-end">
-            <button class="btn-ghost" onclick="closeLicenseModal()">ยกเลิก</button>
-            <button class="btn-primary" onclick="saveLicenseManual()">บันทึก</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ════ DEVICE REGISTRY ════ -->
-      <div id="view-device" class="view">
-
-        <!-- Metric cards -->
-        <div class="metric-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px">
-          <div class="metric-card"><div class="metric-label">Total Devices</div><div class="metric-val" id="dev-total" style="color:var(--blue)">0</div><div class="metric-sub" id="dev-total-sub"></div></div>
-          <div class="metric-card"><div class="metric-label">In Use</div><div class="metric-val" id="dev-inuse" style="color:var(--green)">0</div><div class="metric-sub">มีผู้ถือครองอยู่</div></div>
-          <div class="metric-card"><div class="metric-label">Warranty หมดแล้ว</div><div class="metric-val" id="dev-warranty-expired" style="color:var(--red)">0</div><div class="metric-sub">ต้องดำเนินการ</div></div>
-          <div class="metric-card"><div class="metric-label">Available</div><div class="metric-val" id="dev-available" style="color:var(--gray)">0</div><div class="metric-sub">ยังไม่มีผู้ถือ</div></div>
-        </div>
-
-        <!-- Summary tables side by side -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
-
-          <!-- Table 1: Platform × Type -->
-          <div class="card" style="padding:0;overflow:hidden">
-            <div style="padding:12px 16px 10px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600">Summary by Platform × Type</div>
-            <table class="hist-table" id="dev-summary-platform">
-              <thead><tr>
-                <th style="padding-left:16px">Platform</th>
-                <th>Mobile</th>
-                <th>Tablet</th>
-                <th>Other</th>
-                <th style="text-align:right;padding-right:16px">Total</th>
-              </tr></thead>
-              <tbody id="dev-summary-platform-body"></tbody>
-            </table>
-          </div>
-
-          <!-- Table 2: By Project -->
-          <div class="card" style="padding:0;overflow:hidden">
-            <div style="padding:12px 16px 10px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600">Summary by Project</div>
-            <table class="hist-table" id="dev-summary-project">
-              <thead><tr>
-                <th style="padding-left:16px">โครงการ</th>
-                <th>In Use</th>
-                <th>Available</th>
-                <th>Other</th>
-                <th style="text-align:right;padding-right:16px">Total</th>
-              </tr></thead>
-              <tbody id="dev-summary-project-body"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Filter row -->
-        <div class="filter-row" style="margin-bottom:10px">
-          <input type="text" id="dev-search" placeholder="🔍 ค้นหา Device, Serial, Owner..."
-            style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px;outline:none"
-            oninput="renderDevice()">
-          <select id="dev-filter-platform" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุก Platform</option>
-            <option value="ios">iOS</option>
-            <option value="android">Android</option>
-            <option value="huawei">Huawei</option>
-            <option value="windows">Windows</option>
-            <option value="other">Other</option>
-          </select>
-          <select id="dev-filter-type" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกประเภท</option>
-            <option value="mobile">Mobile Phone</option>
-            <option value="tablet">Tablet</option>
-            <option value="laptop">Laptop</option>
-            <option value="other">Other</option>
-          </select>
-          <select id="dev-filter-status" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกสถานะ</option>
-            <option value="in-use">In Use</option>
-            <option value="available">Available</option>
-            <option value="maintenance">Maintenance</option>
-            <option value="retired">Retired</option>
-          </select>
-          <select id="dev-filter-project" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกโครงการ</option>
-            <option>AOA-MP</option><option>TTB</option><option>Geo9</option>
-            <option>Release 2.1</option><option>Release 3</option>
-          </select>
-          <select id="dev-filter-company" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุก Company</option>
-            <option value="BBIK">BBIK</option>
-            <option value="Orbit Digital">Orbit Digital</option>
-          </select>
-          <button class="btn-export" onclick="exportDeviceCsv()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Export CSV
-          </button>
-          <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="downloadTemplate('device')">⬇ Template</button>
-          <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="importBulk('device')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Import Excel
-          </button>
-          <button class="btn-primary" style="margin-left:auto" onclick="openDeviceModal()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add Device
-          </button>
-        </div>
-
-        <!-- Main registry table -->
-        <div class="card" style="padding:0;overflow:hidden">
-          <table class="hist-table">
-            <thead><tr>
-              <th style="width:16%;padding-left:16px">Brand / Model</th>
-              <th style="width:8%">OS</th>
-              <th style="width:7%">Type</th>
-              <th style="width:10%">Asset IT</th>
-              <th style="width:11%">Serial No.</th>
-              <th style="width:11%">Assignee</th>
-              <th style="width:9%">Project</th>
-              <th style="width:9%;text-align:center">Status</th>
-              <th style="width:9%">Updated</th>
-              <th style="width:10%;text-align:center">Action</th>
-            </tr></thead>
-            <tbody id="dev-table-body"></tbody>
-          </table>
-          <div id="dev-load-more-footer" style="display:none"></div>
-
-          <!-- Device detail panel -->
-          <div id="dev-detail-panel" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-top:12px"></div>
-
-        </div>
-      </div>
-
-      <!-- ════ RESOURCE MANAGEMENT ════ -->
-      <div id="view-resource" class="view">
-
-        <!-- KPI cards -->
-        <div class="metric-row" id="res-kpi" style="grid-template-columns:repeat(5,1fr);margin-bottom:14px"></div>
-
-        <!-- Filter row -->
-        <div class="filter-row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px">
-          <input type="text" id="res-search" placeholder="🔍 ค้นหา Project, Position, Team..."
-            style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px"
-            oninput="renderResource()">
-          <select id="res-f-status" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกสถานะ</option>
-            <option value="pending">Pending</option>
-            <option value="sourcing">Sourcing</option>
-            <option value="interviewing">Interviewing</option>
-            <option value="offer">Offer in Progress</option>
-            <option value="document">Document Processing</option>
-            <option value="filled">Filled</option>
-            <option value="mitigated">Mitigated</option>
-            <option value="resolved">Resolved</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-          <select id="res-f-hiring" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุก Hiring Type</option>
-            <option>Permanent (Direct)</option>
-            <option>Secondment</option>
-            <option>Sub-contract</option>
-          </select>
-          <select id="res-f-project" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกโครงการ</option>
-            <option>AOA-MP</option><option>TTB</option><option>Geo9</option>
-            <option>Release 2.1</option><option>Release 3</option>
-          </select>
-          <select id="res-f-level" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุก Level</option>
-            <option>Junior</option><option>Mid</option><option>Senior</option>
-            <option>Lead</option><option>Manager</option>
-          </select>
-          <button class="btn-export" onclick="exportResourceCsv()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Export CSV
-          </button>
-          <button class="btn-primary" style="margin-left:auto" onclick="openResModal()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            New Request
-          </button>
-        </div>
-
-        <!-- Table -->
-        <div class="card" style="padding:0;overflow:hidden">
-          <table class="hist-table">
-            <thead><tr>
-              <th style="padding-left:12px;width:12%">Request ID</th>
-              <th style="width:9%">Team</th>
-              <th style="width:9%">Project</th>
-              <th style="width:12%">Position</th>
-              <th style="width:7%">Level</th>
-              <th style="width:4%;text-align:center">HC</th>
-              <th style="width:10%">Hiring Type</th>
-              <th style="width:7%">Start</th>
-              <th style="width:7%">End</th>
-              <th style="width:7%">Request Date</th>
-              <th style="width:7%">Resolved</th>
-              <th style="width:8%;text-align:center">Status</th>
-              <th style="width:11%;text-align:center">Action</th>
-            </tr></thead>
-            <tbody id="res-table-body"></tbody>
-          </table>
-        </div>
-
-        <!-- Pagination -->
-        <div id="res-pagination" style="display:flex;justify-content:space-between;align-items:center;padding:10px 4px;font-size:12px"></div>
-      </div>
-
-      <!-- ════ RESOURCE: New/Edit Modal ════ -->
-      <div id="resource-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
-        <div class="card" style="width:640px;max-width:95vw;max-height:90vh;overflow-y:auto;padding:24px;position:relative">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
-            <span id="res-modal-title" style="font-size:15px;font-weight:700">New Resource Request</span>
-            <button class="btn-sm" onclick="closeResModal()" style="padding:4px 10px">✕</button>
-          </div>
-          <input type="hidden" id="res-edit-id">
-          <div id="res-form-body"></div>
-          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px">
-            <button class="btn-ghost" onclick="closeResModal()">Cancel</button>
-            <button class="btn-primary" onclick="saveResource()">💾 Save</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ════ RESOURCE: Status Modal ════ -->
-      <div id="resource-status-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
-        <div class="card" style="width:440px;max-width:95vw;padding:24px">
-          <div style="font-size:15px;font-weight:700;margin-bottom:12px">เปลี่ยนสถานะ</div>
-          <input type="hidden" id="res-status-id">
-          <div id="res-status-current" style="margin-bottom:12px;font-size:13px"></div>
-          <div class="fg" style="margin-bottom:10px"><label>สถานะใหม่</label>
-            <select id="res-status-select" class="ri" style="width:100%"></select>
-          </div>
-          <div class="fg"><label>Remark (จำเป็นเมื่อ Cancelled)</label>
-            <textarea id="res-status-remark" class="ri" rows="2" placeholder="หมายเหตุ"></textarea>
-          </div>
-          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
-            <button class="btn-ghost" onclick="closeResStatus()">Cancel</button>
-            <button class="btn-primary" onclick="saveResStatus()">บันทึก</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ════ RESOURCE: Transfer Modal ════ -->
-      <div id="resource-transfer-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
-        <div class="card" style="width:500px;max-width:95vw;padding:24px">
-          <div style="font-size:15px;font-weight:700;margin-bottom:12px">↗ Transfer Resource</div>
-          <input type="hidden" id="res-transfer-id">
-          <div id="res-transfer-body"></div>
-          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
-            <button class="btn-ghost" onclick="closeResTransfer()">Cancel</button>
-            <button class="btn-primary" onclick="saveResTransfer()">↗ Transfer</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ════ RESOURCE: Detail Drawer ════ -->
-      <div id="resource-detail-drawer" style="position:fixed;top:0;right:0;width:420px;max-width:95vw;height:100vh;background:var(--surface);box-shadow:-4px 0 24px rgba(0,0,0,0.12);z-index:200;transform:translateX(100%);transition:transform 0.25s ease;overflow-y:auto;padding:24px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-          <span style="font-size:14px;font-weight:700">Resource Request Detail</span>
-          <button class="btn-sm" onclick="closeResDetail()" style="padding:4px 10px">✕</button>
-        </div>
-        <div id="res-detail-body"></div>
-      </div>
-
-      <!-- ════ SETTINGS ════ -->
-      <div id="view-settings" class="view"></div>
-
-    </div><!-- /content -->
-  </div><!-- /main -->
-</div><!-- /layout -->
-
-<div id="pdf-stage" class="pdf-stage" aria-hidden="true"></div>
-
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<!-- Core: shared utils, storage, navigation, PDF -->
-<script src="app.js"></script>
-<!-- Views -->
-<script src="views/create.js"></script>
-<script src="views/pending.js"></script>
-<script src="views/history.js"></script>
-<script src="views/budget.js"></script>
-<script src="views/license.js"></script>
-<script src="views/device.js"></script>
-<script src="views/bulk_import.js"></script>
-<script src="views/resource.js"></script>
-<style>
-  #resource-detail-drawer.open { transform: translateX(0); }
-  .badge-purple { background:#E9D5FF; color:#6B21A8; }
-  .badge-teal   { background:#CCFBF1; color:#115E59; }
-  .badge-yellow { background:#FEF9C3; color:#854D0E; }
-  #resource-detail-drawer.open { transform: translateX(0); }
-</style>
-<script>initApp();</script>
-
-<!-- Approve Modal -->
-<div id="approve-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:300;align-items:center;justify-content:center">
-  <div style="background:var(--surface);border-radius:var(--r);padding:24px;width:460px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,0.2)">
-    <div style="font-size:15px;font-weight:700;margin-bottom:16px">✓ Approve Memo</div>
-    <div style="background:var(--bg);border-radius:var(--r-sm);padding:12px;margin-bottom:14px;font-size:13px">
-      <div style="display:grid;grid-template-columns:80px 1fr;gap:6px">
-        <span style="color:var(--text-3);font-size:11px;font-weight:600">MEMO</span><span id="approve-memo-no" style="font-family:monospace;font-weight:600"></span>
-        <span style="color:var(--text-3);font-size:11px;font-weight:600">PROJECT</span><span id="approve-project"></span>
-        <span style="color:var(--text-3);font-size:11px;font-weight:600">AMOUNT</span><span id="approve-amount" style="font-weight:700;color:var(--blue-800)"></span>
-        <span style="color:var(--text-3);font-size:11px;font-weight:600">SUBJECT</span><span id="approve-subject" style="color:var(--text-2)"></span>
-      </div>
-    </div>
-    <div class="fg" style="margin-bottom:16px">
-      <label>Approval Note <span style="color:var(--text-3);font-weight:400">(optional)</span></label>
-      <textarea id="approve-note" placeholder="เช่น Approved via email, Reviewed in meeting..." style="min-height:60px;font-family:inherit;font-size:13px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);width:100%;resize:vertical;outline:none"></textarea>
-    </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn-ghost" onclick="closeApproveModal()">Cancel</button>
-      <button class="btn-primary" onclick="confirmApprove()" style="background:var(--green)">✓ Confirm Approve</button>
-    </div>
-  </div>
-</div>
-
-<!-- Reject Modal -->
-<div id="reject-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:300;align-items:center;justify-content:center">
-  <div style="background:var(--surface);border-radius:var(--r);padding:24px;width:460px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,0.2)">
-    <div style="font-size:15px;font-weight:700;margin-bottom:6px">✕ Reject Memo</div>
-    <div style="font-size:12px;color:var(--text-3);margin-bottom:14px">Memo: <strong id="reject-memo-no"></strong></div>
-    <div class="fg" style="margin-bottom:10px">
-      <label>เหตุผลการ Reject *</label>
-      <select id="reject-reason-select" style="font-family:inherit;font-size:13px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);width:100%;outline:none">
-        <option value="">— เลือกเหตุผล —</option>
-        <option>Budget Issue</option><option>Missing Quotation</option>
-        <option>Incorrect Information</option><option>Duplicate Request</option><option>Other</option>
-      </select>
-    </div>
-    <div class="fg" style="margin-bottom:16px">
-      <label>รายละเอียดเพิ่มเติม <span style="color:var(--text-3);font-weight:400">(optional)</span></label>
-      <textarea id="reject-comment" placeholder="อธิบายเพิ่มเติม..." style="min-height:60px;font-family:inherit;font-size:13px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);width:100%;resize:vertical;outline:none"></textarea>
-    </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn-ghost" onclick="closeRejectModal()">Cancel</button>
-      <button class="btn-reject" onclick="confirmReject()" style="padding:9px 20px;font-size:13px;font-weight:600">✕ Confirm Reject</button>
-    </div>
-  </div>
-</div>
-
-<!-- Detail Modal -->
-<div id="detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:300;align-items:center;justify-content:center">
-  <div style="background:var(--surface);border-radius:var(--r);padding:24px;width:640px;max-width:95vw;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.2)">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-      <div style="font-size:15px;font-weight:700">Memo Detail</div>
-      <button onclick="closeDetailModal()" style="background:none;border:none;cursor:pointer;color:var(--text-3);font-size:20px">&#x2715;</button>
-    </div>
-    <div id="detail-content"></div>
-    <div id="detail-actions" style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--border)"></div>
-  </div>
-</div>
-
-<!-- Device Modal -->
-<div id="device-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:200;align-items:center;justify-content:center">
-  <div style="background:var(--surface);border-radius:var(--r);padding:24px;width:560px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.2)">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
-      <div style="font-size:15px;font-weight:700;color:var(--text)" id="dev-modal-title">Add Device</div>
-      <button onclick="closeDeviceModal()" style="background:none;border:none;cursor:pointer;color:var(--text-3);font-size:20px">&#x2715;</button>
-    </div>
-    <input type="hidden" id="dev-edit-id">
-    <div class="form-grid" style="margin-bottom:10px">
-      <div class="fg"><label>Device Name *</label><input type="text" id="dev-name" placeholder="เช่น iPhone 15 Pro"></div>
-      <div class="fg"><label>Brand / Model</label><input type="text" id="dev-brand" placeholder="เช่น Apple iPhone 15 Pro"></div>
-      <div class="fg"><label>Platform *</label>
-        <select id="dev-platform">
-          <option value="ios">iOS</option>
-          <option value="android">Android</option>
-          <option value="huawei">Huawei</option>
-          <option value="windows">Windows</option>
-          <option value="other">Other</option>
-        </select>
-      </div>
-      <div class="fg"><label>Type *</label>
-        <select id="dev-type">
-          <option value="mobile">Mobile Phone</option>
-          <option value="tablet">Tablet</option>
-          <option value="laptop">Laptop</option>
-          <option value="other">Other</option>
-        </select>
-      </div>
-    </div>
-    <div class="form-grid" style="margin-bottom:10px">
-      <div class="fg"><label>IT Asset ID</label><input type="text" id="dev-asset" placeholder="เช่น OD-001"></div>
-      <div class="fg"><label>Asset ACC</label><input type="text" id="dev-asset-acc" placeholder="เช่น ACC-001"></div>
-      <div class="fg"><label>Serial Number</label><input type="text" id="dev-serial" placeholder="S/N หรือ IMEI"></div>
-      <div class="fg"><label>QTY</label><input type="number" id="dev-qty" min="1" value="1"></div>
-      <div class="fg"><label>OS Version</label><input type="text" id="dev-os-version" placeholder="เช่น iOS 17.4.1"></div>
-      <div class="fg"><label>Company</label>
-        <select id="dev-company">
-          <option value="">— ไม่ระบุ —</option>
-          <option value="BBIK">BBIK</option>
-          <option value="Orbit Digital">Orbit Digital</option>
-        </select>
-      </div>
-      <div class="fg"><label>โครงการ</label>
-        <select id="dev-project">
-          <option value="">— ไม่ระบุ —</option>
-          <option>AOA-MP</option><option>TTB</option><option>Geo9</option>
-          <option>Release 2.1</option><option>Release 3</option>
-        </select>
-      </div>
-    </div>
-    <div class="form-grid" style="margin-bottom:10px">
-      <div class="fg"><label>Assignee</label><input type="text" id="dev-owner" placeholder="ชื่อ-นามสกุล"></div>
-      <div class="fg"><label>Position</label><input type="text" id="dev-position" placeholder="เช่น PMO, Developer"></div>
-      <div class="fg"><label>QA Owner</label><input type="text" id="dev-qa-owner" placeholder="เช่น Best IT"></div>
-      <div class="fg"><label>วันที่รับอุปกรณ์</label><input type="date" id="dev-assigned-date"></div>
-      <div class="fg"><label>Return Date</label><input type="date" id="dev-return-date"></div>
-      <div class="fg"><label>Link HW Memo</label><input type="text" id="dev-memo-ref" placeholder="เช่น ORB-2605-004"></div>
-    </div>
-    <div class="form-grid" style="margin-bottom:10px">
-      <div class="fg"><label>Warranty Expiry</label><input type="date" id="dev-warranty"></div>
-      <div class="fg"><label>สภาพ (Condition)</label><select id="dev-condition"><option value="new">New</option><option value="good">Good</option><option value="fair">Fair</option><option value="poor">Poor</option></select></div>
-      <div class="fg"><label>สถานะ</label><select id="dev-status"><option value="in-use">In Use</option><option value="available">Available</option><option value="maintenance">Maintenance</option><option value="retired">Retired</option></select></div>
-    </div>
-    <div class="fg" style="margin-bottom:16px">
-      <label>หมายเหตุ</label>
-      <textarea id="dev-note" placeholder="รายละเอียดเพิ่มเติม..." style="min-height:52px"></textarea>
-      <div class="fg"><label>Device Photo</label>
-        <input type="file" id="dev-photo-input" accept="image/*" style="font-size:12px">
-        <img id="dev-photo-preview" src="" style="display:none;width:80px;height:80px;object-fit:cover;border-radius:var(--r-sm);margin-top:6px;border:1px solid var(--border)">
-      </div>
-    </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn-ghost" onclick="closeDeviceModal()">ยกเลิก</button>
-      <button class="btn-primary" onclick="saveDevice()">บันทึก</button>
-    </div>
-  </div>
-</div>
-
-<style>
-.pend-tab-btn.active { background:var(--surface)!important;color:var(--blue)!important;font-weight:600!important;box-shadow:0 1px 3px rgba(0,0,0,0.08); }
-</style>
-<!-- Bulk Account Upload Modal -->
-<div id="bulk-acct-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
-  <div class="card" style="width:520px;max-width:95vw;padding:24px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <span style="font-size:15px;font-weight:700">Bulk Upload Account</span>
-      <button class="btn-sm" onclick="closeBulkAcctModal()" style="padding:4px 10px">✕</button>
-    </div>
-    <p style="font-size:12px;color:var(--text-2);margin-bottom:12px">วาง email 1 บรรทัดต่อ 1 account — ค่า Col จะถูกเติมจาก dropdown ที่ตั้งไว้</p>
-    <textarea id="bulk-acct-input" class="ri" style="width:100%;height:160px;resize:vertical;font-family:inherit;font-size:12px" placeholder="email1@orbitdigital.co.th&#10;email2@orbitdigital.co.th&#10;..."></textarea>
-    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
-      <button class="btn-ghost" onclick="closeBulkAcctModal()">ยกเลิก</button>
-      <button class="btn-primary" onclick="saveBulkAcct()">✓ เพิ่ม Account</button>
-    </div>
-  </div>
-</div>
-<!-- Bulk Name Upload Modal -->
-<div id="bulk-name-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
-  <div class="card" style="width:500px;max-width:95vw;padding:24px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <span style="font-size:15px;font-weight:700">Bulk Upload รายชื่อ</span>
-      <button class="btn-sm" onclick="closeBulkNameModal()" style="padding:4px 10px">✕</button>
-    </div>
-    <p style="font-size:12px;color:var(--text-2);margin-bottom:12px">วางรายชื่อได้เลย — 1 บรรทัด ต่อ 1 คน เช่น<br><code style="background:var(--bg);padding:2px 6px;border-radius:4px;font-size:11px">นาย สมชาย ใจดี ตำแหน่ง Developer</code></p>
-    <textarea id="bulk-name-input" class="ri" style="width:100%;height:160px;resize:vertical;font-family:inherit;font-size:12px" placeholder="วางรายชื่อที่นี่...&#10;นาย สมชาย ใจดี Developer&#10;นาง สมหญิง รักงาน QA&#10;..."></textarea>
-    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
-      <button class="btn-ghost" onclick="closeBulkNameModal()">ยกเลิก</button>
-      <button class="btn-primary" onclick="saveBulkNames()">✓ เพิ่มรายชื่อ</button>
-    </div>
-  </div>
-</div>
-
-<script>
-function toggleAccountMenu() {
-  const m = document.getElementById('account-menu');
-  m.style.display = m.style.display === 'none' ? 'block' : 'none';
-}
-function switchAccount(name, role, initials) {
-  document.getElementById('sb-uname').textContent = name;
-  document.getElementById('sb-urole').textContent = role;
-  document.getElementById('sb-avatar').textContent = initials;
-  document.getElementById('account-menu').style.display = 'none';
+async function updateMemoStatusAsync(memoNo, status, extra={}) {
+  const memos = await loadMemosAsync();
+  const memo = memos.find(m => m.memoNo === memoNo);
+  if(!memo) return null;
+  const updated = { ...memo, ...extra, status, updatedAt: new Date().toISOString() };
+  if(status==='completed') updated.approvedAt = updated.updatedAt;
+  if(status==='rejected')  updated.rejectedAt = updated.updatedAt;
+
+  if(await checkSupa()) {
+    try {
+      // camelCase → snake_case: approvalNote → approval_note
+      const toSnake = s => s.replace(/([A-Z])/g, '_$1').toLowerCase();
+      const patch = { status, updated_at: updated.updatedAt, ...Object.fromEntries(
+        Object.entries(extra).map(([k,v]) => [toSnake(k), v])
+      )};
+      if(status==='completed') patch.approved_at = updated.approvedAt;
+      if(status==='rejected')  patch.rejected_at = updated.rejectedAt;
+      await supaFetch('memos', 'PATCH', patch, '?memo_no=eq.' + encodeURIComponent(memoNo));
+      _memCache = null;
+    } catch(e) { console.warn('Supabase patch failed', e.message); }
+  }
+  // also update localStorage
+  const lsMemos = loadMemos();
+  const idx = lsMemos.findIndex(m => m.memoNo === memoNo);
+  if(idx>=0) { lsMemos[idx]=updated; storeMemos(lsMemos); }
   renderPendingMemos();
+  renderHistoryMemos();
+  return updated;
 }
-document.addEventListener('click', e => {
-  if(!document.getElementById('sb-user-btn')?.contains(e.target))
-    document.getElementById('account-menu').style.display = 'none';
-});
-</script>
-<input type="file" id="bulk-import-input" accept=".xlsx,.xls" style="display:none" onchange="handleBulkImport(event)">
 
-      <!-- Cost: Infra Input Modal -->
-      <div id="infra-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
-        <div class="card" style="width:500px;max-width:95vw;padding:24px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-            <span style="font-size:15px;font-weight:700">Add / Edit Infra Cost</span>
-            <button class="btn-sm" onclick="closeInfraModal()" style="padding:4px 10px">✕</button>
-          </div>
-          <div id="infra-form"></div>
-          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
-            <button class="btn-ghost" onclick="closeInfraModal()">Cancel</button>
-            <button class="btn-primary" onclick="saveInfraCost()">💾 Save</button>
-          </div>
-        </div>
+// ── Sync: push all localStorage memos to Supabase ──
+async function syncLocalToSupabase() {
+  if(!(await checkSupa())) return { ok:false, msg:'Supabase unavailable' };
+  const local = loadMemos();
+  if(!local.length) return { ok:true, pushed:0 };
+  let pushed = 0;
+  for(const m of local) {
+    try {
+      await supaFetch('memos', 'POST', memoToDb(m), '?on_conflict=memo_no');
+      pushed++;
+    } catch(e) { console.warn('Sync failed for', m.memoNo, e.message); }
+  }
+  _memCache = null;
+  return { ok:true, pushed };
+}
+
+// ─────────────────────────────────────────
+// app.js — shared utils, storage, nav, PDF
+// ─────────────────────────────────────────
+
+// ── Date helpers ──
+const MONTHS_TH = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+function thaiDate(d) { return `${d.getDate()} ${MONTHS_TH[d.getMonth()]} ${d.getFullYear()+543}`; }
+const TODAY = thaiDate(new Date());
+const todayISO = new Date().toISOString().slice(0,10);
+
+// ── Shared utils ──
+function esc(v) { return String(v ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch])); }
+function val(sel, root=document) { return root.querySelector(sel)?.value?.trim() || ''; }
+function money(n) { return '฿' + (Number(n)||0).toLocaleString('th-TH', { maximumFractionDigits: 2 }); }
+function shortDate(iso) {
+  if(!iso) return '-';
+  const d = new Date(iso);
+  if(Number.isNaN(d.getTime())) return '-';
+  return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getFullYear()+543).slice(-2)}`;
+}
+function dateInput(v) {
+  if(!v) return '-';
+  const d = new Date(v + 'T00:00:00');
+  return Number.isNaN(d.getTime()) ? v : thaiDate(d);
+}
+function badgeClass(type) {
+  return { sl:'badge-blue', hw:'badge-gray', int:'badge-green', ent:'badge-amber', dep:'badge-purple' }[type] || 'badge-gray';
+}
+function table(headers, rows, numericIndexes=[], centerIndexes=[]) {
+  const thStyle = 'background:#e8e8e8;color:#111;font-weight:600;padding:7px 10px;text-align:center;border:1px solid #ccc;font-size:12px';
+  const tdBase  = 'padding:7px 10px;border:1px solid #ccc;font-size:12px';
+  // Last row = total row if numericIndexes provided
+  const bodyRows = rows.map((row, ri) => {
+    const isLast = ri === rows.length - 1 && numericIndexes.length > 0;
+    return '<tr>' + row.map((c,i) => {
+      const align = numericIndexes.includes(i) ? 'center' : centerIndexes.includes(i) ? 'center' : 'left';
+      const weight = numericIndexes.includes(i) ? 'font-weight:700;' : '';
+      const bg = isLast ? 'background:#f0f0f0;' : '';
+      return '<td style="' + tdBase + ';text-align:' + align + ';' + weight + bg + '">' + esc(c) + '</td>';
+    }).join('') + '</tr>';
+  });
+  return '<table style="width:100%;border-collapse:collapse;margin:6px 0">'
+    + '<thead><tr>' + headers.map(h => '<th style="' + thStyle + '">' + esc(h) + '</th>').join('') + '</tr></thead>'
+    + '<tbody>' + bodyRows.join('') + '</tbody>'
+    + '</table>';
+}
+
+// ── Storage ──
+// MEMO_KEY defined in Supabase layer above
+let _memMemos = [];
+function canUseLocalStorage() {
+  try { localStorage.setItem('_t','1'); localStorage.removeItem('_t'); return true; }
+  catch(e) { return false; }
+}
+const HAS_LS = canUseLocalStorage();
+function loadMemos() {
+  if(!HAS_LS) return _memMemos;
+  try { const p = JSON.parse(localStorage.getItem(MEMO_KEY)||'[]'); return Array.isArray(p)?p:[]; }
+  catch(e) { return _memMemos; }
+}
+function storeMemos(memos) {
+  _memMemos = Array.isArray(memos) ? memos : [];
+  if(!HAS_LS) return;
+  try { localStorage.setItem(MEMO_KEY, JSON.stringify(_memMemos)); }
+  catch(e) { console.warn('localStorage write failed'); }
+}
+function currentMemoPrefix() {
+  const d = new Date();
+  return `ORB-${String(d.getFullYear()).slice(-2)}${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+function nextMemoNo() {
+  const prefix = currentMemoPrefix();
+  const max = loadMemos().reduce((m,memo) => {
+    const match = String(memo.memoNo||'').match(new RegExp(`^${prefix}-(\\d{3})$`));
+    return match ? Math.max(m, Number(match[1])) : m;
+  }, 0);
+  return `${prefix}-${String(max+1).padStart(3,'0')}`;
+}
+function setNextMemoNo() {
+  const el = document.getElementById('f-memo-no');
+  if(el && !el.value.trim()) el.value = nextMemoNo();
+}
+function saveMemo(data) {
+  // Sync version for backward compat — also triggers async save to Supabase
+  const now = new Date().toISOString();
+  const memos = loadMemos();
+  const idx = memos.findIndex(m => m.memoNo === data.memoNo);
+  const saved = { ...data, id:data.memoNo, status:data.status||'pending',
+    createdAt: idx>=0 ? memos[idx].createdAt : now, updatedAt: now };
+  if(idx>=0) memos[idx]=saved; else memos.push(saved);
+  storeMemos(memos);
+  // Async push to Supabase in background
+  saveMemoAsync(saved).catch(e => console.warn('Background Supabase save failed', e));
+  return saved;
+}
+function updateMemoStatus(memoNo, status, extra={}) {
+  const memos = loadMemos();
+  const idx = memos.findIndex(m => m.memoNo === memoNo);
+  if(idx<0) { alert('ไม่พบ Memo ที่เลือก'); return null; }
+  memos[idx] = { ...memos[idx], ...extra, status, updatedAt: new Date().toISOString() };
+  if(status==='completed') memos[idx].approvedAt = memos[idx].updatedAt;
+  if(status==='rejected')  memos[idx].rejectedAt = memos[idx].updatedAt;
+  storeMemos(memos);
+  _memCache = null; // force fresh read
+  renderPendingMemos();
+  renderHistoryMemos();
+  // Async update Supabase then re-render with confirmed server data
+  updateMemoStatusAsync(memoNo, status, extra)
+    .then(() => { renderPendingMemos(); renderHistoryMemos(); })
+    .catch(e => console.warn('Supabase status update failed', e));
+  return memos[idx];
+}
+
+// ── Navigation ──
+function swView(id, el, title) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.sb-sub-item').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.sb-item').forEach(s => s.classList.remove('active'));
+  document.getElementById('view-'+id).classList.add('active');
+  document.getElementById('page-title').textContent = title;
+  if(el) el.classList.add('active');
+  if(['create','pending','history'].includes(id)) document.getElementById('nav-memo').classList.add('active');
+  if(id === 'budget')  renderBudget();
+  if(id === 'license') renderLicense();
+  if(id === 'device')  renderDevice();
+  if(id === 'history') { renderHistoryMemos(); if(typeof populateHistTabCounts==='function') populateHistTabCounts(); }
+  if(id === 'pending') renderPendingMemos();
+
+  if(id === 'resource') { if(typeof renderResource==='function') renderResource(); }
+  if(id === 'settings') { if(typeof renderSettings==='function') renderSettings(); }
+}
+function toggleMemoSub(el) {
+  el.classList.add('active');
+  swView('create', document.querySelector('#memo-sub .sb-sub-item'), 'Create Memo');
+}
+
+// ── PDF ──
+function renderMemoPdf(data) {
+  // Use server CSS classes (.mp-*) — injected by PDF server with THSarabun font
+  function fmtDate(v) {
+    if(!v || v === '-') return '';
+    // Already a Thai date string (e.g. "20 พฤษภาคม 2569") — return as-is
+    if(/[ก-๙]/.test(v)) return v;
+    // ISO date YYYY-MM-DD → convert to Thai Buddhist era DD/MM/YYYY
+    const d = new Date(v.length===10 ? v+'T00:00:00' : v);
+    if(isNaN(d.getTime())) return v;
+    return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()+543}`;
+  }
+
+  const typeBody = {
+    sl: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} - บริษัท ออร์บิท ดิจิทัล จำกัด มีความจำเป็นต้องใช้งานโปรแกรม เพื่อพัฒนาโครงการและช่วยทีมพัฒนาสามารถทำงานได้อย่างมีประสิทธิภาพ จึงขออนุมัติงบประมาณเพื่อต่ออายุการใช้งานโปรแกรม ตามรายละเอียดดังต่อไปนี้`,
+    hw: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} - บริษัท ออร์บิท ดิจิทัล จำกัด มีความจำเป็นต้องจัดซื้ออุปกรณ์ Hardware เพื่อสนับสนุนการดำเนินงานของโครงการ จึงขออนุมัติงบประมาณตามรายละเอียดดังต่อไปนี้`,
+    int: `เนื่องด้วยฝ่าย PMO มีความประสงค์จัดกิจกรรม Team Activity เพื่อเสริมสร้างกำลังใจและส่งเสริมการทำงานเป็นทีมของพนักงานโครงการ ${esc(data.project||'-')} จึงขออนุมัติงบประมาณตามรายละเอียดดังต่อไปนี้`,
+    ent: `เนื่องด้วยฝ่าย PMO มีความประสงค์จัดงานเลี้ยงรับรองลูกค้าโครงการ ${esc(data.project||'-')} เพื่อเสริมสร้างความสัมพันธ์อันดีและรักษาความพึงพอใจของลูกค้า จึงขออนุมัติงบประมาณตามรายละเอียดดังต่อไปนี้`,
+    dep: `เนื่องด้วยโครงการ ${esc(data.project||'-')} มีความจำเป็นต้อง Deployment ระบบ จึงขออนุมัติงบประมาณค่าใช้จ่ายในการ Deployment ตามรายละเอียดดังต่อไปนี้`,
+  };
+  const bodyText = typeBody[data.type] || `ด้วยฝ่าย PMO มีความประสงค์ขออนุมัติรายการตามรายละเอียดด้านล่าง เพื่อสนับสนุนการดำเนินงานของโครงการ ${esc(data.project||'-')} ให้เป็นไปตามแผนงาน`;
+
+  // Per-type closing paragraphs with authority reference
+  const authorityRef = 'อ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงิน (ที่มีการตั้งงบประมาณไว้) หมวดการชำระค่าบริการ ซึ่งให้อำนาจแก่ประธานเจ้าหน้าที่บริหารในวงเงินไม่เกิน 2,000,000 บาท';
+  const authorityRef500k = 'อ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงิน (ที่มีการตั้งงบประมาณไว้) หมวดการชำระค่าบริการสำหรับพนักงาน ซึ่งให้อำนาจแก่ผู้บริหารในวงเงินไม่เกิน 500,000 บาท';
+  const amtStr = data.total ? `<strong>${esc(money(data.total||0))}</strong> (${esc(data.amountWords||'-')})` : '';
+
+  const closingMap = {
+    sl:  data.total ? (function(){
+      const slSection = (data.sections||[]).find(s => s.title === 'รายการ Software');
+      let totalSeats = 0, months = 12;
+      if(slSection && slSection.html) {
+        const doc = new DOMParser().parseFromString(slSection.html, 'text/html');
+        doc.querySelectorAll('tbody tr').forEach(row => {
+          const cells = row.querySelectorAll('td');
+          if(cells.length >= 5) {
+            const mo = parseInt(cells[3]?.textContent)||0;
+            const qty = parseInt(cells[4]?.textContent)||0;
+            if(mo) months = mo;
+            totalSeats += qty;
+          }
+        });
+      }
+      const seatsStr = totalSeats ? `จำนวนรวมทั้งหมด ${totalSeats} Seats ` : '';
+      const monthsStr = `ระยะเวลา ${months} เดือน `;
+      return `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณสำหรับค่าใช้จ่ายดังกล่าว รวมเป็นจำนวนเงินไม่เกิน ${amtStr} ${seatsStr}${monthsStr}${authorityRef}`;
+    })() : '',
+    hw:  data.total ? `จึงขอความกรุณาโปรดพิจารณาอนุมัติค่าใช้จ่ายสำหรับรายการจัดซื้อจ้างอ้างต้น ในวงเงิน ${amtStr} ถ้าอ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงิน (ที่มีการตั้งงบประมาณไว้) หมวดการชำระค่าบริการ ซึ่งให้อำนาจแก่ประธานเจ้าหน้าที่บริหารในวงเงินไม่เกิน 500,000 บาท` : '',
+    int: data.total ? `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณสำหรับค่ากิจกรรม Team Activity ดังกล่าว เป็นวงเงินจำนวนไม่เกิน ${amtStr} (แปดหมื่นสี่พันบาทถ้วน) ${authorityRef500k}` : '',
+    ent: data.total ? `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณค่ารับรองลูกค้าจาก ${esc(data.project||'-')} ในช่วงเวลาดังกล่าว ${authorityRef}` : '',
+    dep: data.total ? `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณค่าใช้จ่าย Deployment รวมเป็นจำนวนเงินไม่เกิน ${amtStr} ${authorityRef}` : '',
+  };
+  const closingText = closingMap[data.type] || (data.total ? `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณรวมเป็นจำนวนเงินไม่เกิน ${amtStr}` : '');
+
+  // sectionsHtml rendered inline below with fxNote injection
+
+  const fxNote = data.type === 'sl'
+    ? `<p class="mp-note">* <u>หมายเหตุ</u> : เรทราคาโปรแกรมดังกล่าวแปลงเรทเงินตราจากหน่วย USD เป็น THB ณ วันที่ ${esc(data.date||TODAY)}${data.fxRate ? ` (1 USD = ฿${data.fxRate})` : ''}</p>`
+    : '';
+
+  // Dates stored as Thai strings from dateInput() — display directly
+  // fmtDate only as safety net for raw ISO strings
+  const reviewerDate = data.reviewerDate && data.reviewerDate !== '-' ? data.reviewerDate : (data.date||'');
+  const approverDate = data.approverDate && data.approverDate !== '-' ? data.approverDate : (data.date||'');
+
+  return `<div class="preview-wrap">
+    <!-- Header row: memo no + date (logo injected by server) -->
+    <div class="mp-hdr">
+      <div class="mp-hdr-right">
+        <div><strong>เลขที่</strong>&nbsp;&nbsp;${esc(data.memoNo)}</div>
+        <div><strong>ลงวันที่</strong>&nbsp;&nbsp;${esc(data.date||TODAY)}</div>
       </div>
+    </div>
 
-      <!-- Cost: Budget Modal -->
-      <div id="budget-cost-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
-        <div class="card" style="width:480px;max-width:95vw;max-height:80vh;overflow-y:auto;padding:24px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-            <span style="font-size:15px;font-weight:700">📊 Set Annual Budget</span>
-            <button class="btn-sm" onclick="closeBudgetCostModal()" style="padding:4px 10px">✕</button>
-          </div>
-          <div id="budget-cost-form"></div>
-          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
-            <button class="btn-ghost" onclick="closeBudgetCostModal()">Cancel</button>
-            <button class="btn-primary" onclick="saveBudgetCost()">💾 Save</button>
-          </div>
-        </div>
+    <!-- Title -->
+    <div class="mp-title">บันทึกข้อความ</div>
+
+    <!-- เรื่อง / เรียน -->
+    <div class="mp-field"><span class="mp-field-label">เรื่อง</span><span class="mp-field-value">${esc(data.subject||'-')}</span></div>
+    <div class="mp-field"><span class="mp-field-label">เรียน</span><span class="mp-field-value">${esc(data.to||'-')}</span></div>
+
+    <!-- Body -->
+    <div class="mp-body"><p>${bodyText}</p></div>
+
+    <!-- Sections with fxNote after SL table -->
+    ${(data.sections||[]).map(function(s){
+      let html = s.html;
+      if(s.title === 'รายการ Software') {
+        const H = (from, to) => { html = html.split(from).join(to); };
+        // Rename headers using regex (full inline styles, not just text-align)
+        const renameHeader = (from, to) => {
+          html = html.replace(new RegExp('<th([^>]*)>' + from + '<\\/th>', 'g'), '<th$1>' + to + '</th>');
+        };
+        renameHeader('#', 'No');
+        renameHeader('ชื่อ Software', 'Item');
+        renameHeader('฿\\/เดือน', 'Price/Month (THB)');
+        renameHeader('จำนวน', 'QTY (License)');
+        renameHeader('รวม', 'Amount (THB)');
+        renameHeader('เดือน', 'Month');
+        // Center everything, then fix item name column (index 1) back to left
+        H('<td class="tdl" style="text-align:left">', '<td style="text-align:left">');
+        H('<td class="" style="text-align:left">', '<td style="text-align:center">');
+        H('<td class="num" style="text-align:center">', '<td style="text-align:center;font-weight:700">');
+        // Fix: first td in each row (#) should be center — it uses tdl class
+        // Re-process: make all td center, only keep left for item name cells
+        // Split by rows and fix per-column
+        html = html.replace(/<tr>(.*?)<\/tr>/gs, function(match, cells) {
+          const tds = [];
+          let idx = 0;
+          cells.replace(/<td([^>]*)>(.*?)<\/td>/gs, function(m, attrs, content) {
+            // col 1 (item name) = left, all others = center
+            const isLeft = idx === 1;
+            const isBold = attrs.includes('font-weight:700');
+            tds.push('<td style="padding:7px 10px;border:1px solid #ccc;font-size:13pt;text-align:'+(isLeft?'left':'center')+';'+(isBold?'font-weight:700;':'')+'">'+content+'</td>');
+            idx++;
+            return m;
+          });
+          return tds.length ? '<tr>'+tds.join('')+'</tr>' : match;
+        });
+        // Add Total Amount row if not present
+        if(!html.includes('Total Amount') && data.total) {
+          const colspan = 5;
+          const totalRow = '<tr><td colspan="'+colspan+'" style="text-align:right;font-weight:700;background:#f0f0f0;padding:7px 10px;border:1px solid #ccc;font-size:13pt">Total Amount</td><td style="text-align:center;font-weight:700;background:#f0f0f0;padding:7px 10px;border:1px solid #ccc;font-size:13pt">'+esc(money(data.total))+'</td></tr>';
+          html = html.replace('</tbody></table>', totalRow+'</tbody></table>');
+        }
+      }
+      if(s.title === 'ตาราง Account') {
+        // Add No column header
+        html = html.replace('<thead><tr>', '<thead><tr><th style="background:#e8e8e8;color:#111;font-weight:600;padding:8px 10px;text-align:center;border:1px solid #ccc;font-size:13pt;width:40px">No</th>');
+        // Add row number + center all td except account/email col (index 0 = left)
+        let rowNum = 0;
+        html = html.replace(/<tr>(.*?)<\/tr>/gs, function(match, cells) {
+          if(match.includes('<th')) return match; // skip header
+          rowNum++;
+          const tds = ['<td style="padding:7px 10px;border:1px solid #ccc;font-size:13pt;text-align:center">'+rowNum+'</td>'];
+          let idx = 0;
+          cells.replace(/<td([^>]*)>(.*?)<\/td>/gs, function(m, attrs, content) {
+            const isLeft = idx === 0;
+            tds.push('<td style="padding:7px 10px;border:1px solid #ccc;font-size:13pt;text-align:'+(isLeft?'left':'center')+'">'+content+'</td>');
+            idx++;
+            return m;
+          });
+          return tds.length > 1 ? '<tr>'+tds.join('')+'</tr>' : match;
+        });
+      }
+      return '<div style="margin-top:12px"><p style="font-weight:700;margin-bottom:6px">'+esc(s.title)+'</p>'+html+(s.title==='รายการ Software'?fxNote:'')+'</div>';
+    }).join('')}
+
+
+
+    <!-- Closing -->
+    ${closingText ? `<div class="mp-closing"><p>${closingText}</p></div>` : ''}
+
+    <!-- Signature boxes -->
+    <div class="mp-approval">
+      <div class="mp-appr-cell">
+        <div class="mp-appr-head">เรียนประธานเจ้าหน้าที่บริหาร เพื่อโปรดพิจารณาอนุมัติ<br>ดำเนินการ</div>
+        <div class="mp-appr-opt">&#9675; เห็นชอบ, เพื่อโปรดพิจารณาอนุมัติ</div>
+        <div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>
+        <div style="flex:1"></div>
+        <div class="mp-sig-space"></div>
+        <div class="mp-sig-name">( ${esc(data.reviewerName||'-')} )</div>
+        <div class="mp-sig-role">${esc(data.reviewerTitle||'-')}</div>
+        <div class="mp-sig-date">${reviewerDate}</div>
       </div>
-<script src="views/settings.js"></script>
-
-      <!-- Budget Tag Modal -->
-      <div id="budget-tag-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
-        <div class="card" style="width:420px;max-width:95vw;padding:24px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-            <span style="font-size:15px;font-weight:700">Assign Budget Source</span>
-            <button class="btn-sm" onclick="closeBudgetTagModal()" style="padding:3px 8px">✕</button>
-          </div>
-          <div style="margin-bottom:14px;padding:10px 12px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border)">
-            <div style="font-size:13px;font-weight:600" id="btm-memo-no"></div>
-            <div style="font-size:11px;color:var(--text-3);margin-top:2px" id="btm-memo-detail"></div>
-          </div>
-          <div id="btm-auto-note" style="font-size:11px;margin-bottom:10px;padding:6px 10px;background:var(--bg);border-radius:var(--r-sm)"></div>
-          <div style="font-size:12px;color:var(--text-2);margin-bottom:10px">Budget นี้ตัดจาก:</div>
-          <div id="btm-options"></div>
-          <div style="display:flex;gap:8px;margin-top:16px">
-            <button id="btm-save-btn" class="btn-primary" style="flex:1">Confirm</button>
-            <button class="btn-ghost" onclick="closeBudgetTagModal()">Cancel</button>
-          </div>
-        </div>
+      <div class="mp-appr-cell">
+        <div class="mp-appr-opt">&#9675; อนุมัติ, เพื่อโปรดพิจารณาดำเนินการ</div>
+        <div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>
+        <div style="flex:1"></div>
+        <div class="mp-sig-space"></div>
+        <div class="mp-sig-name">( ${esc(data.approverName||'-')} )</div>
+        <div class="mp-sig-role">${esc(data.approverTitle||'-')}</div>
+        <div class="mp-sig-date">${approverDate}</div>
       </div>
+    </div>
+  </div>`;
+}
 
-</body>
-</html>
+const LOGO_B64 = 'data:image/png;base64,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';
+async function downloadMemoPdf(data) {
+  const stage = document.getElementById('pdf-stage');
+  stage.innerHTML = renderMemoPdf(data);
+  // File naming: [TYPE]_[MemoNo]_[Project]_[Extra]_[Date].Ver1.0.0
+  const typeTag = ({ sl:'SL', hw:'HW', int:'INT', ent:'EXT', dep:'DEP' }[data.type] || data.type?.toUpperCase() || 'MEMO');
+  const proj    = (data.project || '').replace(/\s+/g,'');
+  const memoNo  = (data.memoNo  || 'memo').replace(/\s+/g,'');
+  const dateStr = (data.date    || new Date().toISOString().slice(0,10)).replace(/\//g,'-').replace(/\s.*/,'');
+
+  let extra = '';
+  if(data.type === 'sl') {
+    // [License] = first software name from SL rows
+    const firstSL = document.querySelector('#sl-rows .item-row input[type="text"]')?.value?.trim();
+    extra = firstSL ? '_' + firstSL.replace(/\s+/g,'') : '';
+  }
+
+  const filename = `[${typeTag}]_${memoNo}_${proj}${extra}_${dateStr}.Ver1.0.0.pdf`;
+  async function fetchWithRetry(url, opts, ms=55000, retries=2) {
+    for(let i=0; i<=retries; i++) {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), ms);
+      try {
+        const r = await fetch(url, {...opts, signal:ctrl.signal});
+        clearTimeout(t); return r;
+      } catch(e) { clearTimeout(t); if(i===retries) throw e; await new Promise(r=>setTimeout(r,2000)); }
+    }
+  }
+  try {
+    const html = stage.firstElementChild?.outerHTML || stage.innerHTML;
+    const resp = await fetchWithRetry('https://memo-pdf-server.onrender.com/generate-pdf', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ html, filename, logoBase64: LOGO_B64 })
+    });
+    if(!resp.ok) throw new Error('Server '+resp.status);
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=filename; a.click();
+    URL.revokeObjectURL(url);
+  } catch(err) {
+    console.warn('PDF server failed, fallback to print', err);
+    document.body.classList.add('printing-pdf');
+    try { window.print(); } finally { document.body.classList.remove('printing-pdf'); }
+  }
+}
+function openMemoPdf(memoNo) {
+  const memo = loadMemos().find(m => m.memoNo === memoNo);
+  if(!memo) { alert('ไม่พบ Memo'); return; }
+  downloadMemoPdf(memo);
+}
+
+// ── Init ──
+function initApp() {
+  ['f-date','f-signdate','f-apprdate','sl-ratedate'].forEach(id => {
+    const el = document.getElementById(id); if(el) el.value = todayISO;
+  });
+
+  renderPendingMemos();
+  renderHistoryMemos();
+  rebuildAcct();
+  setInterval(() => fetch('https://memo-pdf-server.onrender.com/ping').catch(()=>{}), 4*60*1000);
+
+  // Load all Supabase data on startup in parallel
+  Promise.all([
+    loadMemosAsync(),
+    typeof loadManualLicensesAsync === 'function' ? loadManualLicensesAsync() : Promise.resolve(),
+    typeof loadInfraCostsAsync     === 'function' ? loadInfraCostsAsync()     : Promise.resolve(),
+    typeof loadBudgetsAsync        === 'function' ? loadBudgetsAsync()        : Promise.resolve(),
+  ]).then(() => {
+    renderPendingMemos();
+    renderHistoryMemos();
+  }).catch(e => console.warn('Supabase init load failed', e));
+}
