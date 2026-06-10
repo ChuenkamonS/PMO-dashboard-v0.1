@@ -63,30 +63,13 @@ function formatDateTime(iso) {
   return `${day}/${month}/${yy} · ${hh}:${mm}`;
 }
 
-// ── Tab state ──
-let _pendingTab = 'submitted';
+// ── Search state ──
 let _pendingSearch = '';
-
-function switchPendingTab(tab) {
-  _pendingTab = tab;
-  document.querySelectorAll('.pend-tab-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.tab === tab);
-    if(b.dataset.tab === tab) {
-      b.style.background = '';
-      b.style.color = '';
-    } else {
-      b.style.background = 'transparent';
-      b.style.color = 'var(--text-2)';
-    }
-  });
-  renderPendingContent();
-}
 
 // ── Populate filter dropdowns dynamically from actual memo data ──
 function populatePendingFilters() {
   const allMemos = loadMemos();
   const projects = [...new Set(allMemos.map(m => m.project).filter(Boolean))].sort();
-
   const projSel = document.getElementById('pend-filter-project');
   if (projSel) {
     const cur = projSel.value;
@@ -94,49 +77,40 @@ function populatePendingFilters() {
       projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
     if ([...projSel.options].some(o => o.value === cur)) projSel.value = cur;
   }
-  // Type dropdown is static (SL/HW/INT/ENT/DEP won't change) — no need to populate
 }
 
 // ── Main render ──
 function renderPendingMemos() {
-  const list = document.getElementById('pending-list');
-  if(!list) return;
-
   populatePendingFilters();
 
-  const allMemos  = loadMemos();
-  // awaiting = still needs a decision
-  const awaiting  = allMemos.filter(m => !m.status || m.status === 'pending');
-  // submitted = already decided (completed or rejected) — distinct from awaiting
-  const submitted = allMemos.filter(m => ['completed','rejected'].includes(m.status));
-  const drafts    = allMemos.filter(m => m.status === 'draft');
+  const allMemos = loadMemos();
+  const pending  = allMemos.filter(m => !m.status || m.status === 'pending');
 
-  const el = id => document.getElementById(id);
-  if(el('pending-count'))        el('pending-count').textContent        = awaiting.length;
-  if(el('pending-my-submitted')) el('pending-my-submitted').textContent = submitted.length;
-  if(el('pending-draft-count'))  el('pending-draft-count').textContent  = drafts.length;
-
+  // Sidebar badge
   const badge = document.querySelector('#memo-sub .sb-badge');
-  if(badge) badge.textContent = awaiting.length;
+  if (badge) badge.textContent = pending.length;
 
-  const counts = { awaiting: awaiting.length, submitted: submitted.length, drafts: drafts.length };
-  Object.entries(counts).forEach(([tab, count]) => {
-    const el = document.querySelector(`.pend-tab-btn[data-tab="${tab}"] .tab-count`);
-    if(el) el.textContent = count > 0 ? count : '';
-  });
+  // KPI cards
+  const el = id => document.getElementById(id);
+  if (el('pending-count')) el('pending-count').textContent = pending.length;
+
+  // Oldest pending
+  const oldest = pending.reduce((max, m) => Math.max(max, pendingAge(m)), 0);
+  if (el('pending-oldest-days')) el('pending-oldest-days').textContent = pending.length ? oldest : '—';
+
+  // Total amount pending
+  const totalAmt = pending.reduce((s, m) => s + (Number(m.total)||0), 0);
+  if (el('pending-total-amt')) el('pending-total-amt').textContent = pending.length ? money(totalAmt) : '—';
+
   renderPendingContent();
 }
 
 function renderPendingContent() {
   const list = document.getElementById('pending-list');
-  if(!list) return;
-  let memos = loadMemos();
-  // awaiting = pending decisions only
-  // submitted = completed or rejected (already decided) — NOT the same as awaiting
-  // drafts = drafts only
-  if(_pendingTab==='awaiting')  memos = memos.filter(m => !m.status || m.status==='pending');
-  if(_pendingTab==='submitted') memos = memos.filter(m => ['completed','rejected'].includes(m.status));
-  if(_pendingTab==='drafts')    memos = memos.filter(m => m.status==='draft');
+  if (!list) return;
+
+  // Inbox = pending only
+  let memos = loadMemos().filter(m => !m.status || m.status === 'pending');
   if(_pendingSearch) {
     const s = _pendingSearch.toLowerCase();
     memos = memos.filter(m => (m.memoNo||'').toLowerCase().includes(s)||(m.project||'').toLowerCase().includes(s)||(m.reviewerName||'').toLowerCase().includes(s));
@@ -155,47 +129,25 @@ function renderPendingContent() {
   });
 
   if(!memos.length) {
-    const emptyStates = {
-      awaiting:  { h:'ไม่มี Memo ที่รออนุมัติ',     p:'สร้าง Memo แล้วกด Save & Generate PDF เพื่อให้รายการมาแสดงที่นี่' },
-      submitted: { h:'ยังไม่มี Memo ที่เคยส่ง',       p:'Memo ที่สร้างและส่งทั้งหมดจะแสดงที่นี่' },
-      drafts:    { h:'ยังไม่มี Draft',                p:'กด Save to Draft เพื่อบันทึก Memo ไว้ก่อนส่ง' },
-      rejected:  { h:'ไม่มี Memo ที่ถูกปฏิเสธ',      p:'Memo ที่ถูก Reject จะแสดงที่นี่เพื่อแก้ไขและส่งใหม่' },
-    };
-    const es = emptyStates[_pendingTab] || { h:'ไม่มีข้อมูล', p:'ยังไม่มีรายการ' };
-    list.innerHTML = `<div class="placeholder" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:38px 20px"><h3>${es.h}</h3><p>${es.p}</p></div>`;
+    list.innerHTML = `<div class="placeholder" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:38px 20px"><h3>ไม่มี Memo ที่รออนุมัติ</h3><p>สร้าง Memo แล้วกด Save & Generate PDF เพื่อให้รายการมาแสดงที่นี่</p></div>`;
     return;
   }
 
-  // Build table
   const thead = `<table class="hist-table hist-table--dense" style="table-layout:fixed;width:100%">
     <colgroup>
-      <col style="width:14%">
-      <col style="width:5%">
-      <col style="width:8%">
-      <col style="width:10%">
-      <col style="width:8%">
-      <col style="width:9%">
-      <col style="width:13%">
-      <col style="width:13%">
-      <col style="width:6%">
+      <col style="width:14%"><col style="width:5%"><col style="width:8%">
+      <col style="width:10%"><col style="width:8%"><col style="width:9%">
+      <col style="width:13%"><col style="width:13%"><col style="width:6%">
       <col style="width:10%">
     </colgroup>
     <thead><tr>
-      <th>เลข Memo</th>
-      <th>Type</th>
-      <th>โครงการ</th>
-      <th>ผู้ขอ</th>
-      <th style="text-align:right">วงเงิน</th>
-      <th>สถานะ</th>
-      <th>Reviewer (A1)</th>
-      <th>Approver (A2)</th>
-      <th>รอ</th>
-      <th style="text-align:center">จัดการ</th>
+      <th>เลข Memo</th><th>Type</th><th>โครงการ</th><th>ผู้ขอ</th>
+      <th style="text-align:right">วงเงิน</th><th>สถานะ</th>
+      <th>Reviewer (A1)</th><th>Approver (A2)</th>
+      <th>รอ</th><th style="text-align:center">จัดการ</th>
     </tr></thead><tbody>`;
 
-  const rows = _pendingTab === 'drafts'
-    ? memos.map(m => buildDraftRow(m)).join('')
-    : memos.map(m => buildPendingRow(m)).join('');
+  const rows = memos.map(m => buildPendingRow(m)).join('');
 
   list.innerHTML = `<div class="card" style="padding:0;overflow:hidden">
     <div style="padding:8px 14px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-3)">
@@ -204,17 +156,13 @@ function renderPendingContent() {
     <div style="overflow-x:auto">${thead}${rows}</tbody></table></div>
   </div>`;
 
-  // Event delegation
   list.onclick = function(e) {
     const btn = e.target.closest('[data-action]');
     if(!btn) return;
     const no = btn.dataset.memo;
-    if(btn.dataset.action==='approve')      openApproveModal(no);
-    else if(btn.dataset.action==='reject')  openRejectModal(no);
-    else if(btn.dataset.action==='detail')  openDetailModal(no);
-    else if(btn.dataset.action==='draft-view')   openDetailModal(no);
-    else if(btn.dataset.action==='draft-edit')   editDraft(no);
-    else if(btn.dataset.action==='draft-delete') deleteDraft(no);
+    if(btn.dataset.action==='approve')     openApproveModal(no);
+    else if(btn.dataset.action==='reject') openRejectModal(no);
+    else if(btn.dataset.action==='detail') openDetailModal(no);
   };
 }
 
@@ -229,7 +177,7 @@ function buildPendingRow(memo) {
   const amt     = Number(memo.total)||0;
   const stage   = memo.approvalStage || 'Pending A1';
   const isOwn   = (memo.requesterName||'') === currentUser();
-  const canAct  = _pendingTab==='awaiting' && !isOwn;
+  const canAct  = !isOwn;
   const accent  = TYPE_COLOR_PENDING[memo.type] || '#888780';
   const typeLbl = TYPE_LABEL_PENDING[memo.type] || (memo.type||'').toUpperCase();
   const typeBg  = TYPE_BG_PENDING[memo.type]    || '#F1EFE8';
