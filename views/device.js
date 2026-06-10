@@ -1,44 +1,263 @@
 // ─────────────────────────────────────────
-// views/device.js — Device Registry Enhanced
+// views/device.js — Device Registry + Purchase Orders
 // ─────────────────────────────────────────
 
 const DEVICE_KEY = 'orbit-pmo-devices-v1';
 const DEV_PAGE_SIZE = 20;
 let _devVisibleCount = DEV_PAGE_SIZE;
+let _devCache = null;
+
+// ══════════════════════════════════════════
+// SUPABASE SYNC — Devices
+// ══════════════════════════════════════════
+
+function deviceToDb(d) {
+  return {
+    id:            String(d.id),
+    name:          d.name,
+    brand:         d.brand || null,
+    platform:      d.platform || 'other',
+    type:          d.type || 'other',
+    serial:        d.serial || null,
+    asset_tag:     d.assetTag || null,
+    owner:         d.owner || null,
+    assigned_date: d.assignedDate || null,
+    project:       d.project || null,
+    company:       d.company || null,
+    return_date:   d.returnDate || null,
+    warranty:      d.warranty || null,
+    condition:     d.condition || 'good',
+    status:        d.status || 'available',
+    memo_ref:      d.memoNo || null,    // use memoNo as single field name
+    note:          d.note || null,
+    source:        d.source || 'manual',
+    updated_at:    d.updatedAt || new Date().toISOString(),
+  };
+}
+
+function dbToDevice(r) {
+  return {
+    id:           r.id,
+    name:         r.name,
+    brand:        r.brand || '',
+    platform:     r.platform || 'other',
+    type:         r.type || 'other',
+    serial:       r.serial || '',
+    assetTag:     r.asset_tag || '',
+    owner:        r.owner || '',
+    assignedDate: r.assigned_date || '',
+    project:      r.project || '',
+    company:      r.company || '',
+    returnDate:   r.return_date || '',
+    warranty:     r.warranty || '',
+    condition:    r.condition || 'good',
+    status:       r.status || 'available',
+    memoNo:       r.memo_ref || '',   // canonical field name
+    note:         r.note || '',
+    source:       r.source || 'manual',
+    createdAt:    r.created_at,
+    updatedAt:    r.updated_at,
+  };
+}
+
+async function loadDevicesAsync() {
+  if (await checkSupa()) {
+    try {
+      const rows = await supaFetch('devices', 'GET', null, '?order=created_at.desc&limit=500');
+      _devCache = (rows || []).map(dbToDevice);
+      try { localStorage.setItem(DEVICE_KEY, JSON.stringify(_devCache)); } catch(e) {}
+      return _devCache;
+    } catch(e) { console.warn('Supabase devices read failed', e.message); }
+  }
+  return loadDevices();
+}
+
+async function saveDeviceAsync(data) {
+  const all = loadDevices();
+  const idx = all.findIndex(d => String(d.id) === String(data.id));
+  if (idx >= 0) all[idx] = data; else all.push(data);
+  storeDevices(all);
+  _devCache = all;
+  if (await checkSupa()) {
+    try {
+      await supaFetch('devices', 'POST', deviceToDb(data), '?on_conflict=id');
+      _devCache = null;
+    } catch(e) { console.warn('Supabase device save failed', e.message); }
+  }
+}
+
+async function deleteDeviceAsync(id) {
+  storeDevices(loadDevices().filter(d => String(d.id) !== String(id)));
+  _devCache = null;
+  if (await checkSupa()) {
+    try {
+      await supaFetch('devices', 'DELETE', null, '?id=eq.' + encodeURIComponent(id));
+    } catch(e) { console.warn('Supabase device delete failed', e.message); }
+  }
+}
 
 function loadDevices() {
-  try { const d = JSON.parse(localStorage.getItem(DEVICE_KEY)||'[]'); return Array.isArray(d)?d:[]; }
-  catch(e) { return []; }
+  if (_devCache !== null) return _devCache;
+  try {
+    const d = JSON.parse(localStorage.getItem(DEVICE_KEY) || '[]');
+    // Migrate: memoRef → memoNo
+    if (Array.isArray(d)) {
+      d.forEach(dev => { if (dev.memoRef && !dev.memoNo) { dev.memoNo = dev.memoRef; delete dev.memoRef; } });
+    }
+    return Array.isArray(d) ? d : [];
+  } catch(e) { return []; }
 }
 function storeDevices(devices) {
-  try { localStorage.setItem(DEVICE_KEY, JSON.stringify(devices)); } catch(e) {}
+  _devCache = Array.isArray(devices) ? devices : [];
+  try { localStorage.setItem(DEVICE_KEY, JSON.stringify(_devCache)); } catch(e) {}
 }
 function nextDeviceId() {
-  const max = loadDevices().reduce((m,d) => Math.max(m, Number(d.id)||0), 0);
-  return max + 1;
+  return `dev_${Date.now()}`;
 }
 
+// ══════════════════════════════════════════
+// SUPABASE SYNC — Purchase Orders
+// ══════════════════════════════════════════
+let _poCache = null;
 
-// ── Find existing device by unique keys (Asset IT, Asset ACC, Serial) ──
-function findExistingDevice(devices, data) {
-  return devices.findIndex(d => {
-    if(data.assetTag && d.assetTag && data.assetTag === d.assetTag) return true;
-    if(data.assetAcc && d.assetAcc && data.assetAcc === d.assetAcc) return true;
-    if(data.serial   && d.serial   && data.serial   === d.serial)   return true;
-    return false;
-  });
+function poToDb(po) {
+  return {
+    id:           po.id,
+    memo_no:      po.memoNo,
+    project:      po.project || null,
+    item_name:    po.itemName,
+    ordered_qty:  po.orderedQty || 1,
+    arrived_qty:  po.arrivedQty || 0,
+    status:       po.status || 'ordered',
+    note:         po.note || null,
+    updated_at:   po.updatedAt || new Date().toISOString(),
+  };
+}
+function dbToPo(r) {
+  return {
+    id:          r.id,
+    memoNo:      r.memo_no,
+    project:     r.project || '',
+    itemName:    r.item_name,
+    orderedQty:  Number(r.ordered_qty) || 1,
+    arrivedQty:  Number(r.arrived_qty) || 0,
+    status:      r.status || 'ordered',
+    note:        r.note || '',
+    createdAt:   r.created_at,
+    updatedAt:   r.updated_at,
+  };
 }
 
+async function loadPurchaseOrdersAsync() {
+  if (await checkSupa()) {
+    try {
+      const rows = await supaFetch('purchase_orders', 'GET', null, '?order=created_at.desc');
+      _poCache = (rows || []).map(dbToPo);
+      return _poCache;
+    } catch(e) { console.warn('Supabase PO read failed', e.message); }
+  }
+  return loadPurchaseOrders();
+}
 
-// ── Find existing device by unique keys (Asset IT | Asset ACC | Serial) ──
-function findDuplicateDevice(devices, data, excludeId) {
-  return devices.find(d => {
-    if(excludeId && d.id === excludeId) return false;
-    if(data.assetTag && d.assetTag && data.assetTag === d.assetTag) return true;
-    if(data.assetAcc  && d.assetAcc  && data.assetAcc  === d.assetAcc)  return true;
-    if(data.serial    && d.serial    && data.serial    === d.serial)    return true;
-    return false;
+async function savePurchaseOrderAsync(po) {
+  const all = loadPurchaseOrders();
+  const idx = all.findIndex(p => p.id === po.id);
+  if (idx >= 0) all[idx] = po; else all.push(po);
+  storePurchaseOrders(all);
+  _poCache = all;
+  if (await checkSupa()) {
+    try {
+      await supaFetch('purchase_orders', 'POST', poToDb(po), '?on_conflict=id');
+      _poCache = null;
+    } catch(e) { console.warn('Supabase PO save failed', e.message); }
+  }
+}
+
+function loadPurchaseOrders() {
+  if (_poCache !== null) return _poCache;
+  try { return JSON.parse(localStorage.getItem('orbit-pmo-po-v1') || '[]'); } catch(e) { return []; }
+}
+function storePurchaseOrders(pos) {
+  _poCache = pos;
+  try { localStorage.setItem('orbit-pmo-po-v1', JSON.stringify(pos)); } catch(e) {}
+}
+
+// Auto-create purchase orders when HW memo is approved
+// Called from updateMemoStatus in app.js when status = completed
+function createPurchaseOrdersFromMemo(memo) {
+  if (memo.type !== 'hw') return;
+  const section = memo.sections?.find(s => s.title === 'รายการ Hardware');
+  if (!section) return;
+  const doc = new DOMParser().parseFromString(section.html, 'text/html');
+  const existing = loadPurchaseOrders();
+  doc.querySelectorAll('tbody tr').forEach(row => {
+    const cells = row.querySelectorAll('td');
+    if (cells.length < 4) return;
+    const name = cells[1]?.textContent?.trim();
+    const qty  = parseInt(cells[3]?.textContent) || 1;
+    if (!name || name === '-') return;
+    // Don't duplicate
+    if (existing.some(p => p.memoNo === memo.memoNo && p.itemName === name)) return;
+    const po = {
+      id:          `po_${memo.memoNo}_${name}`.replace(/\s/g, '_'),
+      memoNo:      memo.memoNo,
+      project:     memo.project || '',
+      itemName:    name,
+      orderedQty:  qty,
+      arrivedQty:  0,
+      status:      'ordered',
+      note:        '',
+      createdAt:   new Date().toISOString(),
+      updatedAt:   new Date().toISOString(),
+    };
+    existing.push(po);
+    savePurchaseOrderAsync(po).catch(e => console.warn('PO save failed', e));
   });
+  storePurchaseOrders(existing);
+}
+
+// Mark devices as arrived — creates device records and updates PO
+async function markArrived(poId, qty, serialNumbers = []) {
+  const pos = loadPurchaseOrders();
+  const po = pos.find(p => p.id === poId);
+  if (!po) return;
+  const now = new Date().toISOString();
+  const newArrived = Math.min(po.arrivedQty + qty, po.orderedQty);
+  po.arrivedQty = newArrived;
+  po.status = newArrived >= po.orderedQty ? 'fulfilled' : 'partial';
+  po.updatedAt = now;
+  storePurchaseOrders(pos);
+  savePurchaseOrderAsync(po).catch(e => console.warn('PO update failed', e));
+
+  // Create device record(s)
+  for (let i = 0; i < qty; i++) {
+    const serial = serialNumbers[i] || '';
+    const device = {
+      id:           nextDeviceId() + '_' + i,
+      name:         po.itemName,
+      brand:        '',
+      platform:     'other',
+      type:         'mobile',
+      serial,
+      assetTag:     '',
+      owner:        '',
+      assignedDate: now.slice(0, 10),
+      project:      po.project,
+      company:      '',
+      returnDate:   '',
+      warranty:     '',
+      condition:    'new',
+      status:       'available',  // arrived but not yet assigned
+      memoNo:       po.memoNo,
+      note:         `Auto-created from ${po.memoNo} · ${po.itemName}`,
+      source:       'memo',
+      createdAt:    now,
+      updatedAt:    now,
+    };
+    await saveDeviceAsync(device);
+  }
+  _devCache = null;
+  renderDevice();
 }
 
 // ── Helpers ──
@@ -59,7 +278,7 @@ function warrantyStatus(warrantyDate) {
   return { label: shortDate(warrantyDate), cls:'badge-green' };
 }
 
-// ── Auto-sync from HW Memos ──
+// ── Auto-sync from HW Memos (legacy — for memos approved before PO system) ──
 function syncFromHWMemos() {
   const hwMemos = loadMemos().filter(m => m.type === 'hw' && m.status === 'completed');
   const devices = loadDevices();
@@ -73,19 +292,30 @@ function syncFromHWMemos() {
       if(cells.length < 2) return;
       const name = cells[1]?.textContent?.trim();
       if(!name || name === '-') return;
-      if(devices.some(d => d.memoRef === memo.memoNo && d.name === name)) return;
+      // Check using memoNo (canonical field)
+      if(devices.some(d => d.memoNo === memo.memoNo && d.name === name)) return;
       devices.push({
-        id: nextDeviceId() + added, name,
+        id: nextDeviceId() + '_' + added,
+        name,
         platform: 'other', type: 'other', brand: '', serial: '', assetTag: '',
-        owner: memo.reviewerName||'', assignedDate: memo.approvedAt?.slice(0,10)||'',
-        project: memo.project||'', returnDate: '', warranty: '', condition: 'good',
-        status: 'in-use', company: '', memoRef: memo.memoNo,
-        note: `Auto-imported from ${memo.memoNo}`, createdAt: new Date().toISOString()
+        owner: '', assignedDate: memo.approvedAt?.slice(0,10) || '',
+        project: memo.project || '', returnDate: '', warranty: '', condition: 'good',
+        status: 'available',  // arrived but not yet assigned to anyone
+        company: '',
+        memoNo: memo.memoNo,  // use memoNo, not memoRef
+        note: `Auto-imported from ${memo.memoNo}`,
+        source: 'memo',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       });
       added++;
     });
   });
-  if(added > 0) storeDevices(devices);
+  if(added > 0) {
+    storeDevices(devices);
+    // Sync new devices to Supabase
+    devices.slice(-added).forEach(d => saveDeviceAsync(d).catch(e => console.warn('sync failed', e)));
+  }
 }
 
 // ── Summary tables ──
@@ -151,6 +381,11 @@ function renderDeviceSummaries(devices) {
 
 // ── Main render ──
 function renderDevice() {
+  // Load fresh from Supabase then render
+  loadDevicesAsync().then(() => _renderDeviceTable()).catch(() => _renderDeviceTable());
+}
+
+function _renderDeviceTable() {
   syncFromHWMemos();
 
   const allDevices = loadDevices();
@@ -344,41 +579,41 @@ function saveDevice() {
     position:     g('dev-position'),
     assignedDate: g('dev-assigned-date'),
     returnDate:   g('dev-return-date'),
-    memoRef:      g('dev-memo-ref'),
+    memoNo:       g('dev-memo-ref'),
     warranty:     g('dev-warranty'),
     condition:    g('dev-condition') || 'good',
-    status:       g('dev-status') || 'in-use',
+    status:       g('dev-status') || 'available',
     note:         g('dev-note'),
-    qaOwner:      g('dev-qa-owner'),
     updatedAt:    now,
+    source:       'manual',
   };
   if(editId) {
-    const idx = devices.findIndex(d => d.id === Number(editId));
-    if(idx >= 0) devices[idx] = { ...devices[idx], ...data };
+    const allDevs = loadDevices();
+    const idx = allDevs.findIndex(d => String(d.id) === String(editId));
+    const orig = idx >= 0 ? allDevs[idx] : {};
+    const updated = { ...orig, ...data, id: editId };
+    saveDeviceAsync(updated).catch(e => console.warn('Device save failed', e));
   } else {
-    // Check for duplicate by unique keys
-    const dupIdx = findExistingDevice(devices, data);
+    const allDevs = loadDevices();
+    const dupIdx = findExistingDevice(allDevs, data);
     if(dupIdx >= 0) {
-      const dup = devices[dupIdx];
-      const matchField = (data.assetTag && data.assetTag === dup.assetTag) ? `Asset IT: ${data.assetTag}`
-                       : (data.assetAcc && data.assetAcc === dup.assetAcc) ? `Asset ACC: ${data.assetAcc}`
-                       : `Serial: ${data.serial}`;
+      const dup = allDevs[dupIdx];
+      const matchField = (data.assetTag && data.assetTag === dup.assetTag) ? `Asset: ${data.assetTag}` : `Serial: ${data.serial}`;
       if(!confirm(`พบอุปกรณ์ซ้ำ (${matchField})\nอัปเดตข้อมูลอันเดิมแทน?`)) return;
-      devices[dupIdx] = { ...devices[dupIdx], ...data };
+      saveDeviceAsync({ ...dup, ...data }).catch(e => console.warn('Device save failed', e));
     } else {
-      devices.push({ id: nextDeviceId(), ...data, createdAt: now });
+      saveDeviceAsync({ id: nextDeviceId(), ...data, createdAt: now }).catch(e => console.warn('Device save failed', e));
     }
   }
-  storeDevices(devices);
   closeDeviceModal();
   renderDevice();
 }
 
 function deleteDevice(id) {
-  const d = loadDevices().find(dev => dev.id === id);
+  const d = loadDevices().find(dev => String(dev.id) === String(id));
   if(!d) return;
   if(!confirm(`ลบ "${d.name}" ออกจากระบบ?`)) return;
-  storeDevices(loadDevices().filter(dev => dev.id !== id));
+  deleteDeviceAsync(id).catch(e => console.warn('Delete failed', e));
   renderDevice();
 }
 
@@ -538,3 +773,111 @@ function uploadDevicePhoto(id, input) {
   };
   reader.readAsDataURL(file);
 }
+
+// ══════════════════════════════════════════
+// PURCHASE ORDERS TAB
+// ══════════════════════════════════════════
+
+function switchDevTab(tab, btn) {
+  document.querySelectorAll('.dev-tab-btn').forEach(b => {
+    const on = b === btn;
+    b.style.borderBottomColor = on ? '#185FA5' : 'transparent';
+    b.style.color = on ? '#185FA5' : 'var(--text-2)';
+    b.style.fontWeight = on ? '500' : '400';
+  });
+  document.getElementById('dev-panel-registry').style.display = tab === 'registry' ? '' : 'none';
+  document.getElementById('dev-panel-orders').style.display   = tab === 'orders'   ? '' : 'none';
+  if (tab === 'orders') renderPurchaseOrders();
+}
+
+function renderPurchaseOrders() {
+  loadPurchaseOrdersAsync().then(() => _renderPOTable()).catch(() => _renderPOTable());
+}
+
+function _renderPOTable() {
+  const pos = loadPurchaseOrders();
+
+  // KPIs
+  const active    = pos.filter(p => p.status !== 'fulfilled').length;
+  const awaiting  = pos.filter(p => p.status === 'ordered').reduce((s, p) => s + p.orderedQty, 0);
+  const partial   = pos.filter(p => p.status === 'partial').length;
+  const fulfilled = pos.filter(p => p.status === 'fulfilled').length;
+  const setText = (id, v) => { const el = document.getElementById(id); if(el) el.textContent = v; };
+  setText('po-kpi-active', active);
+  setText('po-kpi-awaiting', awaiting);
+  setText('po-kpi-partial', partial);
+  setText('po-kpi-fulfilled', fulfilled);
+
+  // Badge on tab
+  const badge = document.getElementById('dev-po-badge');
+  if (badge) { badge.textContent = active > 0 ? active : ''; badge.style.display = active > 0 ? '' : 'none'; }
+
+  const tbody = document.getElementById('po-table-body');
+  if (!tbody) return;
+
+  if (!pos.length) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:34px;color:var(--text-3)">ยังไม่มี Purchase Order — Approve HW Memo เพื่อสร้างอัตโนมัติ</td></tr>`;
+    return;
+  }
+
+  const statusBadge = s => ({
+    ordered:   `<span style="font-size:10px;background:#E6F1FB;color:#0C447C;padding:2px 8px;border-radius:100px">Ordered</span>`,
+    partial:   `<span style="font-size:10px;background:#FAEEDA;color:#633806;padding:2px 8px;border-radius:100px">Partially arrived</span>`,
+    fulfilled: `<span style="font-size:10px;background:#EAF3DE;color:#27500A;padding:2px 8px;border-radius:100px">Fulfilled</span>`,
+  }[s] || `<span style="font-size:10px;background:#F1EFE8;color:#444441;padding:2px 8px;border-radius:100px">${esc(s)}</span>`);
+
+  tbody.innerHTML = pos.map(po => {
+    const pct  = po.orderedQty > 0 ? Math.round(po.arrivedQty / po.orderedQty * 100) : 0;
+    const canAct = po.status !== 'fulfilled';
+    return `<tr>
+      <td style="color:#185FA5;font-weight:500;cursor:pointer;padding:9px 12px" onclick="openHistoryDetail && openHistoryDetail('${esc(po.memoNo)}')">${esc(po.memoNo)}</td>
+      <td style="padding:9px 12px;font-size:12px">${esc(po.itemName)}</td>
+      <td style="padding:9px 12px;font-size:12px">${esc(po.project || '—')}</td>
+      <td style="padding:9px 12px;text-align:center;font-size:12px">${po.orderedQty}</td>
+      <td style="padding:9px 12px;text-align:center;font-size:12px;font-weight:500;color:${po.arrivedQty > 0 ? '#3B6D11' : 'var(--text-3)'}">${po.arrivedQty}</td>
+      <td style="padding:9px 12px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <div style="flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden">
+            <div style="width:${pct}%;height:100%;background:${pct>=100?'#3B6D11':'#185FA5'};border-radius:3px"></div>
+          </div>
+          <span style="font-size:10px;color:var(--text-3)">${po.arrivedQty}/${po.orderedQty}</span>
+        </div>
+      </td>
+      <td style="padding:9px 12px">${statusBadge(po.status)}</td>
+      <td style="padding:9px 12px;white-space:nowrap">
+        ${canAct ? `<button class="btn-sm" style="font-size:11px" onclick="openMarkArrivedModal('${esc(po.id)}')">+ Mark arrived</button>` : `<button class="btn-sm" style="font-size:11px" onclick="switchDevTab('registry',document.getElementById('dev-tbtn-registry'))">View devices</button>`}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Mark Arrived Modal ──
+function openMarkArrivedModal(poId) {
+  const po = loadPurchaseOrders().find(p => p.id === poId);
+  if (!po) return;
+  document.getElementById('mark-arrived-po-id').value = poId;
+  document.getElementById('mark-arrived-subtitle').textContent =
+    `${po.itemName} · ${po.arrivedQty}/${po.orderedQty} มาถึงแล้ว · remaining: ${po.orderedQty - po.arrivedQty}`;
+  document.getElementById('mark-arrived-qty').value = po.orderedQty - po.arrivedQty;
+  document.getElementById('mark-arrived-qty').max   = po.orderedQty - po.arrivedQty;
+  document.getElementById('mark-arrived-serials').value = '';
+  document.getElementById('mark-arrived-modal').style.display = 'flex';
+}
+function closeMarkArrivedModal() { document.getElementById('mark-arrived-modal').style.display = 'none'; }
+
+function submitMarkArrived() {
+  const poId    = document.getElementById('mark-arrived-po-id').value;
+  const qty     = parseInt(document.getElementById('mark-arrived-qty').value) || 0;
+  const serialsRaw = document.getElementById('mark-arrived-serials').value;
+  const serials = serialsRaw.split('\n').map(s => s.trim()).filter(Boolean);
+  if (!qty || qty < 1) { alert('กรุณากรอกจำนวนที่มาถึง'); return; }
+  closeMarkArrivedModal();
+  markArrived(poId, qty, serials).then(() => {
+    renderPurchaseOrders();
+    renderDevice();
+  });
+}
+
+document.addEventListener('click', e => {
+  if (e.target === document.getElementById('mark-arrived-modal')) closeMarkArrivedModal();
+});
