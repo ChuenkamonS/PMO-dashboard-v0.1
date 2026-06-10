@@ -1242,17 +1242,17 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <div id="bgt-tab-overview" class="cost-tab-panel">
 
           <!-- Filter row -->
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-            <select id="ov-range" onchange="renderBudgetOverview()" style="font-size:12px;padding:5px 10px">
+          <div class="filter-row" style="margin-bottom:14px">
+            <select id="ov-range" onchange="renderBudgetOverview()" class="filter-row select">
               <option value="3">3 เดือน</option>
               <option value="6">6 เดือน</option>
               <option value="12" selected>12 เดือน</option>
               <option value="all">ทั้งหมด</option>
             </select>
-            <select id="ov-project" onchange="renderBudgetOverview()" style="font-size:12px;padding:5px 10px">
+            <select id="ov-project" onchange="renderBudgetOverview()" class="filter-row select">
               <option value="all">ทุกโปรเจค</option>
             </select>
-            <select id="ov-type" onchange="renderBudgetOverview()" style="font-size:12px;padding:5px 10px">
+            <select id="ov-type" onchange="renderBudgetOverview()" class="filter-row select">
               <option value="all">ทุกประเภท</option>
               <option value="sl">SL</option>
               <option value="hw">HW</option>
@@ -1286,6 +1286,27 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <div style="height:260px"><canvas id="ov-proj-bar-chart"></canvas></div>
           </div>
 
+          <!-- Spending Breakdown Table -->
+          <div class="card" style="padding:0;overflow:hidden;margin-top:12px">
+            <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+              <span style="font-size:12px;font-weight:600">Spending Breakdown</span>
+              <div style="display:flex;gap:8px;align-items:center">
+                <div style="display:flex;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden">
+                  <button id="ov-view-cumulative" onclick="switchSpendView('cumulative')"
+                    style="font-size:11px;padding:4px 10px;background:var(--blue);color:#fff;border:none;cursor:pointer">สะสม</button>
+                  <button id="ov-view-monthly" onclick="switchSpendView('monthly')"
+                    style="font-size:11px;padding:4px 10px;background:transparent;border:none;cursor:pointer;color:var(--text-2)">รายเดือน</button>
+                </div>
+              </div>
+            </div>
+            <div style="overflow-x:auto">
+              <table class="hist-table" id="ov-breakdown-table">
+                <thead id="ov-breakdown-thead"></thead>
+                <tbody id="ov-breakdown-body"></tbody>
+              </table>
+            </div>
+          </div>
+
         </div>
 
         <!-- ── SUB-TAB: SL + INFRA ── -->
@@ -1313,10 +1334,10 @@ svg.icon { display: inline-block; vertical-align: middle; }
 
             <!-- Left nav -->
             <div style="border-right:1px solid var(--border);background:var(--bg)">
-              <div id="sl-nav-cost" class="sl-nav-item active" onclick="switchSLNav('cost',this)"
+              <div id="sl-nav-bva" class="sl-nav-item active" onclick="switchSLNav('bva',this)"
                 style="padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid var(--blue);background:var(--blue-50)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#185FA5" stroke-width="2"><path d="M3 3h18v4H3z"/><path d="M3 11h18v4H3z"/><path d="M3 19h18v2H3z"/></svg>
-                <span style="font-size:12px;font-weight:600;color:var(--blue)">Cost by Project</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#185FA5" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                <span style="font-size:12px;font-weight:600;color:var(--blue)">Budget vs Actual</span>
               </div>
               <div id="sl-nav-forecast" class="sl-nav-item" onclick="switchSLNav('forecast',this)"
                 style="padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid transparent">
@@ -1328,11 +1349,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6" y2="6"/><line x1="6" y1="18" x2="6" y2="18"/></svg>
                 <span style="font-size:12px;color:var(--text-2)">Infra Cost</span>
               </div>
-              <div id="sl-nav-bva" class="sl-nav-item" onclick="switchSLNav('bva',this)"
-                style="padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid transparent">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-                <span style="font-size:12px;color:var(--text-2)">Budget vs Actual</span>
-              </div>
               <div id="sl-nav-budgetsettings" class="sl-nav-item" onclick="switchSLNav('budgetsettings',this)"
                 style="padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid transparent">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -1342,19 +1358,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
 
             <!-- Content panels -->
             <div>
-
-              <!-- Cost by Project -->
-              <div id="sl-panel-cost" style="padding:0">
-                <table class="hist-table">
-                  <thead><tr>
-                    <th style="padding-left:16px">Project</th>
-                    <th>License (฿)</th>
-                    <th>Infra (฿)</th>
-                    <th>Total/Mo (฿)</th>
-                  </tr></thead>
-                  <tbody id="sl-proj-body"></tbody>
-                </table>
-              </div>
 
               <!-- Forecast vs Actual -->
               <div id="sl-panel-forecast" style="display:none;padding:0">
@@ -1409,7 +1412,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
               </div>
 
               <!-- Budget vs Actual panel -->
-              <div id="sl-panel-bva" style="display:none;padding:0">
+              <div id="sl-panel-bva" style="padding:0">
                 <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
                   <span style="font-size:11px;color:var(--text-3)">Budget = Forecast avg · Actual = SL memo spend ในช่วงที่เลือก</span>
                   <select id="sl-bva-range" onchange="renderBudgetSLInfra()" style="font-size:11px;padding:3px 8px">
