@@ -11,9 +11,8 @@ let _devCache = null;
 // SUPABASE SYNC — Devices
 // ══════════════════════════════════════════
 
-function deviceToDb(d) {
-  return {
-    id:            String(d.id),
+function deviceToDb(d, isNew=false) {
+  const row = {
     name:          d.name,
     brand:         d.brand || null,
     platform:      d.platform || 'other',
@@ -80,18 +79,35 @@ async function saveDeviceAsync(data) {
   _devCache = all;
   if (await checkSupa()) {
     try {
-      await supaFetch('devices', 'POST', deviceToDb(data), '?on_conflict=id');
+      const isNew = !data._supaId; // _supaId set after first insert
+      if (isNew) {
+        // Don't send id — devices table uses BIGINT GENERATED ALWAYS AS IDENTITY
+        const row = deviceToDb(data);
+        delete row.id;
+        const result = await supaFetch('devices', 'POST', row, '?select=id');
+        // Store the Supabase-generated id back
+        if (result?.[0]?.id) {
+          const allDevs = loadDevices();
+          const i2 = allDevs.findIndex(d => String(d.id) === String(data.id));
+          if (i2 >= 0) { allDevs[i2]._supaId = result[0].id; storeDevices(allDevs); }
+        }
+      } else {
+        await supaFetch('devices', 'PATCH', deviceToDb(data), `?id=eq.${data._supaId}`);
+      }
       _devCache = null;
     } catch(e) { console.warn('Supabase device save failed', e.message); }
   }
 }
 
 async function deleteDeviceAsync(id) {
+  const device = loadDevices().find(d => String(d.id) === String(id));
   storeDevices(loadDevices().filter(d => String(d.id) !== String(id)));
   _devCache = null;
   if (await checkSupa()) {
     try {
-      await supaFetch('devices', 'DELETE', null, '?id=eq.' + encodeURIComponent(id));
+      // devices table uses BIGINT id — use _supaId stored after INSERT
+      const supaId = device?._supaId;
+      if (supaId) await supaFetch('devices', 'DELETE', null, `?id=eq.${supaId}`);
     } catch(e) { console.warn('Supabase device delete failed', e.message); }
   }
 }
@@ -100,9 +116,16 @@ function loadDevices() {
   if (_devCache !== null) return _devCache;
   try {
     const d = JSON.parse(localStorage.getItem(DEVICE_KEY) || '[]');
-    // Migrate: memoRef → memoNo
     if (Array.isArray(d)) {
+      // Migrate: memoRef → memoNo
       d.forEach(dev => { if (dev.memoRef && !dev.memoNo) { dev.memoNo = dev.memoRef; delete dev.memoRef; } });
+      // Remove auto-imported devices (source=memo, no serial, no _supaId)
+      // These should only exist after markArrived — filter them out so registry is clean
+      const cleaned = d.filter(dev => !(dev.source === 'memo' && !dev.serial && !dev._supaId && dev.note?.includes('Auto-imported')));
+      if (cleaned.length !== d.length) {
+        try { localStorage.setItem(DEVICE_KEY, JSON.stringify(cleaned)); } catch(e) {}
+        return cleaned;
+      }
     }
     return Array.isArray(d) ? d : [];
   } catch(e) { return []; }
@@ -196,8 +219,9 @@ function createPurchaseOrdersFromMemo(memo) {
     const name = cells[1]?.textContent?.trim();
     const qty  = parseInt(cells[3]?.textContent) || 1;
     if (!name || name === '-') return;
-    // Don't duplicate
-    if (existing.some(p => p.memoNo === memo.memoNo && p.itemName === name)) return;
+    // Don't duplicate — check by both memoNo + itemName
+    const isDup = existing.some(p => p.memoNo === memo.memoNo && p.itemName === name);
+    if (isDup) return;
     const po = {
       id:          `po_${memo.memoNo}_${name}`.replace(/\s/g, '_'),
       memoNo:      memo.memoNo,
@@ -229,11 +253,12 @@ async function markArrived(poId, qty, serialNumbers = []) {
   storePurchaseOrders(pos);
   savePurchaseOrderAsync(po).catch(e => console.warn('PO update failed', e));
 
-  // Create device record(s)
+  // Create device record(s) — use timestamp + index to avoid id collision
+  const batchTs = Date.now();
   for (let i = 0; i < qty; i++) {
     const serial = serialNumbers[i] || '';
     const device = {
-      id:           nextDeviceId() + '_' + i,
+      id:           `dev_${batchTs}_${i}`,
       name:         po.itemName,
       brand:        '',
       platform:     'other',
@@ -386,7 +411,7 @@ function renderDevice() {
 }
 
 function _renderDeviceTable() {
-  syncFromHWMemos();
+  // Note: syncFromHWMemos removed — devices only created via markArrived()
 
   const allDevices = loadDevices();
 
