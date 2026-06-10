@@ -1324,10 +1324,11 @@ svg.icon { display: inline-block; vertical-align: middle; }
 
           <!-- ── Section B: Budget vs Actual ── -->
           <div class="card" style="padding:14px 16px">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
               <div style="font-size:12px;font-weight:600;color:var(--text)">B · Budget vs actual — by project <span id="ov-bva-period-label" style="font-size:11px;font-weight:400;color:var(--text-3)"></span></div>
               <div style="display:flex;gap:5px;flex-wrap:wrap" id="ov-bva-proj-chips"></div>
             </div>
+            <div id="ov-bva-formula" style="font-size:11px;color:var(--text-3);background:var(--bg);border-radius:var(--r-sm);padding:7px 10px;margin-bottom:12px;line-height:1.6"></div>
             <div id="ov-bva-rows"></div>
             <div style="margin-top:10px;font-size:11px;color:var(--text-3)">
               <span style="display:inline-block;width:8px;height:8px;background:var(--red);border-radius:2px;margin-right:4px"></span>&gt;100% over budget &nbsp;
@@ -1337,30 +1338,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
           </div>
 
         </div>
-
-        <!-- ── SUB-TAB: SL + INFRA ── -->
-          <div class="metric-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px">
-            <div class="metric-card">
-              <div class="metric-label">งบประมาณ (ช่วงนี้)</div>
-              <div class="metric-val" id="bgt-kpi-budget" style="color:var(--text)">฿0</div>
-              <div class="metric-sub" id="bgt-kpi-budget-sub">ตั้งไว้สำหรับช่วงนี้</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">ใช้จ่ายจริง</div>
-              <div class="metric-val" id="bgt-kpi-total" style="color:var(--blue)">฿0</div>
-              <div class="metric-sub" id="bgt-kpi-actual-sub">จาก memo ที่อนุมัติแล้ว</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">คงเหลือ</div>
-              <div class="metric-val" id="bgt-kpi-remaining" style="color:var(--green)">—</div>
-              <div class="metric-sub" id="bgt-kpi-remaining-sub">จากงบประมาณที่ตั้งไว้</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">Forecast (ถึงสิ้นปี)</div>
-              <div class="metric-val" id="bgt-kpi-forecast" style="color:var(--amber)">—</div>
-              <div class="metric-sub" id="bgt-kpi-forecast-sub">คาดการณ์จากอัตราปัจจุบัน</div>
-            </div>
-          </div>
 
         <!-- ── SUB-TAB: SL + INFRA ── -->
         <div id="bgt-tab-sl-infra" class="cost-tab-panel" style="display:none">
