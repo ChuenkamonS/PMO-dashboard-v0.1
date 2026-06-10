@@ -1262,48 +1262,47 @@ svg.icon { display: inline-block; vertical-align: middle; }
             </select>
           </div>
 
-          <div class="metric-row" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
-            <div class="metric-card"><div class="metric-label">Total Spend</div><div class="metric-val" id="bgt-kpi-total" style="color:var(--blue)">฿0</div><div class="metric-sub">ทุกประเภท</div></div>
-            <div class="metric-card"><div class="metric-label">SL + Infra</div><div class="metric-val" id="bgt-kpi-sl-infra" style="color:var(--green)">฿0</div><div class="metric-sub">License + OPEX</div></div>
-            <div class="metric-card"><div class="metric-label">Others</div><div class="metric-val" id="bgt-kpi-others" style="color:var(--amber)">฿0</div><div class="metric-sub">HW + INT + ENT + DEP</div></div>
+          <!-- 4-card KPI row -->
+          <div class="metric-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px">
+            <div class="metric-card">
+              <div class="metric-label">งบประมาณ (ช่วงนี้)</div>
+              <div class="metric-val" id="bgt-kpi-budget" style="color:var(--text)">฿0</div>
+              <div class="metric-sub" id="bgt-kpi-budget-sub">ตั้งไว้สำหรับช่วงนี้</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">ใช้จ่ายจริง</div>
+              <div class="metric-val" id="bgt-kpi-total" style="color:var(--blue)">฿0</div>
+              <div class="metric-sub" id="bgt-kpi-actual-sub">จาก memo ที่อนุมัติแล้ว</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">คงเหลือ</div>
+              <div class="metric-val" id="bgt-kpi-remaining" style="color:var(--green)">—</div>
+              <div class="metric-sub" id="bgt-kpi-remaining-sub">จากงบประมาณที่ตั้งไว้</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Forecast (ถึงสิ้นปี)</div>
+              <div class="metric-val" id="bgt-kpi-forecast" style="color:var(--amber)">—</div>
+              <div class="metric-sub" id="bgt-kpi-forecast-sub">คาดการณ์จากอัตราปัจจุบัน</div>
+            </div>
           </div>
 
+          <!-- Monthly stacked bar by type -->
           <div class="card" style="padding:16px;margin-bottom:12px">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-              <span style="font-size:12px;font-weight:600">Monthly Trend — 12 เดือน</span>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-                <span style="font-size:11px;font-weight:500;color:var(--text-2)">Project:</span>
-                <div id="ov-proj-checkboxes" style="display:flex;gap:8px;flex-wrap:wrap"></div>
-                <span style="font-size:11px;font-weight:500;color:var(--text-2);margin-left:4px">Type:</span>
-                <div id="ov-type-checkboxes" style="display:flex;gap:8px;flex-wrap:wrap"></div>
-              </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <span style="font-size:12px;font-weight:600" id="ov-trend-title">Monthly Spend by Type</span>
             </div>
-            <div style="height:280px"><canvas id="ov-trend-chart"></canvas></div>
+            <div style="height:240px"><canvas id="ov-type-bar-chart"></canvas></div>
           </div>
 
-          <div class="card" style="padding:16px">
-            <div style="font-size:12px;font-weight:600;margin-bottom:12px">Spend by Project</div>
-            <div style="height:260px"><canvas id="ov-proj-bar-chart"></canvas></div>
-          </div>
-
-          <!-- Spending Breakdown Table -->
-          <div class="card" style="padding:0;overflow:hidden;margin-top:12px">
-            <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-              <span style="font-size:12px;font-weight:600">Spending Breakdown</span>
-              <div style="display:flex;gap:8px;align-items:center">
-                <div style="display:flex;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden">
-                  <button id="ov-view-cumulative" onclick="switchSpendView('cumulative')"
-                    style="font-size:11px;padding:4px 10px;background:var(--blue);color:#fff;border:none;cursor:pointer">สะสม</button>
-                  <button id="ov-view-monthly" onclick="switchSpendView('monthly')"
-                    style="font-size:11px;padding:4px 10px;background:transparent;border:none;cursor:pointer;color:var(--text-2)">รายเดือน</button>
-                </div>
-              </div>
+          <!-- Two-column: Spend by Project (%) + Spend by Type (%) -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="card" style="padding:16px">
+              <div style="font-size:12px;font-weight:600;margin-bottom:12px">Spend by Project <span style="font-size:10px;font-weight:400;color:var(--text-3)">% of total</span></div>
+              <div style="height:220px"><canvas id="ov-proj-pct-chart"></canvas></div>
             </div>
-            <div style="overflow-x:auto">
-              <table class="hist-table" id="ov-breakdown-table">
-                <thead id="ov-breakdown-thead"></thead>
-                <tbody id="ov-breakdown-body"></tbody>
-              </table>
+            <div class="card" style="padding:16px">
+              <div style="font-size:12px;font-weight:600;margin-bottom:12px">Spend by Type <span style="font-size:10px;font-weight:400;color:var(--text-3)">% of total</span></div>
+              <div style="height:220px"><canvas id="ov-type-pct-chart"></canvas></div>
             </div>
           </div>
 
