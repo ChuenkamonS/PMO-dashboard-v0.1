@@ -215,7 +215,9 @@ function filteredHistoryMemos() {
 function populateHistFilterOptions() {
   const memos = getHistoryMemos();
   const requesters = [...new Set(memos.map(histRequesterName).filter(n => n && n !== '—'))].sort();
-  const approvers = [...new Set(memos.map(histApproverName).filter(n => n && n !== '—'))].sort();
+  const approvers  = [...new Set(memos.map(histApproverName).filter(n => n && n !== '—'))].sort();
+  const projects   = [...new Set(memos.map(m => m.project).filter(Boolean))].sort();
+
   const fill = (id, items) => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -226,6 +228,7 @@ function populateHistFilterOptions() {
   };
   fill('hist-requester', requesters);
   fill('hist-approver', approvers);
+  fill('hist-project', projects);
 }
 
 function toggleHistFilters() {
@@ -355,9 +358,15 @@ function openHistoryDetail(memoNo) {
   `;
 
   const acts = document.getElementById('detail-actions');
+  const isPending = !memo.status || memo.status === 'pending';
+  const isOwn     = (memo.requesterName || '') === (typeof currentUser === 'function' ? currentUser() : '');
+  const canAct    = isPending && !isOwn;
   acts.innerHTML = `
-
-    <button class="btn-sm" type="button" onclick="openMemoPdf('${esc(memo.memoNo)}')" title="Download PDF">Download PDF</button>
+    ${canAct ? `
+      <button class="btn-primary" type="button" onclick="closeDetailModal();openApproveModal('${esc(memo.memoNo)}')">✓ Approve</button>
+      <button class="btn-reject"  type="button" onclick="closeDetailModal();openRejectModal('${esc(memo.memoNo)}')">✕ Reject</button>
+    ` : ''}
+    ${memo.status !== 'draft' ? `<button class="btn-sm" type="button" onclick="openMemoPdf('${esc(memo.memoNo)}')" title="Download PDF">Download PDF</button>` : ''}
     <button class="btn-ghost" type="button" onclick="closeDetailModal()">ปิด</button>
   `;
   const modalInner = document.querySelector('#detail-modal > div');
@@ -493,6 +502,21 @@ function renderHistoryMemos() {
   body.querySelectorAll('tr[data-memo]').forEach(row => {
     row.addEventListener('click', handleHistoryTableClick);
   });
+}
+
+// ── Draft actions (drafts live in All Memos now) ──
+function editDraft(memoNo) {
+  const memo = loadMemos().find(m => m.memoNo === memoNo);
+  if (!memo || memo.status !== 'draft') return;
+  try { localStorage.setItem('orbit-pmo-edit-draft', JSON.stringify(memo)); } catch(e) {}
+  swView('create', document.querySelector('.sb-sub-item[onclick*="create"]'), 'Create Memo');
+  setTimeout(() => { if (typeof applyDraftEdit === 'function') applyDraftEdit(); }, 100);
+}
+function deleteDraft(memoNo) {
+  if (!confirm(`ลบ Draft "${memoNo}" ออกจากระบบ?`)) return;
+  const memos = loadMemos().filter(m => m.memoNo !== memoNo);
+  storeMemos(memos);
+  renderHistoryMemos();
 }
 
 function duplicateMemo(memoNo) {
