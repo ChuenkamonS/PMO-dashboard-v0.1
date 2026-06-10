@@ -16,6 +16,8 @@ function switchSLNav(panel, btn) {
       if(svg) svg.setAttribute('stroke', p === panel ? '#185FA5' : 'currentColor');
     }
   });
+  // Trigger render for panels that need it
+  if(panel === 'budgetsettings') renderBudgetSettings();
 }
 
 // ─────────────────────────────────────────
@@ -401,9 +403,17 @@ function _renderBudgetSLInfraWith(infraEntries) {
   const licByProj  = getLicenseCostByProject();
   const infraProjs = getInfraProjects(infraEntries);
 
+  // Include Company-Wide + projects from SL memo budget sources
+  const slBudgetProjects = Object.keys(loadSLBudgets()?.[String(new Date().getFullYear()+543)] || {});
+  const memoSources = [...new Set(
+    loadMemos().filter(m=>memoStatusKey(m)==='completed'&&m.type==='sl')
+      .map(m => m.budgetSource || m.project || '(ไม่ระบุ)')
+  )];
   const allProjects = [...new Set([
     ...Object.keys(licByProj),
     ...infraProjs,
+    ...slBudgetProjects,
+    ...memoSources,
   ])].sort();
 
   // Cost by Project table: show current monthly rate
@@ -731,7 +741,7 @@ function _parseSLSectionHTML(html) {
 
 // ── Memo breakdown popup ──
 function showMemoBreakdown(proj, monthKey) {
-  const approved = loadMemos().filter(m => memoStatusKey(m)==='completed' && m.type==='sl' && (m.project||'(ไม่ระบุ)')=== proj);
+  const approved = loadMemos().filter(m => memoStatusKey(m)==='completed' && m.type==='sl' && getMemoBudgetSource(m) === proj);
   const [yr, mo] = monthKey.split('-').map(Number);
   const label = new Date(yr, mo-1, 1).toLocaleString('th-TH',{month:'long',year:'2-digit'});
 
@@ -1081,11 +1091,19 @@ function renderBudgetSettings() {
   const yearData = budgets[year] || {};
 
   const s = typeof loadSettings === 'function' ? loadSettings() : null;
+  // Combine: settings projects + projects from actual memos + Company-Wide + already budgeted
+  const memoProjects = [...new Set(
+    loadMemos()
+      .filter(m => m.type === 'sl' && memoStatusKey(m) === 'completed')
+      .map(m => m.project || '(ไม่ระบุ)')
+      .filter(Boolean)
+  )];
   const projects = [...new Set([
     ...(s?.projects || []),
+    ...memoProjects,
     'Company-Wide',
     ...Object.keys(yearData)
-  ])].filter(Boolean);
+  ])].filter(p => p && p !== '(ไม่ระบุ)');
 
   if(!projects.length) {
     body.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:12px">ยังไม่มีโปรเจค — กด "+ เพิ่มโปรเจค" หรือตั้งค่าโปรเจคใน Settings ก่อน</div>`;
