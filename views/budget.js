@@ -197,20 +197,355 @@ function renderBudget() {
 // SUB-TAB 1: OVERVIEW
 // ══════════════════════════════════════════
 
-// ── State ──
+const OV_PROJ_COLORS = ['#185FA5','#1D9E75','#EF9F27','#7F77DD','#5DCAA5','#D85A30','#888780','#3C3489','#639922'];
+const OV_TYPE_COLORS = { sl:'#185FA5', hw:'#1D9E75', int:'#EF9F27', ent:'#7F77DD', dep:'#D85A30' };
+
 const _ov = {
-  mode: 'spend',       // 'spend' | 'bva'
-  groupBy: 'type',     // 'type' | 'project'
+  mode: 'spend',
+  groupBy: 'type',
   stackMode: 'stacked',
-  preset: 12,          // 3 | 6 | 12 | 0=custom
+  preset: 12,
   fromIdx: 0,
   toIdx: 11,
-  allMonths: [],       // populated on first render: [{key:'YYYY-MM', label:'...'}]
+  allMonths: [],
   activeProjKeys: new Set(),
   activeTypeKeys: new Set(),
-  activeBvaProjKeys: new Set(),
   initialized: false,
 };
+
+function renderBudgetOverview() {
+  _ovBuildMonths();
+  _ovInitState();
+  _ovUpdateKPIs();
+  _ovRenderChips();
+  _ovRenderChart();
+}
+
+function _ovBuildMonths() {
+  const now = new Date();
+  _ov.allMonths = [];
+  for (let i = 23; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    _ov.allMonths.push({
+      key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,
+      label: d.toLocaleString('th-TH', { month:'short', year:'2-digit' }),
+    });
+  }
+  const fromSel = document.getElementById('ov-from-sel');
+  const toSel   = document.getElementById('ov-to-sel');
+  if (fromSel && !fromSel.options.length) {
+    _ov.allMonths.forEach((m, i) => {
+      const o1 = document.createElement('option'); o1.value = i; o1.textContent = m.label; fromSel.appendChild(o1);
+      const o2 = document.createElement('option'); o2.value = i; o2.textContent = m.label; toSel.appendChild(o2);
+    });
+    toSel.value = _ov.allMonths.length - 1;
+  }
+}
+
+function _ovInitState() {
+  if (_ov.initialized) return;
+  _ov.initialized = true;
+  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
+  const projKeys  = [...new Set(approved.map(m => m.project || '(ไม่ระบุ)'))].sort();
+  _ov.activeProjKeys = new Set(projKeys);
+  _ov.activeTypeKeys = new Set(['sl','hw','int','ent','dep']);
+  _ovApplyPresetIdxs(12);
+}
+
+function _ovApplyPresetIdxs(n) {
+  _ov.toIdx   = _ov.allMonths.length - 1;
+  _ov.fromIdx = Math.max(0, _ov.toIdx - n + 1);
+  _ovUpdatePeriodLabel();
+}
+
+function _ovUpdatePeriodLabel() {
+  const el = document.getElementById('ov-period-label');
+  if (!el || !_ov.allMonths.length) return;
+  const n = _ov.toIdx - _ov.fromIdx + 1;
+  el.textContent = `${_ov.allMonths[_ov.fromIdx]?.label} – ${_ov.allMonths[_ov.toIdx]?.label} · ${n} เดือน`;
+}
+
+// ── Controls ──
+function ovSetMode(m) {
+  _ov.mode = m;
+  document.querySelectorAll('.ov-mode-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('ov-mbtn-' + m)?.classList.add('active');
+  const svw = document.getElementById('ov-spend-view-wrap');
+  const tc  = document.getElementById('ov-type-col');
+  if (svw) svw.style.display = m === 'bva' ? 'none' : '';
+  if (tc)  tc.style.display  = m === 'bva' ? 'none' : '';
+  _ovUpdateKPIs();
+  _ovRenderChart();
+}
+
+function ovSetGroup(g) {
+  _ov.groupBy = g;
+  const tCard = document.getElementById('ov-vcard-type');
+  const pCard = document.getElementById('ov-vcard-project');
+  if (tCard) tCard.style.border = g === 'type'    ? '1.5px solid var(--blue)' : '0.5px solid var(--border)';
+  if (pCard) pCard.style.border = g === 'project' ? '1.5px solid var(--blue)' : '0.5px solid var(--border)';
+  _ovRenderChart();
+}
+
+function ovSetStack(s) {
+  _ov.stackMode = s;
+  const ss = document.getElementById('ov-sbtn-stacked');
+  const sg = document.getElementById('ov-sbtn-grouped');
+  if (ss) { ss.style.background = s === 'stacked' ? 'var(--blue)' : 'transparent'; ss.style.color = s === 'stacked' ? '#fff' : 'var(--text-2)'; }
+  if (sg) { sg.style.background = s === 'grouped' ? 'var(--blue)' : 'transparent'; sg.style.color = s === 'grouped' ? '#fff' : 'var(--text-2)'; }
+  _ovRenderChart();
+}
+
+function ovSetPreset(n) {
+  _ov.preset = n;
+  document.querySelectorAll('.ov-preset-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('ov-pbtn-' + n)?.classList.add('active');
+  const cr = document.getElementById('ov-custom-range');
+  if (n === 0) {
+    if (cr) cr.style.display = 'flex';
+  } else {
+    if (cr) cr.style.display = 'none';
+    _ovApplyPresetIdxs(n);
+    _ovUpdateKPIs();
+    _ovRenderChart();
+  }
+}
+
+function ovApplyCustomRange() {
+  const f = parseInt(document.getElementById('ov-from-sel')?.value ?? 0);
+  const t = parseInt(document.getElementById('ov-to-sel')?.value ?? _ov.allMonths.length - 1);
+  _ov.fromIdx = f;
+  _ov.toIdx   = Math.max(f, t);
+  _ovUpdatePeriodLabel();
+  _ovUpdateKPIs();
+  _ovRenderChart();
+}
+
+function ovToggleProj(k) {
+  if (_ov.activeProjKeys.has(k)) { if (_ov.activeProjKeys.size > 1) _ov.activeProjKeys.delete(k); }
+  else _ov.activeProjKeys.add(k);
+  _ovRenderChips(); _ovUpdateKPIs(); _ovRenderChart();
+}
+function ovToggleType(k) {
+  if (_ov.activeTypeKeys.has(k)) { if (_ov.activeTypeKeys.size > 1) _ov.activeTypeKeys.delete(k); }
+  else _ov.activeTypeKeys.add(k);
+  _ovRenderChips(); _ovUpdateKPIs(); _ovRenderChart();
+}
+
+// ── Chips — simple 2-state, no dots ──
+function _ovRenderChips() {
+  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
+  const projKeys = [...new Set(approved.map(m => m.project || '(ไม่ระบุ)'))].sort();
+  const typeKeys = ['sl','hw','int','ent','dep'];
+
+  const chipStyle = (on) =>
+    `display:inline-flex;align-items:center;font-size:11px;padding:4px 11px;border-radius:20px;cursor:pointer;user-select:none;margin-bottom:3px;transition:all 0.12s;border:0.5px solid ${on ? 'transparent' : 'var(--border)'};background:${on ? 'var(--blue)' : 'transparent'};color:${on ? '#fff' : 'var(--text-2)'}`;
+
+  const projChips = document.getElementById('ov-proj-chips');
+  if (projChips) {
+    projChips.innerHTML = projKeys.map(k =>
+      `<span onclick="ovToggleProj('${esc(k)}')" style="${chipStyle(_ov.activeProjKeys.has(k))}">${esc(k)}</span>`
+    ).join('');
+  }
+
+  const typeChips = document.getElementById('ov-type-chips');
+  if (typeChips) {
+    typeChips.innerHTML = typeKeys.map(k =>
+      `<span onclick="ovToggleType('${k}')" style="${chipStyle(_ov.activeTypeKeys.has(k))}">${BGT_TYPE_LABELS[k]}</span>`
+    ).join('');
+  }
+
+  const pAll = projKeys.length, tAll = typeKeys.length;
+  const pc = document.getElementById('ov-proj-count');
+  const tc = document.getElementById('ov-type-count');
+  if (pc) pc.textContent = _ov.activeProjKeys.size === pAll ? '(all)' : `(${_ov.activeProjKeys.size}/${pAll})`;
+  if (tc) tc.textContent = _ov.activeTypeKeys.size === tAll ? '(all)' : `(${_ov.activeTypeKeys.size}/${tAll})`;
+}
+
+// ── KPIs ──
+function _ovUpdateKPIs() {
+  const months    = _ov.allMonths.slice(_ov.fromIdx, _ov.toIdx + 1);
+  const numMonths = months.length;
+  const fromKey   = months[0]?.key;
+  const toKey     = months[months.length - 1]?.key;
+  const approved  = loadMemos().filter(m => memoStatusKey(m) === 'completed');
+
+  let filtered = approved.filter(m => {
+    const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
+    const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    return k >= fromKey && k <= toKey;
+  }).filter(m =>
+    _ov.activeProjKeys.has(m.project || '(ไม่ระบุ)') &&
+    (_ov.mode === 'bva' || _ov.activeTypeKeys.has(m.type))
+  );
+
+  const total = filtered.reduce((s, m) => s + (Number(m.total) || 0), 0);
+  const currentYear   = String(new Date().getFullYear() + 543);
+  const slBudgets     = loadSLBudgets()?.[currentYear] || {};
+  const annualBudget  = [..._ov.activeProjKeys].reduce((s, p) => s + (slBudgets[p] || 0), 0);
+  const budgetTotal   = annualBudget > 0 ? (annualBudget / 12) * numMonths : 0;
+  const monthlyRate   = numMonths > 0 ? total / numMonths : 0;
+  const monthsLeft    = 12 - new Date().getMonth();
+  const forecastTotal = total + monthlyRate * monthsLeft;
+
+  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  setText('bgt-kpi-total', money(Math.round(total)));
+  setText('bgt-kpi-actual-sub', `จาก memo ที่อนุมัติแล้ว (${numMonths} เดือน)`);
+
+  if (budgetTotal > 0) {
+    const pct      = Math.round(total / budgetTotal * 100);
+    const remColor = total > budgetTotal ? 'var(--red)' : pct >= 90 ? 'var(--amber)' : 'var(--green)';
+    setText('bgt-kpi-budget', money(Math.round(budgetTotal)));
+    setText('bgt-kpi-budget-sub', `ตั้งไว้ ${numMonths} เดือน`);
+    const remEl = document.getElementById('bgt-kpi-remaining');
+    if (remEl) { remEl.textContent = money(Math.round(budgetTotal - total)); remEl.style.color = remColor; }
+    setText('bgt-kpi-remaining-sub', `${pct}% utilized`);
+    const fColor = forecastTotal > annualBudget ? 'var(--red)' : forecastTotal / annualBudget >= 0.9 ? 'var(--amber)' : 'var(--green)';
+    const fEl = document.getElementById('bgt-kpi-forecast');
+    if (fEl) { fEl.textContent = money(Math.round(forecastTotal)); fEl.style.color = fColor; }
+    setText('bgt-kpi-forecast-sub', 'คาดการณ์ถึงสิ้นปี');
+  } else {
+    setText('bgt-kpi-budget', '—');
+    setText('bgt-kpi-budget-sub', 'ยังไม่ได้ตั้งงบใน Budget Settings');
+    setText('bgt-kpi-remaining', '—');
+    setText('bgt-kpi-remaining-sub', 'ต้องตั้งงบก่อน');
+    const fEl = document.getElementById('bgt-kpi-forecast');
+    if (fEl) { fEl.textContent = money(Math.round(forecastTotal)); fEl.style.color = 'var(--amber)'; }
+    setText('bgt-kpi-forecast-sub', 'คาดการณ์ถึงสิ้นปี (ไม่มีงบอ้างอิง)');
+  }
+}
+
+// ── Main chart ──
+function _ovRenderChart() {
+  const canvas = document.getElementById('ov-main-chart');
+  if (!canvas || typeof Chart === 'undefined') return;
+  if (canvas._chart) { canvas._chart.destroy(); canvas._chart = null; }
+
+  const months   = _ov.allMonths.slice(_ov.fromIdx, _ov.toIdx + 1);
+  const labels   = months.map(m => m.label);
+  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
+  const projKeys = [..._ov.activeProjKeys];
+  const typeKeys = [..._ov.activeTypeKeys];
+
+  const getMemoVal = (memo, monthKey) => {
+    const d = parseThaiDate(memo.date) || new Date(memo.updatedAt || memo.createdAt);
+    const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    return k === monthKey ? (Number(memo.total) || 0) : 0;
+  };
+
+  // ── Budget vs Actual ──
+  if (_ov.mode === 'bva') {
+    const currentYear  = String(new Date().getFullYear() + 543);
+    const slBudgets    = loadSLBudgets()?.[currentYear] || {};
+    const annualBudget = projKeys.reduce((s, p) => s + (slBudgets[p] || 0), 0);
+    const monthlyBgt   = annualBudget / 12;
+
+    const actualVals = months.map(m =>
+      approved.filter(memo => projKeys.includes(memo.project || '(ไม่ระบุ)'))
+        .reduce((s, memo) => s + getMemoVal(memo, m.key), 0)
+    );
+    const budgetVals = months.map(() => Math.round(monthlyBgt));
+
+    canvas._chart = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Budget',  data: budgetVals, backgroundColor: '#B5D4F4', borderRadius: 3, borderSkipped: false },
+          { label: 'Actual',  data: actualVals, backgroundColor: actualVals.map((v, i) => {
+              const pct = budgetVals[i] > 0 ? v / budgetVals[i] : 0;
+              return pct > 1 ? '#E24B4A' : pct >= 0.9 ? '#EF9F27' : '#185FA5';
+            }), borderRadius: 3, borderSkipped: false },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              label: ctx => {
+                const val    = ctx.raw || 0;
+                const budget = budgetVals[ctx.dataIndex] || 0;
+                if (ctx.datasetIndex === 1 && budget > 0) {
+                  const pct = Math.round(val / budget * 100);
+                  return ` Actual: ${money(Math.round(val))}  (${pct}% of budget)`;
+                }
+                return ` ${ctx.dataset.label}: ${money(Math.round(val))}`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+          y: { ticks: { callback: v => '฿' + Number(v).toLocaleString('th-TH'), font: { size: 10 } } },
+        },
+      },
+    });
+    return;
+  }
+
+  // ── Spend mode ──
+  const isStacked = _ov.stackMode === 'stacked';
+  let datasets;
+
+  if (_ov.groupBy === 'type') {
+    datasets = typeKeys.map(tk => ({
+      label: BGT_TYPE_LABELS[tk] || tk.toUpperCase(),
+      backgroundColor: OV_TYPE_COLORS[tk],
+      borderRadius: 3, borderSkipped: false,
+      data: months.map(m =>
+        approved.filter(memo => projKeys.includes(memo.project || '(ไม่ระบุ)') && memo.type === tk)
+          .reduce((s, memo) => s + getMemoVal(memo, m.key), 0)
+      ),
+    }));
+  } else {
+    datasets = projKeys.map((pk, pi) => ({
+      label: pk,
+      backgroundColor: OV_PROJ_COLORS[pi % OV_PROJ_COLORS.length],
+      borderRadius: 3, borderSkipped: false,
+      data: months.map(m =>
+        approved.filter(memo => (memo.project || '(ไม่ระบุ)') === pk && typeKeys.includes(memo.type))
+          .reduce((s, memo) => s + getMemoVal(memo, m.key), 0)
+      ),
+    }));
+  }
+
+  canvas._chart = new Chart(canvas, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const val = ctx.raw || 0;
+              if (val === 0) return null;
+              if (isStacked) {
+                const monthTotal = datasets.reduce((s, ds) => s + (ds.data[ctx.dataIndex] || 0), 0);
+                const pct = monthTotal > 0 ? Math.round(val / monthTotal * 100) : 0;
+                return ` ${ctx.dataset.label}: ${money(Math.round(val))}  (${pct}%)`;
+              }
+              return ` ${ctx.dataset.label}: ${money(Math.round(val))}`;
+            },
+            footer: ctx => {
+              if (!isStacked || !ctx.length) return '';
+              const mIdx = ctx[0].dataIndex;
+              const total = datasets.reduce((s, ds) => s + (ds.data[mIdx] || 0), 0);
+              return total > 0 ? `Total: ${money(Math.round(total))}` : '';
+            },
+          },
+        },
+      },
+      scales: {
+        x: { stacked: isStacked, grid: { display: false }, ticks: { font: { size: 10 } } },
+        y: { stacked: isStacked, ticks: { callback: v => '฿' + Number(v).toLocaleString('th-TH'), font: { size: 10 } } },
+      },
+    },
+  });
+}
 
 function renderBudgetOverview() {
   _ovBuildMonths();
