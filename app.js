@@ -40,7 +40,7 @@ function memoToDb(m) {
     approved_by: m.approvedBy, rejected_by: m.rejectedBy,
     approval_note: m.approvalNote, rejection_reason: m.rejectionReason,
     fx_rate: m.fxRate || null,
-    sections: m.sections || [], audit_log: m.auditLog || [],
+    sections: m.sections || [], sl_items: m.slItems || [], audit_log: m.auditLog || [],
     submitted_at: m.submittedAt || null,
     approved_at: m.approvedAt || null, rejected_at: m.rejectedAt || null,
     created_at: m.createdAt || new Date().toISOString(),
@@ -58,7 +58,7 @@ function dbToMemo(r) {
     approverName: r.approver_name, approverTitle: r.approver_title, approverDate: r.approver_date,
     approvedBy: r.approved_by, rejectedBy: r.rejected_by,
     approvalNote: r.approval_note, rejectionReason: r.rejection_reason,
-    fxRate: r.fx_rate, sections: r.sections || [], auditLog: r.audit_log || [],
+    fxRate: r.fx_rate, sections: r.sections || [], slItems: r.sl_items || [], auditLog: r.audit_log || [],
     submittedAt: r.submitted_at, approvedAt: r.approved_at, rejectedAt: r.rejected_at,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
