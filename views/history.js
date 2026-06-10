@@ -250,7 +250,7 @@ function getLinkedLicenses(memo) {
 function getLinkedDevices(memo) {
   if (memo.type !== 'hw') return [];
   const devices = typeof loadDevices === 'function' ? loadDevices() : [];
-  return devices.filter(d => d.memoNo === memo.memoNo || d.sourceMemoNo === memo.memoNo);
+  return devices.filter(d => d.memoNo === memo.memoNo);
 }
 
 // ── Detail modal (audit workspace) ──
