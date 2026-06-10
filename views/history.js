@@ -46,7 +46,10 @@ function histApproverName(memo) {
   return memo.approverName || '—';
 }
 function histActivityAt(memo) {
-  return memo.updatedAt || memo.approvedAt || memo.rejectedAt || memo.submittedAt || memo.createdAt;
+  // Use the decision date (approvedAt/rejectedAt) as primary — not updatedAt
+  // because updatedAt changes whenever any field is patched, which would shift
+  // the memo into the wrong date-range bucket in history filters.
+  return memo.approvedAt || memo.rejectedAt || memo.submittedAt || memo.updatedAt || memo.createdAt;
 }
 function approvalDurationMs(memo) {
   const start = new Date(memo.submittedAt || memo.createdAt || 0);
