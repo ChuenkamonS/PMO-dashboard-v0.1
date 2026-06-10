@@ -993,9 +993,9 @@ function _renderBudgetVsActual(allProjects, infraEntries, licByProj) {
     });
   });
 
-  // Budget per project = current monthly license rate (from licByProj) × rangeVal + infra × rangeVal
-  // licByProj comes from getLicenseCostByProject() which reads active license records directly —
-  // this is the monthly cost we *expect* to keep paying, making Budget vs Actual meaningful.
+  // Budget per project — from Budget Settings (annual ÷ 12 × range)
+  const currentYear = String(new Date().getFullYear() + 543); // Thai Buddhist year
+  const slBudgets   = loadSLBudgets()?.[currentYear] || {};
   const projData = allProjects.map(proj => {
     // Infra: sum monthly costs for entries active within the range
     const rangeFrom = infraMonthKey(new Date(now.getFullYear(), now.getMonth() - rangeVal, 1));
