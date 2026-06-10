@@ -1281,40 +1281,26 @@ svg.icon { display: inline-block; vertical-align: middle; }
               </div>
             </div>
 
-            <!-- Period + view controls -->
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px">
-              <div>
-                <div style="font-size:11px;font-weight:500;color:var(--text-2);margin-bottom:5px">Period</div>
-                <div style="display:flex;gap:5px;flex-wrap:wrap;">
+            <!-- Period + Group controls — single compact row -->
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="font-size:11px;font-weight:500;color:var(--text-3)">Period</span>
+                <div style="display:flex;gap:4px">
                   <button class="btn-sm ov-preset-btn" id="ov-pbtn-3" onclick="ovSetPreset(3)">3M</button>
                   <button class="btn-sm ov-preset-btn" id="ov-pbtn-6" onclick="ovSetPreset(6)">6M</button>
                   <button class="btn-sm ov-preset-btn active" id="ov-pbtn-12" onclick="ovSetPreset(12)">12M</button>
-                  <button class="btn-sm ov-preset-btn" id="ov-pbtn-0" onclick="ovSetPreset(0)">Custom</button>
                 </div>
-                <div id="ov-custom-range" style="display:none;margin-top:7px;gap:6px;align-items:center;">
-                  <select id="ov-from-sel" onchange="ovApplyCustomRange()" class="ri" style="font-size:11px;padding:3px 6px;width:auto"></select>
-                  <span style="font-size:11px;color:var(--text-3)">→</span>
-                  <select id="ov-to-sel" onchange="ovApplyCustomRange()" class="ri" style="font-size:11px;padding:3px 6px;width:auto"></select>
-                </div>
+                <!-- hidden selects kept for ovApplyCustomRange compatibility -->
+                <select id="ov-from-sel" style="display:none"></select>
+                <select id="ov-to-sel" style="display:none"></select>
               </div>
-
-              <div id="ov-spend-view-wrap">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                  <div style="font-size:11px;font-weight:500;color:var(--text-2)">แสดงแต่ละแท่งเป็น</div>
-                  <div style="display:flex;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden;">
-                    <button id="ov-sbtn-stacked" onclick="ovSetStack('stacked')" style="font-size:10px;padding:3px 8px;border:none;background:var(--blue);color:#fff;cursor:pointer;">Stacked</button>
-                    <button id="ov-sbtn-grouped" onclick="ovSetStack('grouped')" style="font-size:10px;padding:3px 8px;border:none;background:transparent;color:var(--text-2);cursor:pointer;">Side by side</button>
-                  </div>
-                </div>
-                <div style="display:flex;gap:8px;">
-                  <div id="ov-vcard-type" onclick="ovSetGroup('type')" style="flex:1;padding:10px 12px;border-radius:var(--r-sm);border:1.5px solid var(--blue);cursor:pointer;background:var(--card-bg)">
-                    <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:2px">แยกตาม Type</div>
-                    <div style="font-size:10px;color:var(--text-3);line-height:1.4">แต่ละสี = SL / HW / INT...<br>เห็นว่าจ่ายไปกับอะไร</div>
-                  </div>
-                  <div id="ov-vcard-project" onclick="ovSetGroup('project')" style="flex:1;padding:10px 12px;border-radius:var(--r-sm);border:0.5px solid var(--border);cursor:pointer;background:var(--card-bg)">
-                    <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:2px">แยกตาม Project</div>
-                    <div style="font-size:10px;color:var(--text-3);line-height:1.4">แต่ละสี = Geo9 / AOA-MP...<br>เห็นว่าโปรเจคไหนใช้เงิน</div>
-                  </div>
+              <div id="ov-spend-view-wrap" style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:11px;font-weight:500;color:var(--text-3)">Group by</span>
+                <div style="display:flex;border:0.5px solid var(--border);border-radius:var(--r-sm);overflow:hidden">
+                  <button class="ov-group-btn active" id="ov-gbtn-type" onclick="ovSetGroup('type')"
+                    style="font-size:11px;padding:4px 12px;border:none;background:var(--blue);color:#fff;cursor:pointer">Type</button>
+                  <button class="ov-group-btn" id="ov-gbtn-project" onclick="ovSetGroup('project')"
+                    style="font-size:11px;padding:4px 12px;border:none;background:transparent;color:var(--text-2);cursor:pointer">Project</button>
                 </div>
               </div>
             </div>
