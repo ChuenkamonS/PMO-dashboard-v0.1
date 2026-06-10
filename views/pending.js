@@ -219,56 +219,8 @@ function buildPendingRow(memo) {
   </tr>`;
 }
 
-function buildDraftRow(memo) {
-  const amt    = Number(memo.total)||0;
-  const accent = TYPE_COLOR_PENDING[memo.type] || '#888780';
-  const typeLbl = TYPE_LABEL_PENDING[memo.type] || (memo.type||'').toUpperCase();
-  const typeBg  = TYPE_BG_PENDING[memo.type]    || '#F1EFE8';
-  const typeTxt = TYPE_TEXT_PENDING[memo.type]  || '#444441';
-
-  return `<tr style="cursor:pointer" onclick="if(!event.target.closest('[data-action]'))openDetailModal('${esc(memo.memoNo)}')">
-    <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
-      <span style="font-size:12px;font-weight:600;color:var(--text-2)">${esc(memo.memoNo)}</span>
-      <div style="font-size:10px;color:var(--text-3)">${esc(formatDateTime(memo.createdAt))}</div>
-    </td>
-    <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
-      <span style="font-size:10px;font-weight:600;background:${typeBg};color:${typeTxt};padding:2px 7px;border-radius:4px">${typeLbl}</span>
-    </td>
-    <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text)">${esc(memo.project||'—')}</td>
-    <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text)">${esc(memo.requesterName||memo.reviewerName||'—')}</td>
-    <td style="padding:9px 12px;border-bottom:1px solid var(--border);text-align:right;font-size:12px;font-weight:600;color:var(--text)">${money(amt)}</td>
-    <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
-      <span style="font-size:10px;font-weight:500;background:#F1EFE8;color:#5F5E5A;padding:2px 7px;border-radius:4px">Draft</span>
-    </td>
-    <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-3)" colspan="2">—</td>
-    <td style="padding:9px 12px;border-bottom:1px solid var(--border)">—</td>
-    <td style="padding:9px 12px;border-bottom:1px solid var(--border);text-align:center;white-space:nowrap">
-      <button data-action="draft-view"   data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 6px;cursor:pointer">⊙</button>
-      <button data-action="draft-edit"   data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 6px;cursor:pointer;color:var(--blue);margin-left:2px">✎</button>
-      <button data-action="draft-delete" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 6px;cursor:pointer;color:var(--red);margin-left:2px">✕</button>
-    </td>
-  </tr>`;
-}
-
-
-// ── Edit Draft ──
-function editDraft(memoNo) {
-  const memo = loadMemos().find(m => m.memoNo === memoNo);
-  if(!memo || memo.status !== 'draft') return;
-  // Store draft to load in create form
-  try { localStorage.setItem('orbit-pmo-edit-draft', JSON.stringify(memo)); } catch(e) {}
-  swView('create', document.querySelector('.sb-sub-item[onclick*="create"]'), 'Create Memo');
-  // Trigger load after view switch
-  setTimeout(() => { if(typeof applyDraftEdit === 'function') applyDraftEdit(); }, 100);
-}
-
-// ── Delete Draft ──
-function deleteDraft(memoNo) {
-  if(!confirm(`ลบ Draft "${memoNo}" ออกจากระบบ?`)) return;
-  const memos = loadMemos().filter(m => m.memoNo !== memoNo);
-  storeMemos(memos);
-  renderPendingMemos();
-}
+// ── Draft row builder (kept for reference, not used in pending inbox) ──
+// Draft management is handled in All Memos (history.js)
 
 
 // ── Approve Modal ──
