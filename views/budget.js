@@ -197,9 +197,9 @@ function renderBudget() {
 // SUB-TAB 1: OVERVIEW
 // ══════════════════════════════════════════
 function renderBudgetOverview() {
-  const rangeVal  = val('#ov-range') || '12';
-  const projVal   = val('#ov-project') || 'all';
-  const typeVal   = val('#ov-type') || 'all';
+  const rangeVal = val('#ov-range') || '12';
+  const projVal  = val('#ov-project') || 'all';
+  const typeVal  = val('#ov-type') || 'all';
 
   // Populate project dropdown once
   const projSel = document.getElementById('ov-project');
@@ -210,164 +210,102 @@ function renderBudgetOverview() {
 
   let approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
 
-  // Apply range filter
+  // Build month range keys
+  const now = new Date();
+  let fromKey = null;
+  let numMonths = 12;
   if(rangeVal !== 'all') {
-    const months = parseInt(rangeVal);
-    const now = new Date();
-    const cutoffKey = `${new Date(now.getFullYear(), now.getMonth()-months+1, 1).getFullYear()}-${String(new Date(now.getFullYear(), now.getMonth()-months+1, 1).getMonth()+1).padStart(2,'0')}`;
+    numMonths = parseInt(rangeVal);
+    const cutoff = new Date(now.getFullYear(), now.getMonth() - numMonths + 1, 1);
+    fromKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth()+1).padStart(2,'0')}`;
     approved = approved.filter(m => {
       const d = parseThaiDate(m.date) || new Date(m.updatedAt||m.createdAt);
       const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      return k >= cutoffKey;
+      return k >= fromKey;
     });
   }
-  // Apply project filter
   if(projVal !== 'all') approved = approved.filter(m => (m.project||'ไม่ระบุ') === projVal);
-  // Apply type filter
   if(typeVal !== 'all') approved = approved.filter(m => m.type === typeVal);
 
-  // ── KPIs ──
-  const total  = approved.reduce((s,m) => s+(Number(m.total)||0), 0);
-  const setKpi = (id, v) => { const el = document.getElementById(id); if(el) el.textContent = money(v); };
-  setKpi('bgt-kpi-total', total);
-  // Hide SL+Infra and Others cards — not meaningful without proper timeframe context
-  ['bgt-kpi-sl-infra','bgt-kpi-others'].forEach(id => {
-    const card = document.getElementById(id)?.closest?.('.metric-card');
-    if(card) card.style.display = 'none';
-  });
+  const total = approved.reduce((s,m) => s+(Number(m.total)||0), 0);
 
-  // ── Trend chart ──
-  _renderOvTrendChart(approved);
-
-  // ── Stacked bar by project ──
-  _renderOvProjBarChart(approved);
-}
-
-// ── Overview: Trend (reuses existing logic, migrated to new IDs) ──
-let _ovProjSelected = new Set();
-let _ovTypeSelected = new Set(['sl','hw','int','ent','dep']);
-
-function _renderOvTrendChart(allMemos) {
-  const allProjects = [...new Set(allMemos.map(m => m.project||'ไม่ระบุ'))].sort();
-  if(!_ovProjSelected.size) allProjects.forEach(p => _ovProjSelected.add(p));
-
-  // Project checkboxes
-  const projBox = document.getElementById('ov-proj-checkboxes');
-  if(projBox && !projBox.children.length) {
-    projBox.innerHTML = allProjects.map(p => `
-      <label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer;white-space:nowrap">
-        <input type="checkbox" ${_ovProjSelected.has(p)?'checked':''} onchange="toggleOvProj('${esc(p)}',this.checked)">
-        ${esc(p)}
-      </label>`).join('');
+  // ── KPI: Budget from Budget Settings ──
+  const currentYear = String(now.getFullYear() + 543);
+  const slBudgets   = loadSLBudgets()?.[currentYear] || {};
+  let budgetTotal = 0;
+  if(projVal === 'all') {
+    budgetTotal = Object.values(slBudgets).reduce((s,v)=>s+Number(v||0),0);
+    if(rangeVal !== 'all') budgetTotal = (budgetTotal / 12) * numMonths;
+  } else {
+    const annual = slBudgets[projVal] || 0;
+    budgetTotal = rangeVal === 'all' ? annual : (annual / 12) * numMonths;
   }
 
-  // Type checkboxes
-  const typeBox = document.getElementById('ov-type-checkboxes');
-  if(typeBox && !typeBox.children.length) {
-    typeBox.innerHTML = ['sl','hw','int','ent','dep'].map(t => `
-      <label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer">
-        <input type="checkbox" ${_ovTypeSelected.has(t)?'checked':''} onchange="toggleOvType('${t}',this.checked)">
-        ${t.toUpperCase()}
-      </label>`).join('');
+  // ── KPI: Forecast (extrapolate current monthly rate to end of year) ──
+  const monthsElapsed = rangeVal === 'all' ? 12 : numMonths;
+  const monthlyRate   = monthsElapsed > 0 ? total / monthsElapsed : 0;
+  const monthsLeft    = 12 - now.getMonth(); // remaining months inc. current
+  const forecastTotal = total + monthlyRate * monthsLeft;
+
+  // ── Update KPI cards ──
+  const setText = (id, v) => { const el = document.getElementById(id); if(el) el.textContent = v; };
+
+  setText('bgt-kpi-total', money(Math.round(total)));
+  setText('bgt-kpi-actual-sub', `จาก memo ที่อนุมัติแล้ว (${rangeVal === 'all' ? 'ทั้งหมด' : rangeVal + ' เดือน'})`);
+
+  if(budgetTotal > 0) {
+    const pct = Math.round(total / budgetTotal * 100);
+    const remColor = total > budgetTotal ? 'var(--red)' : total/budgetTotal >= 0.9 ? 'var(--amber)' : 'var(--green)';
+    setText('bgt-kpi-budget', money(Math.round(budgetTotal)));
+    setText('bgt-kpi-budget-sub', `ตั้งไว้ ${rangeVal === 'all' ? 'ทั้งปี' : rangeVal + ' เดือน'}`);
+    const remEl = document.getElementById('bgt-kpi-remaining');
+    if(remEl) { remEl.textContent = money(Math.round(budgetTotal - total)); remEl.style.color = remColor; }
+    setText('bgt-kpi-remaining-sub', `${pct}% utilized`);
+    const fEl = document.getElementById('bgt-kpi-forecast');
+    if(fEl) {
+      fEl.textContent = money(Math.round(forecastTotal));
+      fEl.style.color = forecastTotal > budgetTotal * 12 / (rangeVal === 'all' ? 12 : numMonths)
+        ? 'var(--red)' : forecastTotal / (budgetTotal * 12 / (rangeVal === 'all' ? 12 : numMonths)) >= 0.9
+        ? 'var(--amber)' : 'var(--green)';
+    }
+    setText('bgt-kpi-forecast-sub', 'คาดการณ์จากอัตราปัจจุบัน');
+  } else {
+    setText('bgt-kpi-budget', '—');
+    setText('bgt-kpi-budget-sub', 'ยังไม่ได้ตั้งงบใน Budget Settings');
+    setText('bgt-kpi-remaining', '—');
+    setText('bgt-kpi-remaining-sub', 'ต้องตั้งงบก่อน');
+    setText('bgt-kpi-forecast', money(Math.round(forecastTotal)));
+    setText('bgt-kpi-forecast-sub', 'คาดการณ์ถึงสิ้นปี (ไม่มีงบอ้างอิง)');
   }
 
-  _drawTrendChart('ov-trend-chart', allMemos, _ovProjSelected, _ovTypeSelected);
+  // ── Charts ──
+  _renderOvTypeBarChart(approved, rangeVal, numMonths);
+  _renderOvProjPctChart(approved);
+  _renderOvTypePctChart(approved);
 }
 
-function toggleOvProj(proj, checked) {
-  if(checked) _ovProjSelected.add(proj); else _ovProjSelected.delete(proj);
-  _drawTrendChart('ov-trend-chart', loadMemos().filter(m=>memoStatusKey(m)==='completed'), _ovProjSelected, _ovTypeSelected);
-}
-function toggleOvType(type, checked) {
-  if(checked) _ovTypeSelected.add(type); else _ovTypeSelected.delete(type);
-  _drawTrendChart('ov-trend-chart', loadMemos().filter(m=>memoStatusKey(m)==='completed'), _ovProjSelected, _ovTypeSelected);
-}
-
-function _drawTrendChart(canvasId, allMemos, projSet, typeSet) {
-  const canvas = document.getElementById(canvasId);
+// ── Monthly stacked bar by TYPE ──
+function _renderOvTypeBarChart(allMemos, rangeVal, numMonths) {
+  const canvas = document.getElementById('ov-type-bar-chart');
   if(!canvas || typeof Chart === 'undefined') return;
   if(canvas._chart) canvas._chart.destroy();
 
   const now = new Date();
+  const n = rangeVal === 'all' ? 12 : numMonths;
   const labels = [], months = [];
-  for(let i = 11; i >= 0; i--) {
+  for(let i = n-1; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
     labels.push(d.toLocaleString('th-TH', { month:'short', year:'2-digit' }));
-    months.push(d);
+    months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
   }
 
-  const datasets = [...projSet].sort().map((proj, pi) => {
-    const data = months.map(m =>
-      allMemos.filter(memo => {
-        const d = new Date(memo.updatedAt||memo.createdAt);
-        return (memo.project||'ไม่ระบุ') === proj
-          && typeSet.has(memo.type)
-          && d.getFullYear() === m.getFullYear()
-          && d.getMonth() === m.getMonth();
-      }).reduce((s,memo) => s+(Number(memo.total)||0), 0)
-    );
-    const anomaly = data.map((v,i) => {
-      if(i < 3) return false;
-      const avg = (data[i-1]+data[i-2]+data[i-3])/3;
-      return avg > 0 && v > avg * 1.5;
-    });
-    const color = BGT_PROJ_COLORS[pi % BGT_PROJ_COLORS.length];
-    return {
-      label: proj, data, borderColor: color, backgroundColor: color+'22',
-      borderWidth: 2, tension: 0.3, fill: false,
-      pointBackgroundColor: data.map((_,i) => anomaly[i] ? '#A32D2D' : color),
-      pointRadius: data.map((_,i) => anomaly[i] ? 7 : 3),
-    };
-  });
-
-  canvas._chart = new Chart(canvas, {
-    type: 'line',
-    data: { labels, datasets },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { position:'bottom', labels:{ font:{size:11} } },
-        tooltip: { callbacks: {
-          label: ctx => ` ${ctx.dataset.label}: ${money(ctx.raw)}`,
-          afterLabel: ctx => {
-            const d = ctx.dataIndex, data = ctx.dataset.data;
-            if(d >= 3) {
-              const avg = (data[d-1]+data[d-2]+data[d-3])/3;
-              if(avg > 0 && ctx.raw > avg*1.5) return '⚠ Spike > 150% avg';
-            }
-            return '';
-          }
-        }}
-      },
-      scales: {
-        x: { grid:{display:false}, ticks:{font:{size:10}} },
-        y: { ticks:{ callback: v => '฿'+Number(v).toLocaleString('th-TH'), font:{size:10} } }
-      }
-    }
-  });
-}
-
-// ── Overview: Stacked horizontal bar by project ──
-function _renderOvProjBarChart(allMemos) {
-  const canvas = document.getElementById('ov-proj-bar-chart');
-  if(!canvas || typeof Chart === 'undefined') return;
-  if(canvas._chart) canvas._chart.destroy();
-
   const types = ['sl','hw','int','ent','dep'];
-  const byProj = {};
-  allMemos.forEach(m => {
-    const p = m.project||'ไม่ระบุ';
-    if(!byProj[p]) byProj[p] = { total:0, sl:0, hw:0, int:0, ent:0, dep:0 };
-    byProj[p][m.type] = (byProj[p][m.type]||0) + (Number(m.total)||0);
-    byProj[p].total  += Number(m.total)||0;
-  });
-
-  const sorted  = Object.entries(byProj).sort((a,b) => b[1].total - a[1].total);
-  const labels  = sorted.map(([p]) => p);
-
   const datasets = types.map(t => ({
     label: BGT_TYPE_LABELS[t] || t.toUpperCase(),
-    data: sorted.map(([,v]) => v[t]||0),
+    data: months.map(mk => allMemos.filter(m => {
+      const d = parseThaiDate(m.date) || new Date(m.updatedAt||m.createdAt);
+      return m.type === t && `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` === mk;
+    }).reduce((s,m)=>s+(Number(m.total)||0),0)),
     backgroundColor: BGT_TYPE_COLORS[t],
     borderRadius: 2,
     borderSkipped: false,
@@ -377,15 +315,104 @@ function _renderOvProjBarChart(allMemos) {
     type: 'bar',
     data: { labels, datasets },
     options: {
-      indexAxis: 'y',
       responsive: true, maintainAspectRatio: false,
       plugins: {
         legend: { position:'bottom', labels:{ font:{size:11} } },
         tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${money(ctx.raw)}` } }
       },
       scales: {
-        x: { stacked: true, ticks:{ callback: v => '฿'+Number(v).toLocaleString('th-TH'), font:{size:10} } },
-        y: { stacked: true, ticks:{ font:{size:11} } }
+        x: { stacked: true, grid:{ display:false }, ticks:{ font:{size:10} } },
+        y: { stacked: true, ticks:{ callback: v => '฿'+Number(v).toLocaleString('th-TH'), font:{size:10} } }
+      }
+    }
+  });
+}
+
+// ── Spend by Project — horizontal bar normalized to % ──
+function _renderOvProjPctChart(allMemos) {
+  const canvas = document.getElementById('ov-proj-pct-chart');
+  if(!canvas || typeof Chart === 'undefined') return;
+  if(canvas._chart) canvas._chart.destroy();
+
+  const byProj = {};
+  allMemos.forEach(m => {
+    const p = m.project||'ไม่ระบุ';
+    byProj[p] = (byProj[p]||0) + (Number(m.total)||0);
+  });
+  const grandTotal = Object.values(byProj).reduce((s,v)=>s+v,0) || 1;
+  const sorted = Object.entries(byProj).sort((a,b)=>b[1]-a[1]);
+
+  canvas._chart = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: sorted.map(([p])=>p),
+      datasets: [{
+        data: sorted.map(([,v]) => Math.round(v/grandTotal*100)),
+        backgroundColor: BGT_PROJ_COLORS.slice(0, sorted.length),
+        borderRadius: 3,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: {
+          label: ctx => {
+            const proj = sorted[ctx.dataIndex];
+            return ` ${ctx.raw}%  (${money(Math.round(proj[1]))})`;
+          }
+        }}
+      },
+      scales: {
+        x: { max:100, ticks:{ callback: v => v+'%', font:{size:10} }, grid:{display:false} },
+        y: { ticks:{ font:{size:11} } }
+      }
+    }
+  });
+}
+
+// ── Spend by Type — horizontal bar normalized to % ──
+function _renderOvTypePctChart(allMemos) {
+  const canvas = document.getElementById('ov-type-pct-chart');
+  if(!canvas || typeof Chart === 'undefined') return;
+  if(canvas._chart) canvas._chart.destroy();
+
+  const types = ['sl','hw','int','ent','dep'];
+  const byType = {};
+  types.forEach(t => byType[t] = 0);
+  allMemos.forEach(m => { if(types.includes(m.type)) byType[m.type] += Number(m.total)||0; });
+  const grandTotal = Object.values(byType).reduce((s,v)=>s+v,0) || 1;
+  const sorted = types.map(t => [BGT_TYPE_LABELS[t]||t.toUpperCase(), byType[t], BGT_TYPE_COLORS[t]])
+    .filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+
+  canvas._chart = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: sorted.map(([l])=>l),
+      datasets: [{
+        data: sorted.map(([,v]) => Math.round(v/grandTotal*100)),
+        backgroundColor: sorted.map(([,,c])=>c),
+        borderRadius: 3,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: {
+          label: ctx => {
+            const item = sorted[ctx.dataIndex];
+            return ` ${ctx.raw}%  (${money(Math.round(item[1]))})`;
+          }
+        }}
+      },
+      scales: {
+        x: { max:100, ticks:{ callback: v => v+'%', font:{size:10} }, grid:{display:false} },
+        y: { ticks:{ font:{size:11} } }
       }
     }
   });
@@ -1171,18 +1198,7 @@ function addBudgetRow() {
   renderBudgetSettings();
 }
 
-// ── Spending Breakdown Table ──
-let _spendViewMode = 'cumulative'; // 'cumulative' | 'monthly'
-
-function switchSpendView(mode) {
-  _spendViewMode = mode;
-  const btnC = document.getElementById('ov-view-cumulative');
-  const btnM = document.getElementById('ov-view-monthly');
-  if(btnC) { btnC.style.background = mode==='cumulative'?'var(--blue)':'transparent'; btnC.style.color = mode==='cumulative'?'#fff':'var(--text-2)'; }
-  if(btnM) { btnM.style.background = mode==='monthly'?'var(--blue)':'transparent'; btnM.style.color = mode==='monthly'?'#fff':'var(--text-2)'; }
-  _renderSpendBreakdown();
-}
-
+// ── Spending Breakdown (kept for SL+Infra tab use if needed) ──
 function _renderSpendBreakdown() {
   const thead = document.getElementById('ov-breakdown-thead');
   const tbody = document.getElementById('ov-breakdown-body');
