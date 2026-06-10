@@ -1,6 +1,6 @@
 // ── SL+Infra sidebar nav ──
 function switchSLNav(panel, btn) {
-  ['cost','forecast','infra','bva','budgetsettings'].forEach(p => {
+  ['forecast','infra','bva','budgetsettings'].forEach(p => {
     const panelEl = document.getElementById('sl-panel-' + p);
     const navEl   = document.getElementById('sl-nav-' + p);
     if(panelEl) panelEl.style.display = p === panel ? '' : 'none';
@@ -437,25 +437,7 @@ function _renderBudgetSLInfraWith(infraEntries) {
   // ── Forecast vs Actual Table ──
   _renderForecastTable(allProjects, infraEntries, licByProj);
 
-  // ── Cost by Project Table ──
-  const projBody = document.getElementById('sl-proj-body');
-  if(projBody) {
-    if(!projData.length) {
-      projBody.innerHTML = `<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล — กรอก Infra Cost หรือเพิ่ม License ก่อน</td></tr>`;
-    } else {
-      projBody.innerHTML = projData.map(d => `<tr>
-        <td style="padding-left:14px;font-weight:500">${esc(d.proj)}</td>
-        <td class="mono">${money(d.lic)}</td>
-        <td class="mono">${money(d.infra)}</td>
-        <td class="mono" style="font-weight:700">${money(d.total)}</td>
-      </tr>`).join('') + `<tr style="background:var(--bg);font-weight:600">
-        <td style="padding-left:14px">Total</td>
-        <td class="mono">${money(totalLicense)}</td>
-        <td class="mono">${money(totalInfra)}</td>
-        <td class="mono" style="color:var(--blue)">${money(totalLicense+totalInfra)}</td>
-      </tr>`;
-    }
-  }
+  // Cost by Project panel removed
 
   // ── Infra Matrix ──
   _renderInfraMatrix(infraEntries);
@@ -1187,4 +1169,125 @@ function addBudgetRow() {
   if(!(proj in budgets[year])) budgets[year][proj] = 0;
   storeSLBudgets(budgets);
   renderBudgetSettings();
+}
+
+// ── Spending Breakdown Table ──
+let _spendViewMode = 'cumulative'; // 'cumulative' | 'monthly'
+
+function switchSpendView(mode) {
+  _spendViewMode = mode;
+  const btnC = document.getElementById('ov-view-cumulative');
+  const btnM = document.getElementById('ov-view-monthly');
+  if(btnC) { btnC.style.background = mode==='cumulative'?'var(--blue)':'transparent'; btnC.style.color = mode==='cumulative'?'#fff':'var(--text-2)'; }
+  if(btnM) { btnM.style.background = mode==='monthly'?'var(--blue)':'transparent'; btnM.style.color = mode==='monthly'?'#fff':'var(--text-2)'; }
+  _renderSpendBreakdown();
+}
+
+function _renderSpendBreakdown() {
+  const thead = document.getElementById('ov-breakdown-thead');
+  const tbody = document.getElementById('ov-breakdown-body');
+  if(!thead || !tbody) return;
+
+  const rangeVal = val('#ov-range') || '12';
+  const projVal  = val('#ov-project') || 'all';
+  const typeVal  = val('#ov-type') || 'all';
+  const types    = typeVal === 'all' ? ['sl','hw','int','ent','dep'] : [typeVal];
+
+  let approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
+  if(rangeVal !== 'all') {
+    const now = new Date();
+    const cutoffKey = `${new Date(now.getFullYear(), now.getMonth()-(parseInt(rangeVal)-1), 1).getFullYear()}-${String(new Date(now.getFullYear(), now.getMonth()-(parseInt(rangeVal)-1), 1).getMonth()+1).padStart(2,'0')}`;
+    approved = approved.filter(m => {
+      const d = parseThaiDate(m.date) || new Date(m.updatedAt||m.createdAt);
+      const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      return k >= cutoffKey;
+    });
+  }
+  if(projVal !== 'all') approved = approved.filter(m => (m.project||'ไม่ระบุ') === projVal);
+  approved = approved.filter(m => types.includes(m.type));
+
+  const projects = [...new Set(approved.map(m => m.project||'ไม่ระบุ'))].sort();
+
+  const thS = 'padding:7px 10px;font-size:10px;font-weight:600;color:var(--text-3);border-bottom:1px solid var(--border);text-align:right;white-space:nowrap';
+
+  if(_spendViewMode === 'cumulative') {
+    // Build per project × type
+    thead.innerHTML = `<tr>
+      <th style="${thS};text-align:left">Project</th>
+      ${types.map(t => `<th style="${thS}">${(BGT_TYPE_LABELS[t]||t).split(' ')[0]}</th>`).join('')}
+      <th style="${thS};color:var(--blue)">Total</th>
+    </tr>`;
+
+    const tdS = 'padding:7px 10px;border-bottom:1px solid var(--border);font-size:12px;text-align:right';
+    let grandTotal = 0;
+    const typeTotals = {};
+    types.forEach(t => typeTotals[t] = 0);
+
+    tbody.innerHTML = projects.map(proj => {
+      const byType = {};
+      let rowTotal = 0;
+      types.forEach(t => {
+        const amt = approved.filter(m => (m.project||'ไม่ระบุ')===proj && m.type===t)
+          .reduce((s,m) => s+(Number(m.total)||0), 0);
+        byType[t] = amt;
+        rowTotal += amt;
+        typeTotals[t] += amt;
+      });
+      grandTotal += rowTotal;
+      return `<tr>
+        <td style="${tdS};text-align:left;font-weight:500">${esc(proj)}</td>
+        ${types.map(t => `<td style="${tdS};color:${byType[t]>0?'var(--text)':'var(--text-3)'}">${byType[t]>0?money(byType[t]):'—'}</td>`).join('')}
+        <td style="${tdS};font-weight:600;color:var(--blue)">${money(rowTotal)}</td>
+      </tr>`;
+    }).join('') + `<tr style="background:var(--bg)">
+      <td style="${tdS};text-align:left;font-weight:600;color:var(--text-2)">Total</td>
+      ${types.map(t => `<td style="${tdS};font-weight:600">${typeTotals[t]>0?money(typeTotals[t]):'—'}</td>`).join('')}
+      <td style="${tdS};font-weight:700;color:var(--blue)">${money(grandTotal)}</td>
+    </tr>`;
+
+  } else {
+    // Monthly view
+    const now = new Date();
+    const months = [];
+    const n = rangeVal === 'all' ? 12 : parseInt(rangeVal);
+    for(let i = n-1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+      months.push({ key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`, label: d.toLocaleString('th-TH',{month:'short',year:'2-digit'}) });
+    }
+
+    thead.innerHTML = `<tr>
+      <th style="${thS};text-align:left">Project</th>
+      ${months.map(m => `<th style="${thS}">${esc(m.label)}</th>`).join('')}
+      <th style="${thS};color:var(--blue)">Total</th>
+    </tr>`;
+
+    const tdS = 'padding:7px 10px;border-bottom:1px solid var(--border);font-size:12px;text-align:right';
+    let grandTotal = 0;
+    const monthTotals = {};
+    months.forEach(m => monthTotals[m.key] = 0);
+
+    tbody.innerHTML = projects.map(proj => {
+      let rowTotal = 0;
+      const cells = months.map(mo => {
+        const amt = approved.filter(m => {
+          if((m.project||'ไม่ระบุ') !== proj) return false;
+          const d = parseThaiDate(m.date) || new Date(m.updatedAt||m.createdAt);
+          return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` === mo.key;
+        }).reduce((s,m) => s+(Number(m.total)||0), 0);
+        rowTotal += amt;
+        monthTotals[mo.key] += amt;
+        return `<td style="${tdS};color:${amt>0?'var(--text)':'var(--text-3)'}">${amt>0?money(amt):'—'}</td>`;
+      }).join('');
+      grandTotal += rowTotal;
+      return `<tr>
+        <td style="${tdS};text-align:left;font-weight:500">${esc(proj)}</td>
+        ${cells}
+        <td style="${tdS};font-weight:600;color:var(--blue)">${money(rowTotal)}</td>
+      </tr>`;
+    }).join('') + `<tr style="background:var(--bg)">
+      <td style="${tdS};text-align:left;font-weight:600;color:var(--text-2)">Total</td>
+      ${months.map(m => `<td style="${tdS};font-weight:600">${monthTotals[m.key]>0?money(monthTotals[m.key]):'—'}</td>`).join('')}
+      <td style="${tdS};font-weight:700;color:var(--blue)">${money(grandTotal)}</td>
+    </tr>`;
+  }
 }
