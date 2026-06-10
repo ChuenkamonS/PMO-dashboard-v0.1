@@ -295,6 +295,7 @@ function swView(id, el, title) {
   if(id === 'pending') renderPendingMemos();
 
   if(id === 'resource') { if(typeof renderResource==='function') renderResource(); }
+  if(id === 'settings') { if(typeof renderSettings==='function') renderSettings(); }
 }
 function toggleMemoSub(el) {
   el.classList.add('active');
