@@ -140,19 +140,25 @@ function parseLicenseFromMemo(memo) {
   doc.querySelectorAll('tbody tr').forEach(row => {
     const cells = row.querySelectorAll('td');
     if (cells.length < 6) return;
-    const name     = cells[1]?.textContent?.trim();
-    const priceStr = cells[2]?.textContent?.replace(/[฿,]/g, '').trim();
-    const months   = parseInt(cells[3]?.textContent) || 12;
-    const seats    = parseInt(cells[4]?.textContent) || 1;
-    const price    = parseFloat(priceStr) || 0;
+    const name       = cells[1]?.textContent?.trim();
+    const priceStr   = cells[2]?.textContent?.replace(/[฿,]/g, '').trim();
+    const months     = parseInt(cells[3]?.textContent) || 12;
+    const seats      = parseInt(cells[4]?.textContent) || 1;
+    // cells[5] = startMonth (YYYY-MM or '-'), cells[6] = endMonth, cells[7] = subtotal
+    const startMonth = cells[5]?.textContent?.trim();
+    const price      = parseFloat(priceStr) || 0;
     if (!name || name === '-') return;
-    const start = new Date(purchaseDate);
+    // Use item startMonth if present, else fall back to approvedAt
+    const start = (startMonth && startMonth !== '-' && startMonth.match(/^\d{4}-\d{2}$/))
+      ? new Date(startMonth + '-01')
+      : new Date(purchaseDate);
     const expiry = new Date(start);
     expiry.setMonth(expiry.getMonth() + months);
     licenses.push({
       id: `memo-${memo.memoNo}-${name}`.replace(/\s/g, '_'),
       name, seats, pricePerMonth: price, months,
-      purchaseDate, expiry: expiry.toISOString(),
+      purchaseDate: start.toISOString(),
+      expiry: expiry.toISOString(),
       project: memo.project, memoNo: memo.memoNo,
       source: 'memo', owner: '', department: '',
       vendor: '', billingFreq: 'monthly', licenseType: 'subscription',
