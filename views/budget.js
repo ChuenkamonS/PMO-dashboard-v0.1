@@ -211,8 +211,13 @@ function renderBudgetOverview() {
   // Apply range filter
   if(rangeVal !== 'all') {
     const months = parseInt(rangeVal);
-    const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - months);
-    approved = approved.filter(m => new Date(m.updatedAt||m.createdAt) >= cutoff);
+    const now = new Date();
+    const cutoffKey = `${new Date(now.getFullYear(), now.getMonth()-months+1, 1).getFullYear()}-${String(new Date(now.getFullYear(), now.getMonth()-months+1, 1).getMonth()+1).padStart(2,'0')}`;
+    approved = approved.filter(m => {
+      const d = parseThaiDate(m.date) || new Date(m.updatedAt||m.createdAt);
+      const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      return k >= cutoffKey;
+    });
   }
   // Apply project filter
   if(projVal !== 'all') approved = approved.filter(m => (m.project||'ไม่ระบุ') === projVal);
@@ -474,6 +479,59 @@ function parseThaiDate(str) {
   }
   console.warn('[parseThaiDate] ไม่สามารถ parse วันที่ได้:', str, '— จะใช้ createdAt/approvedAt แทน');
   return null;
+}
+
+
+// ════════════════════════════════════════════════════
+// SHARED HELPER — distributes SL memo amounts by month
+// Returns: { 'YYYY-MM': { total: number, memos: [{memoNo, name, monthly}] } }
+// Use this in Overview KPI, Forecast, and BvA for consistency
+// ════════════════════════════════════════════════════
+function buildActualByMonth(proj) {
+  const approved = loadMemos().filter(m =>
+    memoStatusKey(m) === 'completed' &&
+    m.type === 'sl' &&
+    (proj === null || (m.project || '(ไม่ระบุ)') === proj)
+  );
+  const result = {}; // { 'YYYY-MM': { total, memos: [] } }
+
+  approved.forEach(memo => {
+    const memoProj = memo.project || '(ไม่ระบุ)';
+    const startDate = parseThaiDate(memo.date) || parseThaiDate(memo.createdAt) || new Date();
+    const startMo = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    const slItems = memo.slItems || [];
+    const parsedItems = !slItems.length
+      ? _parseSLSectionHTML((memo.sections||[]).find(s=>s.title?.includes('Software'))?.html||'')
+      : slItems;
+
+    const addEntry = (name, price, qty, moCount) => {
+      const monthly = (price||0) * (qty||1);
+      for(let i = 0; i < moCount; i++) {
+        const d = new Date(startMo.getFullYear(), startMo.getMonth()+i, 1);
+        const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        if(!result[key]) result[key] = { total: 0, memos: [] };
+        result[key].total += monthly;
+        const ex = result[key].memos.find(x => x.memoNo === memo.memoNo && x.name === name);
+        if(ex) ex.monthly += monthly;
+        else result[key].memos.push({ memoNo: memo.memoNo, proj: memoProj, name, price, qty: qty||1, monthly });
+      }
+    };
+
+    if(!parsedItems.length) {
+      addEntry('SL รวม', (Number(memo.total)||0)/12, 1, 12);
+    } else {
+      parsedItems.forEach(item => addEntry(item.name||'SL', item.price||0, item.qty||1, item.months||12));
+    }
+  });
+  return result;
+}
+
+// Get actual spend for a project in a month range (inclusive YYYY-MM strings)
+function getActualInRange(proj, fromKey, toKey) {
+  const byMonth = buildActualByMonth(proj);
+  return Object.entries(byMonth)
+    .filter(([k]) => k >= fromKey && k <= toKey)
+    .reduce((s, [, v]) => s + v.total, 0);
 }
 
 // ── Forecast vs Actual ──
