@@ -541,8 +541,12 @@ function _renderForecastTable(allProjects, infraEntries, licByProj) {
       const prog = item.name || 'SL';
       const mo   = item.months || 12;
       const monthly = (item.price||0) * (item.qty||1);
+      // Use item.startMonth if available, else fall back to memo.date
+      const itemStart = item.startMonth
+        ? new Date(item.startMonth + '-01')
+        : startMo;
       for(let i = 0; i < mo; i++) {
-        const d = new Date(startMo.getFullYear(), startMo.getMonth() + i, 1);
+        const d = new Date(itemStart.getFullYear(), itemStart.getMonth() + i, 1);
         const key = monthKey(d);
         if(!actualByProjProg[proj]) actualByProjProg[proj] = {};
         if(!actualByProjProg[proj][prog]) actualByProjProg[proj][prog] = {};
@@ -900,17 +904,20 @@ function _renderBudgetVsActual(allProjects, infraEntries, licByProj) {
       ? _parseSLSectionHTML((memo.sections||[]).find(s=>s.title?.includes('Software'))?.html||'')
       : slItems;
 
-    const processItem = (monthly, moCount) => {
+    const processItem = (monthly, moCount, itemStartMo) => {
       for(let i = 0; i < moCount; i++) {
-        const d = new Date(startMo.getFullYear(), startMo.getMonth()+i, 1);
+        const d = new Date(itemStartMo.getFullYear(), itemStartMo.getMonth()+i, 1);
         if(d >= cutoff && d <= now) {
           if(!actualByProj[proj]) actualByProj[proj] = 0;
           actualByProj[proj] += monthly;
         }
       }
     };
-    if(!parsedItems.length) { processItem((Number(memo.total)||0)/12, 12); }
-    else parsedItems.forEach(item => processItem((item.price||0)*(item.qty||1), item.months||12));
+    if(!parsedItems.length) { processItem((Number(memo.total)||0)/12, 12, startMo); }
+    else parsedItems.forEach(item => {
+      const itemStart = item.startMonth ? new Date(item.startMonth + '-01') : startMo;
+      processItem((item.price||0)*(item.qty||1), item.months||12, itemStart);
+    });
   });
 
   // Budget per project = current monthly license rate (from licByProj) × rangeVal + infra × rangeVal
