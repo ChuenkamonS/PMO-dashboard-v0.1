@@ -124,8 +124,9 @@ function storeManualLicenses(licenses) {
   try { localStorage.setItem(LICENSE_KEY, JSON.stringify(licenses)); } catch(e) {}
 }
 function nextLicenseId() {
-  const licenses = loadManualLicenses();
-  return String((licenses.reduce((m, l) => Math.max(m, Number(l.id) || 0), 0)) + 1);
+  // Use timestamp-based id to avoid collision with existing Supabase records
+  // when localStorage is empty (e.g. fresh browser session)
+  return `lic_${Date.now()}`;
 }
 
 // ── Parse from SL memo ──
@@ -226,8 +227,30 @@ function renderLicense() {
   loadManualLicensesAsync().then(() => _renderLicenseTable()).catch(() => _renderLicenseTable());
 }
 
+function _populateLicenseFilters(allLicenses) {
+  const projSel = document.getElementById('lic-filter-project');
+  if (projSel) {
+    const cur = projSel.value;
+    const projects = [...new Set(allLicenses.map(l => l.project).filter(Boolean))].sort();
+    projSel.innerHTML = `<option value="all">ทุกโครงการ</option>` +
+      projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+    if ([...projSel.options].some(o => o.value === cur)) projSel.value = cur;
+  }
+  // Also populate lic-project in modal
+  const modalProj = document.getElementById('lic-project');
+  if (modalProj) {
+    const s = typeof loadSettings === 'function' ? loadSettings() : null;
+    const projects = s?.projects || [...new Set(allLicenses.map(l => l.project).filter(Boolean))].sort();
+    const cur = modalProj.value;
+    modalProj.innerHTML = `<option value="">— ไม่ระบุ —</option>` +
+      projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+    if ([...modalProj.options].some(o => o.value === cur)) modalProj.value = cur;
+  }
+}
+
 function _renderLicenseTable() {
   const allLicenses = getAllLicenses();
+  _populateLicenseFilters(allLicenses);
   const search     = (document.getElementById('lic-search')?.value || '').toLowerCase();
   const filterSt   = document.getElementById('lic-filter-status')?.value || 'all';
   const filterProj = document.getElementById('lic-filter-project')?.value || 'all';
@@ -291,7 +314,7 @@ function _renderLicenseTable() {
 
   const tbody = document.getElementById('lic-table-body');
   if (!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:34px 16px;color:var(--text-3)">ยังไม่มีข้อมูล${search ? ' ที่ตรงกับการค้นหา' : ''} — Approve SL Memo หรือกด Add License</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:34px 16px;color:var(--text-3)">ยังไม่มีข้อมูล${search ? ' ที่ตรงกับการค้นหา' : ''} — Approve SL Memo หรือกด Add License</td></tr>`;
     return;
   }
 
@@ -299,11 +322,14 @@ function _renderLicenseTable() {
   tbody.innerHTML = filtered.map((lic, _idx) => {
     const s = getLicenseStatus(lic);
     const monthlyCostLic = (lic.pricePerMonth || 0) * (lic.seats || 1);
+    const sourceBadge = lic.source === 'memo'
+      ? `<span style="font-size:10px;background:#E6F1FB;color:#0C447C;padding:1px 6px;border-radius:3px;white-space:nowrap">Memo</span>`
+      : `<span style="font-size:10px;background:#F1EFE8;color:#5F5E5A;padding:1px 6px;border-radius:3px;white-space:nowrap">Manual</span>`;
     return `<tr>
       <td style="padding-left:16px;font-weight:600">
         ${esc(lic.name)}
         ${lic.vendor ? `<div style="font-size:10px;color:var(--text-3);font-weight:400">${esc(lic.vendor)}</div>` : ''}
-        ${lic.memoNo ? `<div style="font-size:10px;color:var(--blue);font-weight:400;cursor:pointer" onclick="openMemoPdf('${esc(lic.memoNo)}')">${esc(lic.memoNo)}</div>` : ''}
+        ${lic.memoNo ? `<div style="font-size:10px;color:var(--blue);font-weight:400;cursor:pointer" onclick="openHistoryDetail && openHistoryDetail('${esc(lic.memoNo)}') || openMemoPdf('${esc(lic.memoNo)}')">${esc(lic.memoNo)}</div>` : ''}
       </td>
       <td>${esc(lic.seats || 1)}</td>
       <td class="mono">${esc(money(monthlyCostLic))}</td>
@@ -313,8 +339,9 @@ function _renderLicenseTable() {
       <td style="font-size:11px">${esc(shortDate(lic.purchaseDate))}</td>
       <td style="font-size:11px">${esc(shortDate(lic.expiry))}</td>
       <td style="text-align:center"><span class="badge ${s.badge}">${esc(s.label)}</span></td>
+      <td style="text-align:center">${sourceBadge}</td>
       <td style="text-align:center;white-space:nowrap">
-        <button class="btn-sm" data-action="edit" data-idx="${_idx}" style="padding:3px 7px;font-size:11px" title="Edit">✎</button>
+        <button class="btn-sm" data-action="edit" data-idx="${_idx}" style="padding:3px 7px;font-size:11px" title="${lic.source === 'memo' ? 'แก้ไข owner/dept/note' : 'Edit'}">✎</button>
         ${lic.source !== 'memo' ? `<button class="btn-sm" data-action="delete" data-idx="${_idx}" style="padding:3px 7px;font-size:11px;color:var(--red)" title="Delete">✕</button>` : ''}
       </td>
     </tr>`;
@@ -335,10 +362,12 @@ function _renderLicenseTable() {
 function openLicenseModal(id) {
   const modal = document.getElementById('license-modal');
   modal.style.display = 'flex';
+  _populateLicenseFilters(getAllLicenses()); // ensure modal project dropdown is populated
   if (id) {
     const lic = getAllLicenses().find(l => String(l.id) === String(id));
     if (!lic) { closeLicenseModal(); return; }
-    document.getElementById('lic-modal-title').textContent = 'Edit License';
+    const fromMemo = lic.source === 'memo';
+    document.getElementById('lic-modal-title').textContent = fromMemo ? 'Edit License (from Memo)' : 'Edit License';
     document.getElementById('lic-edit-id').value     = lic.id;
     document.getElementById('lic-name').value        = lic.name || '';
     document.getElementById('lic-vendor').value      = lic.vendor || '';
@@ -354,10 +383,20 @@ function openLicenseModal(id) {
     document.getElementById('lic-status-field').value = lic.statusOverride || 'active';
     document.getElementById('lic-memo-ref').value    = lic.memoNo || '';
     document.getElementById('lic-note').value        = lic.note || '';
+    // Lock fields that come from the memo — only allow editing owner/dept/note/status
+    const lock = fromMemo;
+    ['lic-name','lic-vendor','lic-seats','lic-price','lic-purchase-date','lic-expiry-date','lic-billing','lic-memo-ref'].forEach(fid => {
+      const el = document.getElementById(fid);
+      if (el) { el.disabled = lock; el.style.opacity = lock ? '0.5' : '1'; }
+    });
+    if (lock) {
+      const hint = document.getElementById('lic-memo-hint');
+      if (hint) hint.style.display = '';
+    }
   } else {
     document.getElementById('lic-modal-title').textContent = 'Add License';
     document.getElementById('lic-edit-id').value = '';
-    ['lic-name', 'lic-vendor', 'lic-owner', 'lic-dept', 'lic-note', 'lic-memo-ref'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    ['lic-name', 'lic-vendor', 'lic-owner', 'lic-dept', 'lic-note', 'lic-memo-ref'].forEach(fid => { const el = document.getElementById(fid); if (el) el.value = ''; });
     document.getElementById('lic-seats').value = 1;
     document.getElementById('lic-price').value = 0;
     document.getElementById('lic-purchase-date').value = new Date().toISOString().slice(0, 10);
@@ -366,6 +405,13 @@ function openLicenseModal(id) {
     document.getElementById('lic-type-field').value = 'subscription';
     document.getElementById('lic-billing').value = 'monthly';
     document.getElementById('lic-status-field').value = 'active';
+    // Ensure all fields are unlocked for new manual license
+    ['lic-name','lic-vendor','lic-seats','lic-price','lic-purchase-date','lic-expiry-date','lic-billing','lic-memo-ref'].forEach(fid => {
+      const el = document.getElementById(fid);
+      if (el) { el.disabled = false; el.style.opacity = '1'; }
+    });
+    const hint = document.getElementById('lic-memo-hint');
+    if (hint) hint.style.display = 'none';
   }
 }
 function closeLicenseModal() { document.getElementById('license-modal').style.display = 'none'; }
