@@ -336,6 +336,7 @@ function openHistoryDetail(memoNo) {
       <div><span class="lbl">อัปเดตล่าสุด</span>${esc(formatDateTime(histActivityAt(memo)))}</div>
       <div><span class="lbl">ระยะเวลาอนุมัติ</span>${esc(formatApprovalDuration(memo))}</div>
       <div><span class="lbl">เรียน</span>${esc(memo.to || '—')}</div>
+      <div><span class="lbl">Budget Source</span>${buildBudgetSourceBadge(memo)}</div>
     </div>
     ${memo.reason ? `<div class="hist-detail-block"><div class="hist-detail-block-title">เหตุผล</div><p style="font-size:13px;margin:0">${esc(memo.reason)}</p></div>` : ''}
     ${sections ? `<div class="hist-detail-block"><div class="hist-detail-block-title">รายละเอียด</div>${sections}</div>` : ''}
@@ -361,11 +362,13 @@ function openHistoryDetail(memoNo) {
   const isPending = !memo.status || memo.status === 'pending';
   const isOwn     = (memo.requesterName || '') === (typeof currentUser === 'function' ? currentUser() : '');
   const canAct    = isPending && !isOwn;
+  const isCompleted = memo.status === 'completed';
   acts.innerHTML = `
     ${canAct ? `
       <button class="btn-primary" type="button" onclick="closeDetailModal();openApproveModal('${esc(memo.memoNo)}')">✓ Approve</button>
       <button class="btn-reject"  type="button" onclick="closeDetailModal();openRejectModal('${esc(memo.memoNo)}')">✕ Reject</button>
     ` : ''}
+    ${isCompleted && memo.type === 'sl' ? `<button class="btn-sm" type="button" onclick="openBudgetTagModal('${esc(memo.memoNo)}')" style="background:${memo.budgetSource ? 'var(--green-50)' : 'var(--amber-50)'};color:${memo.budgetSource ? 'var(--green-800)' : 'var(--amber-800)'}">⚑ ${memo.budgetSource ? memo.budgetSource : 'Tag Budget'}</button>` : ''}
     ${memo.status !== 'draft' ? `<button class="btn-sm" type="button" onclick="openMemoPdf('${esc(memo.memoNo)}')" title="Download PDF">Download PDF</button>` : ''}
     <button class="btn-ghost" type="button" onclick="closeDetailModal()">ปิด</button>
   `;
@@ -544,3 +547,56 @@ document.addEventListener('click', e => {
     hideRejectionPopover();
   }
 });
+
+
+// ── Budget Source Tag ──
+function buildBudgetSourceBadge(memo) {
+  if(!memo.budgetSource) return '<span style="font-size:11px;background:var(--amber-50);color:var(--amber-800);padding:2px 8px;border-radius:4px;cursor:pointer" onclick="openBudgetTagModal(\''+esc(memo.memoNo)+'\')">⚑ ยังไม่ได้ Tag</span>';
+  const isCompany = memo.budgetSource === 'Company-Wide';
+  return `<span style="font-size:11px;background:${isCompany?'var(--blue-50)':'var(--green-50)'};color:${isCompany?'var(--blue-800)':'var(--green-800)'};padding:2px 8px;border-radius:4px;cursor:pointer" onclick="openBudgetTagModal('${esc(memo.memoNo)}')">${esc(memo.budgetSource)}</span>`;
+}
+
+function openBudgetTagModal(memoNo) {
+  const memo = getHistoryMemos().find(m => m.memoNo === memoNo);
+  if(!memo) return;
+  const s = typeof loadSettings === 'function' ? loadSettings() : null;
+  const projects = s?.projects || ['AOA-MP','TTB','Geo9','Release 2.1','Axistant'];
+
+  const options = ['Company-Wide', ...projects.filter(p => p !== memo.project), memo.project]
+    .filter((v,i,a) => a.indexOf(v) === i);
+
+  const modal = document.getElementById('budget-tag-modal');
+  if(!modal) return;
+
+  document.getElementById('btm-memo-no').textContent = memo.memoNo;
+  document.getElementById('btm-memo-detail').textContent = `${memo.project} · ${typeof money === 'function' ? money(memo.total||0) : memo.total}`;
+
+  const optContainer = document.getElementById('btm-options');
+  optContainer.innerHTML = options.map(opt => {
+    const isCompany = opt === 'Company-Wide';
+    const isSelected = memo.budgetSource === opt;
+    return `<label style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:0.5px solid var(--border);border-radius:var(--r);margin-bottom:8px;cursor:pointer;${isSelected?'background:var(--blue-50);border-color:var(--blue)':''}">
+      <input type="radio" name="bsrc-opt" value="${esc(opt)}" ${isSelected?'checked':''} style="margin-top:2px">
+      <div>
+        <div style="font-size:12px;font-weight:500">${esc(opt)}</div>
+        ${isCompany ? '<div style="font-size:11px;color:var(--text-3)">งบกลางของบริษัท — ใช้ร่วมกันทุกโปรเจค</div>' : `<div style="font-size:11px;color:var(--text-3)">ตัดงบจาก ${esc(opt)} Budget</div>`}
+      </div>
+    </label>`;
+  }).join('');
+
+  document.getElementById('btm-save-btn').onclick = () => saveBudgetTag(memoNo);
+  modal.style.display = 'flex';
+}
+
+function closeBudgetTagModal() {
+  const modal = document.getElementById('budget-tag-modal');
+  if(modal) modal.style.display = 'none';
+}
+
+function saveBudgetTag(memoNo) {
+  const selected = document.querySelector('input[name="bsrc-opt"]:checked')?.value;
+  if(!selected) { alert('กรุณาเลือก Budget Source'); return; }
+  updateMemoStatus(memoNo, 'completed', { budgetSource: selected });
+  closeBudgetTagModal();
+  renderHistoryMemos();
+}
