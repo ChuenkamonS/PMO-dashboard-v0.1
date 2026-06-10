@@ -1242,7 +1242,103 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <!-- ── SUB-TAB: OVERVIEW ── -->
         <div id="bgt-tab-overview" class="cost-tab-panel">
 
-          <!-- 4-card KPI row -->
+          <!-- Period selector — controls everything -->
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+            <span style="font-size:11px;font-weight:500;color:var(--text-3)">Period</span>
+            <div style="display:flex;gap:4px">
+              <button class="btn-sm ov-preset-btn" id="ov-pbtn-3"  onclick="ovSetPreset(3)">3M</button>
+              <button class="btn-sm ov-preset-btn" id="ov-pbtn-6"  onclick="ovSetPreset(6)">6M</button>
+              <button class="btn-sm ov-preset-btn active" id="ov-pbtn-12" onclick="ovSetPreset(12)">12M</button>
+              <button class="btn-sm ov-preset-btn" id="ov-pbtn-0"  onclick="ovSetPreset(0)">Custom</button>
+            </div>
+            <div id="ov-custom-range" style="display:none;align-items:center;gap:6px">
+              <select id="ov-from-sel" onchange="ovApplyCustomRange()" class="ri" style="font-size:11px;padding:3px 6px;width:auto"></select>
+              <span style="font-size:11px;color:var(--text-3)">→</span>
+              <select id="ov-to-sel" onchange="ovApplyCustomRange()" class="ri" style="font-size:11px;padding:3px 6px;width:auto"></select>
+              <button class="btn-sm" onclick="ovApplyCustomRange()" style="font-size:11px">Apply</button>
+            </div>
+            <span style="font-size:11px;color:var(--text-3)" id="ov-period-label"></span>
+          </div>
+
+          <!-- KPI row -->
+          <div class="metric-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">
+            <div class="metric-card">
+              <div class="metric-label">งบประมาณ (ช่วงนี้)</div>
+              <div class="metric-val" id="bgt-kpi-budget" style="color:var(--text)">฿0</div>
+              <div class="metric-sub" id="bgt-kpi-budget-sub">ตั้งไว้สำหรับช่วงนี้</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">ใช้จ่ายจริง</div>
+              <div class="metric-val" id="bgt-kpi-total" style="color:var(--blue)">฿0</div>
+              <div class="metric-sub" id="bgt-kpi-actual-sub">กระจายตาม duration</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">คงเหลือ</div>
+              <div class="metric-val" id="bgt-kpi-remaining" style="color:var(--green)">—</div>
+              <div class="metric-sub" id="bgt-kpi-remaining-sub">จากงบที่ตั้งไว้</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Forecast (ถึงสิ้นปี)</div>
+              <div class="metric-val" id="bgt-kpi-forecast" style="color:var(--amber)">—</div>
+              <div class="metric-sub" id="bgt-kpi-forecast-sub">avg 3 เดือนล่าสุด</div>
+            </div>
+          </div>
+
+          <!-- ── Section A: Spend breakdown ── -->
+          <div class="card" style="padding:14px 16px;margin-bottom:12px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div style="font-size:12px;font-weight:600;color:var(--text)">A · Spend breakdown <span id="ov-period-label-a" style="font-size:11px;font-weight:400;color:var(--text-3)"></span></div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <span style="font-size:11px;color:var(--text-3)">Group by</span>
+                <div style="display:flex;border:0.5px solid var(--border);border-radius:var(--r-sm);overflow:hidden">
+                  <button class="ov-group-btn" id="ov-gbtn-type" onclick="ovSetGroup('type')"
+                    style="font-size:11px;padding:3px 10px;border:none;background:var(--blue);color:#fff;cursor:pointer">Type</button>
+                  <button class="ov-group-btn" id="ov-gbtn-project" onclick="ovSetGroup('project')"
+                    style="font-size:11px;padding:3px 10px;border:none;background:transparent;color:var(--text-2);cursor:pointer">Project</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Project filter chips -->
+            <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px" id="ov-proj-chips"></div>
+
+            <!-- Type filter chips (hidden when group=project) -->
+            <div id="ov-type-col" style="margin-bottom:12px">
+              <div style="font-size:10px;font-weight:500;color:var(--text-3);margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em">Filter by type <span id="ov-type-count" style="font-weight:400"></span></div>
+              <div style="display:flex;gap:5px;flex-wrap:wrap" id="ov-type-chips"></div>
+            </div>
+
+            <!-- Bar + Donut side by side -->
+            <div style="display:grid;grid-template-columns:1fr 200px;gap:14px;align-items:start">
+              <div>
+                <div style="font-size:11px;color:var(--text-3);margin-bottom:6px">Monthly spend (฿)</div>
+                <div style="height:220px"><canvas id="ov-main-chart"></canvas></div>
+              </div>
+              <div>
+                <div style="font-size:11px;color:var(--text-3);margin-bottom:6px" id="ov-donut-title">สัดส่วนรวม</div>
+                <div style="width:160px;height:160px;margin:0 auto"><canvas id="ov-donut-chart"></canvas></div>
+                <div id="ov-donut-legend" style="margin-top:8px;display:flex;flex-direction:column;gap:4px"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Section B: Budget vs Actual ── -->
+          <div class="card" style="padding:14px 16px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <div style="font-size:12px;font-weight:600;color:var(--text)">B · Budget vs actual — by project <span id="ov-bva-period-label" style="font-size:11px;font-weight:400;color:var(--text-3)"></span></div>
+              <div style="display:flex;gap:5px;flex-wrap:wrap" id="ov-bva-proj-chips"></div>
+            </div>
+            <div id="ov-bva-rows"></div>
+            <div style="margin-top:10px;font-size:11px;color:var(--text-3)">
+              <span style="display:inline-block;width:8px;height:8px;background:var(--red);border-radius:2px;margin-right:4px"></span>&gt;100% over budget &nbsp;
+              <span style="display:inline-block;width:8px;height:8px;background:var(--amber);border-radius:2px;margin-right:4px"></span>90–100% near limit &nbsp;
+              <span style="display:inline-block;width:8px;height:8px;background:var(--blue);border-radius:2px;margin-right:4px"></span>&lt;90% on track
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ── SUB-TAB: SL + INFRA ── -->
           <div class="metric-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px">
             <div class="metric-card">
               <div class="metric-label">งบประมาณ (ช่วงนี้)</div>
@@ -1265,69 +1361,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <div class="metric-sub" id="bgt-kpi-forecast-sub">คาดการณ์จากอัตราปัจจุบัน</div>
             </div>
           </div>
-
-          <!-- Interactive chart card -->
-          <div class="card" style="padding:16px">
-
-            <!-- Title + mode -->
-            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-              <div>
-                <div style="font-size:12px;font-weight:600;color:var(--text)">Monthly Spend</div>
-                <div style="font-size:11px;color:var(--text-3);margin-top:2px" id="ov-period-label"></div>
-              </div>
-              <div style="display:flex;gap:5px;">
-                <button class="btn-sm ov-mode-btn active" id="ov-mbtn-spend" onclick="ovSetMode('spend')">Spend</button>
-                <button class="btn-sm ov-mode-btn" id="ov-mbtn-bva" onclick="ovSetMode('bva')">Budget vs Actual</button>
-              </div>
-            </div>
-
-            <!-- Period + Group controls — single compact row -->
-            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px">
-              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                <span style="font-size:11px;font-weight:500;color:var(--text-3)">Period</span>
-                <div style="display:flex;gap:4px">
-                  <button class="btn-sm ov-preset-btn" id="ov-pbtn-3" onclick="ovSetPreset(3)">3M</button>
-                  <button class="btn-sm ov-preset-btn" id="ov-pbtn-6" onclick="ovSetPreset(6)">6M</button>
-                  <button class="btn-sm ov-preset-btn active" id="ov-pbtn-12" onclick="ovSetPreset(12)">12M</button>
-                </div>
-                <!-- hidden selects kept for ovApplyCustomRange compatibility -->
-                <select id="ov-from-sel" style="display:none"></select>
-                <select id="ov-to-sel" style="display:none"></select>
-              </div>
-              <div id="ov-spend-view-wrap" style="display:flex;align-items:center;gap:8px">
-                <span style="font-size:11px;font-weight:500;color:var(--text-3)">Group by</span>
-                <div style="display:flex;border:0.5px solid var(--border);border-radius:var(--r-sm);overflow:hidden">
-                  <button class="ov-group-btn active" id="ov-gbtn-type" onclick="ovSetGroup('type')"
-                    style="font-size:11px;padding:4px 12px;border:none;background:var(--blue);color:#fff;cursor:pointer">Type</button>
-                  <button class="ov-group-btn" id="ov-gbtn-project" onclick="ovSetGroup('project')"
-                    style="font-size:11px;padding:4px 12px;border:none;background:transparent;color:var(--text-2);cursor:pointer">Project</button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Project chips (always shown) + Type chips (spend only) -->
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
-              <div>
-                <div style="font-size:11px;font-weight:500;color:var(--text-2);margin-bottom:5px">Projects <span id="ov-proj-count" style="color:var(--text-3);font-weight:400"></span></div>
-                <div style="display:flex;gap:5px;flex-wrap:wrap" id="ov-proj-chips"></div>
-              </div>
-              <div id="ov-type-col">
-                <div style="font-size:11px;font-weight:500;color:var(--text-2);margin-bottom:5px">Types <span id="ov-type-count" style="color:var(--text-3);font-weight:400"></span></div>
-                <div style="display:flex;gap:5px;flex-wrap:wrap" id="ov-type-chips"></div>
-              </div>
-            </div>
-
-            <div style="display:grid;grid-template-columns:1fr 200px;gap:12px;align-items:start">
-              <div style="height:260px"><canvas id="ov-main-chart"></canvas></div>
-              <div style="height:260px;display:flex;flex-direction:column;align-items:center;justify-content:center">
-                <div style="font-size:11px;font-weight:600;color:var(--text-3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em">สัดส่วนรวม</div>
-                <div style="position:relative;width:160px;height:160px"><canvas id="ov-donut-chart"></canvas></div>
-                <div id="ov-donut-legend" style="margin-top:8px;display:flex;flex-direction:column;gap:3px;width:100%"></div>
-              </div>
-            </div>
-          </div>
-
-        </div>
 
         <!-- ── SUB-TAB: SL + INFRA ── -->
         <div id="bgt-tab-sl-infra" class="cost-tab-panel" style="display:none">
