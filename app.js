@@ -272,7 +272,7 @@ function updateMemoStatus(memoNo, status, extra={}) {
   if(status==='rejected')  memos[idx].rejectedAt = memos[idx].updatedAt;
   storeMemos(memos);
   _memCache = null;
-  // Auto-create purchase orders for HW memos
+  // Auto-create purchase orders for HW memos (sync only — avoid double-firing)
   if(status === 'completed' && memos[idx].type === 'hw') {
     if(typeof createPurchaseOrdersFromMemo === 'function') {
       createPurchaseOrdersFromMemo(memos[idx]);
