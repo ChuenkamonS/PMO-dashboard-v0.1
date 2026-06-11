@@ -167,7 +167,7 @@ function getLicenseCostByProject() {
 let _bgtCurrentTab = 'overview';
 function switchBudgetTab(tab, btn) {
   _bgtCurrentTab = tab;
-  ['overview','actual-spend','forecast','bva','bgt-settings'].forEach(t => {
+  ['overview','actual-spend','forecast','bva','bgt-settings','others'].forEach(t => {
     const p = document.getElementById('bgt-tab-' + t);
     if (p) p.style.display = 'none';
   });
@@ -184,6 +184,7 @@ function switchBudgetTab(tab, btn) {
   if (tab === 'forecast')      renderBudgetSLInfra();
   if (tab === 'bva')           renderBudgetVsActual();
   if (tab === 'bgt-settings')  { switchBgtSettings('budget'); renderBudgetSettings(); }
+  if (tab === 'others')        renderBudgetOthers();
 }
 
 // ── Main entry ──
@@ -193,6 +194,7 @@ function renderBudget() {
   if (_bgtCurrentTab === 'forecast')     renderBudgetSLInfra();
   if (_bgtCurrentTab === 'bva')          renderBudgetVsActual();
   if (_bgtCurrentTab === 'bgt-settings') renderBudgetSettings();
+  if (_bgtCurrentTab === 'others')       renderBudgetOthers();
 }
 
 // ══════════════════════════════════════════
