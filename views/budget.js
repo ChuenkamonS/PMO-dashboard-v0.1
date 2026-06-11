@@ -1703,20 +1703,23 @@ function renderActualSpend() {
                 <th style="${tdS};text-align:right">% ของ project</th>
               </tr></thead>
               <tbody>
-                ${Object.entries(types).sort((a,b) => b[1].total - a[1].total).map(([type, data]) =>
-                  `<tr style="cursor:pointer" onclick="showActualMemos('${esc(proj)}','${esc(type)}',${JSON.stringify(data.memos.map(m=>m.memoNo))})">
+                ${Object.entries(types).sort((a,b) => b[1].total - a[1].total).map(([type, data]) => {
+                  const memoNosAttr = data.memos.map(m=>m.memoNo).join(',');
+                  return `<tr style="cursor:pointer" onclick="showActualMemos('${esc(proj)}','${esc(type)}','${esc(memoNosAttr)}')">
                     <td style="${tdS}"><span style="font-size:11px;padding:2px 8px;border-radius:4px;background:var(--bg);color:var(--text-2)">${BGT_TYPE_LABELS[type] || type}</span></td>
                     <td style="${tdS};text-align:right;font-weight:500">${money(Math.round(data.total))}</td>
                     <td style="${tdS};text-align:right;color:var(--blue)">${data.memos.length} <span style="font-size:10px;color:var(--text-3)">ดูรายการ →</span></td>
                     <td style="${tdS};text-align:right;color:var(--text-2)">${projTotal > 0 ? Math.round(data.total/projTotal*100) : 0}%</td>
-                  </tr>`).join('')}
+                  </tr>`;
+                }).join('')}
               </tbody>
             </table>
           </div>`;
       }).join('')}`;
 }
 
-function showActualMemos(proj, type, memoNos) {
+function showActualMemos(proj, type, memoNosStr) {
+  const memoNos  = memoNosStr ? memoNosStr.split(',').filter(Boolean) : [];
   const allMemos = loadMemos();
   const memos    = memoNos.map(no => allMemos.find(m => m.memoNo === no)).filter(Boolean);
   const total    = memos.reduce((s, m) => s + (Number(m.total) || 0), 0);
@@ -1745,7 +1748,7 @@ function showActualMemos(proj, type, memoNos) {
           ${memos.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(m => {
             const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
             const dateStr = d.toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'2-digit'});
-            return `<tr style="cursor:pointer" onclick="document.getElementById('actual-memo-panel').remove();viewMemoDetail('${esc(m.memoNo)}')">
+            return `<tr style="cursor:pointer" onclick="document.getElementById('actual-memo-panel').remove();openHistoryDetail('${esc(m.memoNo)}')">
               <td style="${tdS};color:var(--blue);font-weight:500">${esc(m.memoNo)}</td>
               <td style="${tdS};color:var(--text-3)">${dateStr}</td>
               <td style="${tdS}">${esc(m.subject || m.memoNo)}</td>
@@ -2028,7 +2031,7 @@ function showPoolMemos(poolId) {
           ${memos.sort((a,b) => (b.date||'').localeCompare(a.date||'')).map(m => {
             const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
             const dateStr = d.toLocaleDateString('th-TH', {day:'numeric',month:'short',year:'2-digit'});
-            return `<tr style="cursor:pointer" onclick="document.getElementById('bva-memo-panel').remove();viewMemoDetail('${esc(m.memoNo)}')">
+            return `<tr style="cursor:pointer" onclick="document.getElementById('bva-memo-panel').remove();openHistoryDetail('${esc(m.memoNo)}')">
               <td style="${tdS};color:var(--blue);font-weight:500">${esc(m.memoNo)}</td>
               <td style="${tdS};color:var(--text-3)">${dateStr}</td>
               <td style="${tdS}"><span style="font-size:10px;padding:2px 7px;border-radius:4px;background:var(--bg)">${BGT_TYPE_LABELS[m.type] || m.type}</span></td>
