@@ -120,13 +120,6 @@ function loadDevices() {
     if (Array.isArray(d)) {
       // Migrate: memoRef → memoNo
       d.forEach(dev => { if (dev.memoRef && !dev.memoNo) { dev.memoNo = dev.memoRef; delete dev.memoRef; } });
-      // Remove auto-imported devices (source=memo, no serial, no _supaId)
-      // These should only exist after markArrived — filter them out so registry is clean
-      const cleaned = d.filter(dev => !(dev.source === 'memo' && !dev.serial && !dev._supaId && dev.note?.includes('Auto-imported')));
-      if (cleaned.length !== d.length) {
-        try { localStorage.setItem(DEVICE_KEY, JSON.stringify(cleaned)); } catch(e) {}
-        return cleaned;
-      }
     }
     return Array.isArray(d) ? d : [];
   } catch(e) { return []; }
@@ -236,7 +229,7 @@ function createPurchaseOrdersFromMemo(memo) {
       itemName:    name,
       orderedQty:  qty,
       arrivedQty:  0,
-      status:      'ordered',
+      status:      'pending_order',
       note:        '',
       createdAt:   new Date().toISOString(),
       updatedAt:   new Date().toISOString(),
@@ -263,10 +256,14 @@ async function markArrived(poId, qty, serialNumbers = []) {
   const pos = loadPurchaseOrders();
   const po = pos.find(p => p.id === poId);
   if (!po) return;
+  if (!['awaiting', 'partial_arrived'].includes(po.status)) {
+    alert('กรุณาเปลี่ยนสถานะเป็น Awaiting ก่อน mark arrived');
+    return;
+  }
   const now = new Date().toISOString();
   const newArrived = Math.min(po.arrivedQty + qty, po.orderedQty);
   po.arrivedQty = newArrived;
-  po.status = newArrived >= po.orderedQty ? 'fulfilled' : 'partial';
+  po.status = newArrived >= po.orderedQty ? 'fulfilled' : 'partial_arrived';
   po.updatedAt = now;
   storePurchaseOrders(pos);
   savePurchaseOrderAsync(po).catch(e => console.warn('PO update failed', e));
@@ -276,26 +273,27 @@ async function markArrived(poId, qty, serialNumbers = []) {
   for (let i = 0; i < qty; i++) {
     const serial = serialNumbers[i] || '';
     const device = {
-      id:           `dev_${batchTs}_${i}`,
-      name:         po.itemName,
-      brand:        '',
-      platform:     'other',
-      type:         'mobile',
+      id:             `dev_${batchTs}_${i}`,
+      name:           po.itemName,
+      brand:          '',
+      platform:       'other',
+      type:           'mobile',
       serial,
-      assetTag:     '',
-      owner:        '',
-      assignedDate: now.slice(0, 10),
-      project:      po.project,
-      company:      '',
-      returnDate:   '',
-      warranty:     '',
-      condition:    'new',
-      status:       'available',  // arrived but not yet assigned
-      memoNo:       po.memoNo,
-      note:         `Auto-created from ${po.memoNo} · ${po.itemName}`,
-      source:       'memo',
-      createdAt:    now,
-      updatedAt:    now,
+      assetTag:       '',
+      owner:          '',
+      assignedDate:   now.slice(0, 10),
+      project:        po.project,
+      company:        '',
+      returnDate:     '',
+      warranty:       '',
+      condition:      'new',
+      status:         'available',
+      memoNo:         po.memoNo,
+      purchaseOrderId: po.id,   // link back to PO
+      note:           `Arrived from ${po.memoNo} · ${po.itemName}`,
+      source:         'memo',
+      createdAt:      now,
+      updatedAt:      now,
     };
     await saveDeviceAsync(device);
   }
@@ -322,44 +320,7 @@ function warrantyStatus(warrantyDate) {
 }
 
 // ── Auto-sync from HW Memos (legacy — for memos approved before PO system) ──
-function syncFromHWMemos() {
-  const hwMemos = loadMemos().filter(m => m.type === 'hw' && m.status === 'completed');
-  const devices = loadDevices();
-  let added = 0;
-  hwMemos.forEach(memo => {
-    const section = memo.sections?.find(s => s.title === 'รายการ Hardware');
-    if(!section) return;
-    const doc = new DOMParser().parseFromString(section.html, 'text/html');
-    doc.querySelectorAll('tbody tr').forEach(row => {
-      const cells = row.querySelectorAll('td');
-      if(cells.length < 2) return;
-      const name = cells[1]?.textContent?.trim();
-      if(!name || name === '-') return;
-      // Check using memoNo (canonical field)
-      if(devices.some(d => d.memoNo === memo.memoNo && d.name === name)) return;
-      devices.push({
-        id: nextDeviceId() + '_' + added,
-        name,
-        platform: 'other', type: 'other', brand: '', serial: '', assetTag: '',
-        owner: '', assignedDate: memo.approvedAt?.slice(0,10) || '',
-        project: memo.project || '', returnDate: '', warranty: '', condition: 'good',
-        status: 'available',  // arrived but not yet assigned to anyone
-        company: '',
-        memoNo: memo.memoNo,  // use memoNo, not memoRef
-        note: `Auto-imported from ${memo.memoNo}`,
-        source: 'memo',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
-      added++;
-    });
-  });
-  if(added > 0) {
-    storeDevices(devices);
-    // Sync new devices to Supabase
-    devices.slice(-added).forEach(d => saveDeviceAsync(d).catch(e => console.warn('sync failed', e)));
-  }
-}
+// syncFromHWMemos removed — devices only enter registry via markArrived()
 
 // ── Summary tables ──
 function renderDeviceSummaries(devices) {
@@ -429,7 +390,6 @@ function renderDevice() {
 }
 
 function _renderDeviceTable() {
-  // Note: syncFromHWMemos removed — devices only created via markArrived()
 
   const allDevices = loadDevices();
 
@@ -837,21 +797,53 @@ function renderPurchaseOrders() {
   loadPurchaseOrdersAsync().then(() => _renderPOTable()).catch(() => _renderPOTable());
 }
 
+const PO_STATUS_BADGE = {
+  pending_order:  `<span style="font-size:10px;background:#F1EFE8;color:#444441;padding:2px 8px;border-radius:100px">Pending Order</span>`,
+  ordered:        `<span style="font-size:10px;background:#E6F1FB;color:#0C447C;padding:2px 8px;border-radius:100px">Ordered</span>`,
+  awaiting:       `<span style="font-size:10px;background:#FAEEDA;color:#633806;padding:2px 8px;border-radius:100px">Awaiting</span>`,
+  partial_arrived:`<span style="font-size:10px;background:#FAEEDA;color:#633806;padding:2px 8px;border-radius:100px">Partial arrived</span>`,
+  fulfilled:      `<span style="font-size:10px;background:#EAF3DE;color:#27500A;padding:2px 8px;border-radius:100px">Fulfilled</span>`,
+};
+
+function poActionBtn(po) {
+  const s = po.status;
+  if (s === 'pending_order')
+    return `<button class="btn-sm" style="font-size:11px;background:#185FA5;color:#fff;border-color:transparent" onclick="advancePOStatus('${esc(po.id)}','ordered')">Mark ordered</button>`;
+  if (s === 'ordered')
+    return `<button class="btn-sm" style="font-size:11px" onclick="advancePOStatus('${esc(po.id)}','awaiting')">Mark awaiting</button>`;
+  if (s === 'awaiting' || s === 'partial_arrived')
+    return `<button class="btn-sm" style="font-size:11px;background:#185FA5;color:#fff;border-color:transparent" onclick="openMarkArrivedModal('${esc(po.id)}')">+ Mark arrived</button>`;
+  if (s === 'fulfilled')
+    return `<button class="btn-sm" style="font-size:11px;color:var(--text-3)" onclick="switchDevTab('registry',document.getElementById('dev-tbtn-registry'))">View devices</button>`;
+  return '';
+}
+
+function advancePOStatus(poId, newStatus) {
+  const pos = loadPurchaseOrders();
+  const po = pos.find(p => p.id === poId);
+  if (!po) return;
+  po.status = newStatus;
+  po.updatedAt = new Date().toISOString();
+  storePurchaseOrders(pos);
+  savePurchaseOrderAsync(po).catch(e => console.warn('PO advance failed', e));
+  _poCache = null;
+  _renderPOTable();
+}
+
 function _renderPOTable() {
   const pos = loadPurchaseOrders();
 
   // KPIs
   const active    = pos.filter(p => p.status !== 'fulfilled').length;
-  const awaiting  = pos.filter(p => p.status === 'ordered').reduce((s, p) => s + p.orderedQty, 0);
-  const partial   = pos.filter(p => p.status === 'partial').length;
+  const awaitingUnits = pos.filter(p => ['ordered','awaiting'].includes(p.status)).reduce((s,p) => s+p.orderedQty,0);
+  const partial   = pos.filter(p => p.status === 'partial_arrived').length;
   const fulfilled = pos.filter(p => p.status === 'fulfilled').length;
   const setText = (id, v) => { const el = document.getElementById(id); if(el) el.textContent = v; };
-  setText('po-kpi-active', active);
-  setText('po-kpi-awaiting', awaiting);
-  setText('po-kpi-partial', partial);
+  setText('po-kpi-active',    active);
+  setText('po-kpi-awaiting',  awaitingUnits);
+  setText('po-kpi-partial',   partial);
   setText('po-kpi-fulfilled', fulfilled);
 
-  // Badge on tab
   const badge = document.getElementById('dev-po-badge');
   if (badge) { badge.textContent = active > 0 ? active : ''; badge.style.display = active > 0 ? '' : 'none'; }
 
@@ -863,33 +855,29 @@ function _renderPOTable() {
     return;
   }
 
-  const statusBadge = s => ({
-    ordered:   `<span style="font-size:10px;background:#E6F1FB;color:#0C447C;padding:2px 8px;border-radius:100px">Ordered</span>`,
-    partial:   `<span style="font-size:10px;background:#FAEEDA;color:#633806;padding:2px 8px;border-radius:100px">Partially arrived</span>`,
-    fulfilled: `<span style="font-size:10px;background:#EAF3DE;color:#27500A;padding:2px 8px;border-radius:100px">Fulfilled</span>`,
-  }[s] || `<span style="font-size:10px;background:#F1EFE8;color:#444441;padding:2px 8px;border-radius:100px">${esc(s)}</span>`);
+  // Sort: active first (by status order), then fulfilled
+  const statusOrder = { pending_order:0, ordered:1, awaiting:2, partial_arrived:3, fulfilled:4 };
+  const sorted = [...pos].sort((a,b) => (statusOrder[a.status]||99) - (statusOrder[b.status]||99));
 
-  tbody.innerHTML = pos.map(po => {
-    const pct  = po.orderedQty > 0 ? Math.round(po.arrivedQty / po.orderedQty * 100) : 0;
-    const canAct = po.status !== 'fulfilled';
-    return `<tr>
-      <td style="color:#185FA5;font-weight:500;cursor:pointer;padding:9px 12px" onclick="openHistoryDetail && openHistoryDetail('${esc(po.memoNo)}')">${esc(po.memoNo)}</td>
+  tbody.innerHTML = sorted.map(po => {
+    const pct = po.orderedQty > 0 ? Math.round(po.arrivedQty / po.orderedQty * 100) : 0;
+    const barColor = pct >= 100 ? '#3B6D11' : '#185FA5';
+    return `<tr style="${po.status==='fulfilled'?'opacity:0.7':''}">
+      <td style="color:#185FA5;font-weight:500;cursor:pointer;padding:9px 12px" onclick="typeof openHistoryDetail==='function'&&openHistoryDetail('${esc(po.memoNo)}')">${esc(po.memoNo)}</td>
       <td style="padding:9px 12px;font-size:12px">${esc(po.itemName)}</td>
-      <td style="padding:9px 12px;font-size:12px">${esc(po.project || '—')}</td>
+      <td style="padding:9px 12px;font-size:12px">${esc(po.project||'—')}</td>
       <td style="padding:9px 12px;text-align:center;font-size:12px">${po.orderedQty}</td>
-      <td style="padding:9px 12px;text-align:center;font-size:12px;font-weight:500;color:${po.arrivedQty > 0 ? '#3B6D11' : 'var(--text-3)'}">${po.arrivedQty}</td>
+      <td style="padding:9px 12px;text-align:center;font-size:12px;font-weight:500;color:${po.arrivedQty>0?'#3B6D11':'var(--text-3)'}">${po.arrivedQty||'—'}</td>
       <td style="padding:9px 12px">
         <div style="display:flex;align-items:center;gap:6px">
           <div style="flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden">
-            <div style="width:${pct}%;height:100%;background:${pct>=100?'#3B6D11':'#185FA5'};border-radius:3px"></div>
+            <div style="width:${pct}%;height:100%;background:${barColor};border-radius:3px"></div>
           </div>
           <span style="font-size:10px;color:var(--text-3)">${po.arrivedQty}/${po.orderedQty}</span>
         </div>
       </td>
-      <td style="padding:9px 12px">${statusBadge(po.status)}</td>
-      <td style="padding:9px 12px;white-space:nowrap">
-        ${canAct ? `<button class="btn-sm" style="font-size:11px" onclick="openMarkArrivedModal('${esc(po.id)}')">+ Mark arrived</button>` : `<button class="btn-sm" style="font-size:11px" onclick="switchDevTab('registry',document.getElementById('dev-tbtn-registry'))">View devices</button>`}
-      </td>
+      <td style="padding:9px 12px">${PO_STATUS_BADGE[po.status]||`<span style="font-size:10px;background:#F1EFE8;color:#444441;padding:2px 8px;border-radius:100px">${esc(po.status)}</span>`}</td>
+      <td style="padding:9px 12px;white-space:nowrap">${poActionBtn(po)}</td>
     </tr>`;
   }).join('');
 }
@@ -898,6 +886,10 @@ function _renderPOTable() {
 function openMarkArrivedModal(poId) {
   const po = loadPurchaseOrders().find(p => p.id === poId);
   if (!po) return;
+  if (!['awaiting', 'partial_arrived'].includes(po.status)) {
+    alert('กรุณา Mark awaiting ก่อน แล้วจึงกด Mark arrived');
+    return;
+  }
   document.getElementById('mark-arrived-po-id').value = poId;
   document.getElementById('mark-arrived-subtitle').textContent =
     `${po.itemName} · ${po.arrivedQty}/${po.orderedQty} มาถึงแล้ว · remaining: ${po.orderedQty - po.arrivedQty}`;
