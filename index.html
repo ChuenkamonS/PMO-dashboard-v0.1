@@ -1778,47 +1778,30 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <!-- KPI cards (3) -->
         <div class="metric-row" id="res-kpi" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px;min-height:72px"></div>
 
-        <!-- Filter row -->
-        <div class="filter-row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px">
-          <input type="text" id="res-search" placeholder="🔍 ค้นหา Project, Position, Team..."
-            style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px"
+        <!-- Toolbar row -->
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <input type="text" id="res-search" placeholder="🔍 ค้นหา Position, Project, Team..."
+            style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);flex:1;min-width:180px"
             oninput="renderResource()">
-          <select id="res-f-status" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกสถานะ</option>
-            <option value="pending">Pending</option>
-            <option value="sourcing">Sourcing</option>
-            <option value="interviewing">Interviewing</option>
-            <option value="offer">Offer in Progress</option>
-            <option value="document">Document Processing</option>
-            <option value="filled">Filled</option>
-            <option value="mitigated">Mitigated</option>
-            <option value="resolved">Resolved</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-          <select id="res-f-team" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุก Team</option>
-          </select>
-          <select id="res-f-hiring" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุก Hiring Type</option>
-          </select>
-          <select id="res-f-project" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกโครงการ</option>
-          </select>
-          <select id="res-f-level" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุก Level</option>
-          </select>
+          <button id="res-filter-btn" onclick="resToggleFilterPanel()"
+            style="display:inline-flex;align-items:center;gap:5px;font-family:inherit;font-size:12px;padding:6px 12px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);color:var(--text-2);cursor:pointer">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+            Filter
+            <span id="res-filter-badge" style="display:none;background:var(--blue);color:#fff;font-size:9px;font-weight:600;min-width:16px;height:16px;border-radius:8px;padding:0 4px;align-items:center;justify-content:center">0</span>
+          </button>
+          <div style="width:1px;height:22px;background:var(--border)"></div>
           <button class="btn-export" onclick="exportResourceCsv()">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Export CSV
           </button>
           <button class="btn-export" onclick="downloadResTemplate()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
             Template
           </button>
           <label style="cursor:pointer">
             <input type="file" id="res-bulk-input" accept=".xlsx,.xls" style="display:none" onchange="handleResBulkUpload(event)">
             <span class="btn-export" style="display:inline-flex;align-items:center;gap:5px">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
               Bulk Upload
             </span>
           </label>
@@ -1828,23 +1811,60 @@ svg.icon { display: inline-block; vertical-align: middle; }
           </button>
         </div>
 
-        <!-- Table with sortable headers -->
+        <!-- Collapsible filter panel -->
+        <div id="res-filter-panel" style="display:none;border:1px solid var(--border-md);border-radius:var(--r);padding:14px 16px;background:var(--surface);margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <span style="font-size:12px;font-weight:600;color:var(--text)">Filters <span id="res-filter-summary" style="font-size:11px;font-weight:400;color:var(--text-3)">— ทั้งหมด</span></span>
+            <button onclick="resClearAllFilters()" style="font-size:11px;color:var(--blue);background:none;border:none;cursor:pointer;padding:0;font-family:inherit">Clear all</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div>
+              <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Status</div>
+              <div id="res-chips-status"></div>
+            </div>
+            <div>
+              <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Team</div>
+              <div id="res-chips-team"></div>
+            </div>
+            <div>
+              <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Level</div>
+              <div id="res-chips-level"></div>
+            </div>
+            <div>
+              <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Hiring Type</div>
+              <div id="res-chips-hiring"></div>
+            </div>
+            <div>
+              <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Project</div>
+              <div id="res-chips-project"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Table -->
         <div class="card" style="padding:0;overflow:hidden">
-          <table class="hist-table">
+          <table class="hist-table" style="table-layout:fixed;width:100%">
+            <colgroup>
+              <col style="width:11%"><col style="width:7%"><col style="width:9%">
+              <col style="width:13%"><col style="width:7%"><col style="width:4%">
+              <col style="width:9%"><col style="width:6%"><col style="width:6%">
+              <col style="width:7%"><col style="width:7%"><col style="width:8%">
+              <col style="width:6%">
+            </colgroup>
             <thead><tr>
-              <th class="res-th-sort" data-col="id" onclick="resSortBy('id')" style="padding-left:12px;width:12%;cursor:pointer">Request ID <span class="sort-arrow"></span></th>
-              <th class="res-th-sort" data-col="resourceTeam" onclick="resSortBy('resourceTeam')" style="width:8%;cursor:pointer">Team <span class="sort-arrow"></span></th>
-              <th class="res-th-sort" data-col="project" onclick="resSortBy('project')" style="width:9%;cursor:pointer">Project <span class="sort-arrow"></span></th>
-              <th class="res-th-sort" data-col="position" onclick="resSortBy('position')" style="width:12%;cursor:pointer">Position <span class="sort-arrow"></span></th>
-              <th class="res-th-sort" data-col="level" onclick="resSortBy('level')" style="width:7%;cursor:pointer">Level <span class="sort-arrow"></span></th>
-              <th style="width:4%;text-align:center">HC</th>
-              <th style="width:10%">Hiring Type</th>
-              <th class="res-th-sort" data-col="startDate" onclick="resSortBy('startDate')" style="width:7%;cursor:pointer">Start <span class="sort-arrow"></span></th>
-              <th style="width:7%">End</th>
-              <th class="res-th-sort" data-col="requestDate" onclick="resSortBy('requestDate')" style="width:7%;cursor:pointer">Request Date <span class="sort-arrow"></span></th>
-              <th class="res-th-sort" data-col="resolvedDate" onclick="resSortBy('resolvedDate')" style="width:7%;cursor:pointer">Resolved <span class="sort-arrow"></span></th>
-              <th style="width:8%;text-align:center">Status</th>
-              <th style="width:11%;text-align:center">Action</th>
+              <th class="res-th-sort" data-col="id" onclick="resSortBy('id')" style="padding-left:12px;cursor:pointer">Request ID <span class="sort-arrow"></span></th>
+              <th class="res-th-sort" data-col="resourceTeam" onclick="resSortBy('resourceTeam')" style="cursor:pointer">Team <span class="sort-arrow"></span></th>
+              <th class="res-th-sort" data-col="project" onclick="resSortBy('project')" style="cursor:pointer">Project <span class="sort-arrow"></span></th>
+              <th class="res-th-sort" data-col="position" onclick="resSortBy('position')" style="cursor:pointer">Position <span class="sort-arrow"></span></th>
+              <th class="res-th-sort" data-col="level" onclick="resSortBy('level')" style="cursor:pointer">Level <span class="sort-arrow"></span></th>
+              <th style="text-align:center">HC</th>
+              <th>Hiring Type</th>
+              <th class="res-th-sort" data-col="startDate" onclick="resSortBy('startDate')" style="cursor:pointer">Start <span class="sort-arrow"></span></th>
+              <th>End</th>
+              <th class="res-th-sort" data-col="requestDate" onclick="resSortBy('requestDate')" style="cursor:pointer">Req Date <span class="sort-arrow"></span></th>
+              <th class="res-th-sort" data-col="resolvedDate" onclick="resSortBy('resolvedDate')" style="cursor:pointer">Resolved <span class="sort-arrow"></span></th>
+              <th style="text-align:center">Status</th>
+              <th style="text-align:center">Action</th>
             </tr></thead>
             <tbody id="res-table-body"></tbody>
           </table>
