@@ -2180,26 +2180,25 @@ function saveBudgetPool() {
   const editId  = g('bpool-edit-id');
 
   const memoTypes = Object.keys(BGT_TYPE_LABELS).filter(k => document.getElementById('bpool-type-' + k)?.checked);
+
+  if (!project) { alert('กรุณาเลือก Project'); return; }
   if (!name)    { alert('กรุณากรอกชื่อ Pool'); return; }
   if (!budget)  { alert('กรุณากรอก Budget'); return; }
 
-  const pools = loadBudgetPools();
   const id    = editId || `pool-${Date.now().toString(36).toUpperCase()}`;
   const entry = { id, project, name, budget, year, startMonth: start, endMonth: end, memoTypes };
 
-  if (editId) {
-    const idx = pools.findIndex(p => p.id === editId);
-    if (idx >= 0) pools[idx] = entry; else pools.push(entry);
-  } else {
-    pools.push(entry);
-  }
-  storeBudgetPools(pools);
-  document.getElementById('bpool-modal')?.remove();
-  renderBudgetSettings();
+  savePoolAsync(entry)
+    .then(() => {
+      document.getElementById('bpool-modal')?.remove();
+      renderBudgetSettings();
+    })
+    .catch(e => console.warn('Pool save error:', e));
 }
 
 function deleteBudgetPool(id) {
   if (!confirm('ลบ pool นี้?')) return;
-  storeBudgetPools(loadBudgetPools().filter(p => p.id !== id));
-  renderBudgetSettings();
+  deletePoolAsync(id)
+    .then(() => renderBudgetSettings())
+    .catch(e => console.warn('Pool delete error:', e));
 }
