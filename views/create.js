@@ -33,7 +33,7 @@ function selectType(type, btn) {
     const hwRows = document.getElementById('hw-rows');
     if(hwRows) { hwRows.innerHTML = ''; addHWRow(); }
     // Reset name lists
-    ['int-names','dep-names','ent-names'].forEach(id => {
+    ['int-names','ent-names'].forEach(id => {
       const el = document.getElementById(id);
       if(el) el.innerHTML = '';
     });
@@ -148,6 +148,48 @@ function addHWRow() {
   d.innerHTML = `<input class="ri" type="text" placeholder="ชื่ออุปกรณ์"><input class="ri hw-price" type="number" placeholder="ราคา" oninput="calcHW()"><input class="ri hw-qty" type="number" placeholder="จำนวน" oninput="calcHW()"><button class="rm-btn" onclick="rmRow(this,'hw-rows');calcHW()" title="ลบ">${TRASH}</button>`;
   document.getElementById('hw-rows').appendChild(d);
 }
+// ── DEP items ──
+function addDepItem() {
+  const container = document.getElementById('dep-items');
+  if (!container) return;
+  const row = document.createElement('div');
+  row.className = 'item-row dep-item-row';
+  row.style.cssText = 'display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:6px;margin-bottom:6px;align-items:center';
+  row.innerHTML = `
+    <input class="ri dep-item-name" type="text" placeholder="รายการ เช่น ค่าเดินทาง">
+    <input class="ri dep-item-price" type="number" placeholder="ราคา/หัว (฿)" min="0" oninput="calcDepRow(this)">
+    <input class="ri dep-item-qty" type="number" placeholder="จำนวนคน" min="1" oninput="calcDepRow(this)">
+    <input class="ri dep-item-total" type="text" placeholder="รวม (฿)" readonly style="background:var(--bg);font-weight:600">
+    <button class="rm-btn" onclick="rmDepItem(this)" title="ลบ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>`;
+  container.appendChild(row);
+}
+function rmDepItem(btn) {
+  const rows = document.querySelectorAll('#dep-items .dep-item-row');
+  if (rows.length > 1) { btn.closest('.dep-item-row').remove(); calcDepGrand(); }
+}
+function calcDepRow(inp) {
+  const row   = inp.closest('.dep-item-row');
+  const price = parseFloat(row.querySelector('.dep-item-price')?.value) || 0;
+  const qty   = parseInt(row.querySelector('.dep-item-qty')?.value)   || 0;
+  const total = price * qty;
+  const totalInp = row.querySelector('.dep-item-total');
+  if (totalInp) totalInp.value = total > 0 ? total.toLocaleString() : '';
+  calcDepGrand();
+}
+function calcDepGrand() {
+  let grand = 0;
+  document.querySelectorAll('#dep-items .dep-item-row').forEach(row => {
+    const price = parseFloat(row.querySelector('.dep-item-price')?.value) || 0;
+    const qty   = parseInt(row.querySelector('.dep-item-qty')?.value)   || 0;
+    grand += price * qty;
+  });
+  const el = document.getElementById('dep-grand-total');
+  if (el) el.textContent = '฿' + grand.toLocaleString();
+  // Sync total field
+  const totalEl = document.getElementById('dep-total');
+  if (totalEl) { totalEl.value = grand; totalEl.dispatchEvent(new Event('input')); }
+}
+
 function addName(cid, cls, doCalc) {
   const c = document.getElementById(cid);
   const n = c.querySelectorAll('.row-name').length + 1;
@@ -209,10 +251,11 @@ function memoSubject(data) {
       return `ขออนุมัติงบประมาณค่าใช้จ่ายเลี้ยงรับรองลูกค้า ${client}`;
     }
     case 'dep': {
-      const depInp = document.querySelectorAll('#fs-dep input');
-      const start = depInp[0]?.value ? dateInput(depInp[0].value) : 'วันที่เริ่ม';
-      const end   = depInp[1]?.value ? dateInput(depInp[1].value) : 'วันที่สิ้นสุด';
-      return `ขออนุมัติงบประมาณค่าใช้จ่ายสำหรับพนักงานที่ปฏิบัติการ Deployment ของ ${p} ในวันที่ ${start} – ${end}`;
+      const start    = document.getElementById('dep-start')?.value ? dateInput(document.getElementById('dep-start').value) : 'วันที่เริ่ม';
+      const end      = document.getElementById('dep-end')?.value   ? dateInput(document.getElementById('dep-end').value)   : 'วันที่สิ้นสุด';
+      const location = document.getElementById('dep-location')?.value.trim();
+      const locStr   = location ? ` ณ ${location}` : '';
+      return `ขออนุมัติงบประมาณค่าใช้จ่ายสำหรับพนักงานที่ปฏิบัติการ Deployment ของ ${p}${locStr} ในวันที่ ${start} – ${end}`;
     }
     default: return 'ขออนุมัติ Memo';
   }
@@ -306,12 +349,43 @@ function collectMemoData() {
     data.sections.push({ title:'รายละเอียดงานเลี้ยงรับรอง', html:`<p>ลูกค้า: ${esc(inp[0]?.value||'-')}<br>วันที่: ${esc(dateInput(inp[1]?.value))} ${esc(inp[2]?.value||'')}<br>สถานที่: ${esc(inp[3]?.value||'-')}<br>จำนวน: ${esc(inp[4]?.value||'-')} คน</p>` });
   }
   if(data.type==='dep') {
-    const fs = document.querySelector('#fs-dep');
-    const inp = fs.querySelectorAll('input');
-    data.amountWords = inp[4]?.value.trim()||'';
-    const names = Array.from(fs.querySelectorAll('.dep-name')).map((i,idx)=>[idx+1,i.value.trim()||'-']);
-    data.sections.push({ title:'รายละเอียด Deployment', html:`<p>ช่วงวันที่: ${esc(dateInput(inp[0]?.value))} - ${esc(dateInput(inp[1]?.value))}<br>สถานที่: ${esc(inp[2]?.value||'-')}<br>รูปแบบ: ${esc(fs.querySelector('select')?.value||'-')}<br>วงเงินอำนาจ: ${esc(inp[5]?.value||'-')} บาท</p>` });
-    if(names.length) data.sections.push({ title:'รายชื่อพนักงาน', html:table(['#','ชื่อ-นามสกุล / ตำแหน่ง'], names, []) });
+    const start    = document.getElementById('dep-start')?.value || '';
+    const end      = document.getElementById('dep-end')?.value   || '';
+    const location = document.getElementById('dep-location')?.value.trim() || '';
+    data.amountWords = document.getElementById('dep-amount-words')?.value.trim() || '';
+
+    // Collect items
+    const itemRows = document.querySelectorAll('#dep-items .dep-item-row');
+    const items = [];
+    let grandTotal = 0;
+    itemRows.forEach((row, idx) => {
+      const name  = row.querySelector('.dep-item-name')?.value.trim() || '';
+      const price = parseFloat(row.querySelector('.dep-item-price')?.value) || 0;
+      const qty   = parseInt(row.querySelector('.dep-item-qty')?.value)   || 0;
+      const total = price * qty;
+      if (name) { items.push([idx+1, name, price, qty, total]); grandTotal += total; }
+    });
+
+    // Override total with computed sum
+    if (items.length) data.total = grandTotal;
+
+    // Inject location into subject if not already there
+    if (location && data.subject && !data.subject.includes(location)) {
+      data.subject = data.subject.replace(/(ในวันที่.*)/, `ณ ${location} $1`);
+    }
+
+    // Build numbered list section for PDF
+    const itemsHtml = items.map(([n, name, price, qty, total]) =>
+      `<li>${esc(name)} ราคา ${price.toLocaleString()} บาท × ${qty} คน = ${total.toLocaleString()} บาท (รวมภาษีมูลค่าเพิ่ม)</li>`
+    ).join('');
+    data.depItems   = items;
+    data.depLocation = location;
+    data.depStart   = start ? dateInput(start) : '';
+    data.depEnd     = end   ? dateInput(end)   : '';
+    data.sections.push({
+      title: 'รายการค่าใช้จ่าย',
+      html:  `<ol style="margin:0;padding-left:20px;line-height:2">${itemsHtml}</ol>`
+    });
   }
   return data;
 }
