@@ -964,22 +964,25 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <!-- DEP fields -->
             <div class="fs" id="fs-dep">
               <div class="form-grid" style="margin-bottom:12px">
-                <div class="fg"><label>วันที่ Deploy (Start) *</label><input type="date"></div>
-                <div class="fg"><label>วันที่ Deploy (End) *</label><input type="date"></div>
-                <div class="fg"><label>สถานที่ Deploy *</label><input type="text" placeholder="เช่น สำนักงานลูกค้า"></div>
-                <div class="fg"><label>รูปแบบ</label>
-                  <select><option>Onsite</option><option>Online</option><option>Online / Onsite</option></select>
-                </div>
-                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร</label><input type="text" placeholder="เช่น หนึ่งร้อยบาทถ้วน"></div>
-                <div class="fg"><label>วงเงินอำนาจอนุมัติ (บาท)</label><input type="text" value="500,000"></div>
+                <div class="fg"><label>วันที่ Deploy (Start) *</label><input type="date" id="dep-start"></div>
+                <div class="fg"><label>วันที่ Deploy (End) *</label><input type="date" id="dep-end"></div>
+                <div class="fg"><label>สถานที่ปฏิบัติการ *</label><input type="text" id="dep-location" placeholder="เช่น สาขาวิชาการตรีสิ 62 สำนักงานลูกค้า"></div>
+                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร</label><input type="text" id="dep-amount-words" placeholder="เช่น หนึ่งหมื่นบาทถ้วน"></div>
               </div>
-              <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:7px">รายชื่อพนักงานที่ Deploy <span style="font-weight:400;color:var(--text-3)">(optional)</span></div>
-              <div id="dep-names">
-                <div class="row-name"><span class="name-num">1.</span><input class="ri dep-name" type="text" placeholder="ชื่อ-นามสกุล ตำแหน่ง"><button class="rm-btn" onclick="rmName(this,'dep-names')" title="ลบ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button></div>
+
+              <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:7px">รายการค่าใช้จ่าย *</div>
+              <div id="dep-items">
+                <div class="item-row dep-item-row" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:6px;margin-bottom:6px;align-items:center">
+                  <input class="ri dep-item-name" type="text" placeholder="รายการ เช่น ค่าอาหาร">
+                  <input class="ri dep-item-price" type="number" placeholder="ราคา/หัว (฿)" min="0" oninput="calcDepRow(this)">
+                  <input class="ri dep-item-qty" type="number" placeholder="จำนวนคน" min="1" oninput="calcDepRow(this)">
+                  <input class="ri dep-item-total" type="text" placeholder="รวม (฿)" readonly style="background:var(--bg);font-weight:600">
+                  <button class="rm-btn" onclick="rmDepItem(this)" title="ลบ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
+                </div>
               </div>
               <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-                <button class="add-btn" onclick="addName('dep-names','dep-name',false)" style="margin-top:0">+ เพิ่มรายชื่อ</button>
-                <button class="btn-sm" onclick="openBulkNameModal('dep-names','dep-name',false)" style="font-size:11px;padding:5px 10px">⬆ Bulk Upload</button>
+                <button class="add-btn" onclick="addDepItem()" style="margin-top:0">+ เพิ่มรายการ</button>
+                <span id="dep-total-display" style="font-size:12px;color:var(--text-2);margin-left:auto">รวม: <strong id="dep-grand-total">฿0</strong></span>
               </div>
             </div>
 
