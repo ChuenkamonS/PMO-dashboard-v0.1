@@ -1316,33 +1316,18 @@ svg.icon { display: inline-block; vertical-align: middle; }
             </div>
           </div>
 
-          <!-- Section B: Budget vs Actual summary -->
-          <div class="card" style="padding:14px 16px">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-              <div style="font-size:12px;font-weight:600;color:var(--text)">B · Budget vs actual — by project <span id="ov-bva-period-label" style="font-size:11px;font-weight:400;color:var(--text-3)"></span></div>
-              <div style="display:flex;gap:5px;flex-wrap:wrap" id="ov-bva-proj-chips"></div>
-            </div>
-            <div id="ov-bva-formula" style="font-size:11px;color:var(--text-3);background:var(--bg);border-radius:var(--r-sm);padding:7px 10px;margin-bottom:12px;line-height:1.6"></div>
-            <div id="ov-bva-rows"></div>
-            <div style="margin-top:10px;font-size:11px;color:var(--text-3)">
-              <span style="display:inline-block;width:8px;height:8px;background:var(--red);border-radius:2px;margin-right:4px"></span>&gt;100% over budget &nbsp;
-              <span style="display:inline-block;width:8px;height:8px;background:var(--amber);border-radius:2px;margin-right:4px"></span>90–100% near limit &nbsp;
-              <span style="display:inline-block;width:8px;height:8px;background:var(--blue);border-radius:2px;margin-right:4px"></span>&lt;90% on track
-            </div>
-          </div>
-
         </div>
 
         <!-- ── TAB: ACTUAL SPEND ── -->
         <div id="bgt-tab-actual-spend" class="cost-tab-panel" style="display:none">
 
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
-            <select id="as-range" onchange="renderActualSpend()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-              <option value="3">3 เดือน</option>
-              <option value="6">6 เดือน</option>
-              <option value="12" selected>12 เดือน</option>
-              <option value="all">ทั้งหมด</option>
-            </select>
+            <div style="display:flex;align-items:center;gap:6px">
+              <label style="font-size:11px;color:var(--text-3)">จาก</label>
+              <input type="month" id="as-from" onchange="renderActualSpend()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+              <label style="font-size:11px;color:var(--text-3)">ถึง</label>
+              <input type="month" id="as-to" onchange="renderActualSpend()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+            </div>
             <select id="as-project" onchange="renderActualSpend()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
               <option value="all">ทุกโปรเจค</option>
             </select>
@@ -1354,6 +1339,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <option value="ent">Client Expense</option>
               <option value="dep">Deployment</option>
             </select>
+            <span id="as-period-label" style="font-size:11px;color:var(--text-3)">ทั้งหมด</span>
           </div>
 
           <div id="as-content"></div>
