@@ -185,12 +185,14 @@ function switchBudgetTab(tab, btn) {
   // Render content
   if(tab === 'overview')  { _ov.initialized = false; renderBudgetOverview(); }
   if(tab === 'sl-infra')  renderBudgetSLInfra();
+  if(tab === 'others')    renderBudgetOthers();
 }
 
 // ── Main entry ──
 function renderBudget() {
   if(_bgtCurrentTab === 'overview')  renderBudgetOverview();
   if(_bgtCurrentTab === 'sl-infra')  renderBudgetSLInfra();
+  if(_bgtCurrentTab === 'others')    renderBudgetOthers();
 }
 
 // ══════════════════════════════════════════
@@ -198,7 +200,8 @@ function renderBudget() {
 // ══════════════════════════════════════════
 
 const OV_PROJ_COLORS = ['#185FA5','#1D9E75','#EF9F27','#7F77DD','#5DCAA5','#D85A30','#888780','#3C3489','#639922'];
-const OV_TYPE_COLORS = { sl:'#185FA5', hw:'#1D9E75', int:'#EF9F27', ent:'#7F77DD', dep:'#D85A30' };
+// OV_TYPE_COLORS — alias to BGT_TYPE_COLORS for consistency
+const OV_TYPE_COLORS = BGT_TYPE_COLORS;
 
 const _ov = {
   groupBy: 'type',
@@ -359,26 +362,42 @@ function _ovUpdateKPIs() {
   const projArr   = [..._ov.activeProjKeys];
   const typeArr   = [..._ov.activeTypeKeys];
 
-  // Actual: distribute SL by month, lump-sum others
+  // ── Actual: SL memos distributed by duration, all other types by memo date ──
   let total = 0;
-  projArr.forEach(proj => {
-    const byMonth = buildActualByMonth(proj);
-    Object.entries(byMonth).forEach(([k, v]) => { if (k >= fromKey && k <= toKey) total += v.total; });
-  });
-  const nonSLTypes = typeArr.filter(t => t !== 'sl');
-  if (nonSLTypes.length) {
-    loadMemos().filter(m => memoStatusKey(m) === 'completed' && nonSLTypes.includes(m.type) && projArr.includes(m.project || '(ไม่ระบุ)')).forEach(m => {
-      const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
-      const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      if (k >= fromKey && k <= toKey) total += Number(m.total) || 0;
+
+  // SL: distribute by month using buildActualByMonth
+  if (typeArr.includes('sl')) {
+    projArr.forEach(proj => {
+      const byMonth = buildActualByMonth(proj);
+      Object.entries(byMonth).forEach(([k, v]) => {
+        if (k >= fromKey && k <= toKey) total += v.total;
+      });
     });
   }
 
+  // Non-SL types: use memo date directly (one-time purchases)
+  const nonSLTypes = typeArr.filter(t => t !== 'sl');
+  if (nonSLTypes.length) {
+    loadMemos()
+      .filter(m =>
+        memoStatusKey(m) === 'completed' &&
+        nonSLTypes.includes(m.type) &&
+        projArr.includes(m.project || '(ไม่ระบุ)')
+      )
+      .forEach(m => {
+        const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
+        const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        if (k >= fromKey && k <= toKey) total += Number(m.total) || 0;
+      });
+  }
+
+  // ── Budget from SL settings (SL only — no budget for other types yet) ──
   const currentYear  = String(new Date().getFullYear() + 543);
   const slBudgets    = loadSLBudgets()?.[currentYear] || {};
   const annualBudget = projArr.reduce((s, p) => s + (slBudgets[p] || 0), 0);
   const budgetTotal  = annualBudget > 0 ? (annualBudget / 12) * numMonths : 0;
 
+  // ── Forecast: smooth 3-month avg of SL spend × remaining months + non-SL YTD rate ──
   const now = new Date();
   const smooth3Keys = [];
   for (let i = 3; i >= 1; i--) {
@@ -399,18 +418,32 @@ function _ovUpdateKPIs() {
     const byMonth = buildActualByMonth(proj);
     Object.entries(byMonth).forEach(([k, v]) => { if (k >= ytdStart && k <= ytdEnd) ytdTotal += v.total; });
   });
+  // Also add non-SL YTD
+  if (nonSLTypes.length) {
+    loadMemos()
+      .filter(m =>
+        memoStatusKey(m) === 'completed' &&
+        nonSLTypes.includes(m.type) &&
+        projArr.includes(m.project || '(ไม่ระบุ)')
+      )
+      .forEach(m => {
+        const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
+        const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        if (k >= ytdStart && k <= ytdEnd) ytdTotal += Number(m.total) || 0;
+      });
+  }
   const forecastTotal = ytdTotal + smoothMonthlyRate * monthsLeft;
 
   const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
   setText('bgt-kpi-total', money(Math.round(total)));
-  setText('bgt-kpi-actual-sub', `กระจายตาม duration (${numMonths} เดือน)`);
+  setText('bgt-kpi-actual-sub', `SL กระจายตาม duration · others ตามวันที่ (${numMonths} เดือน)`);
 
   if (budgetTotal > 0) {
     const pct      = Math.round(total / budgetTotal * 100);
     const rem      = budgetTotal - total;
     const remColor = total > budgetTotal ? 'var(--red)' : pct >= 90 ? 'var(--amber)' : 'var(--green)';
     setText('bgt-kpi-budget', money(Math.round(budgetTotal)));
-    setText('bgt-kpi-budget-sub', `ตั้งไว้ ${numMonths} เดือน`);
+    setText('bgt-kpi-budget-sub', `งบ SL ตั้งไว้ ${numMonths} เดือน`);
     const remEl = document.getElementById('bgt-kpi-remaining');
     if (remEl) { remEl.textContent = money(Math.round(rem)); remEl.style.color = remColor; }
     setText('bgt-kpi-remaining-sub', `${pct}% utilized`);
@@ -421,7 +454,7 @@ function _ovUpdateKPIs() {
   } else {
     setText('bgt-kpi-budget', '—');
     const budEl = document.getElementById('bgt-kpi-budget-sub');
-    if (budEl) budEl.innerHTML = `ยังไม่ได้ตั้งงบ — <span style="color:var(--blue);cursor:pointer;text-decoration:underline" onclick="switchSLNav('budgetsettings')">ตั้งค่าที่นี่</span>`;
+    if (budEl) budEl.innerHTML = `ยังไม่ได้ตั้งงบ — <span style="color:var(--blue);cursor:pointer;text-decoration:underline" onclick="switchBudgetTab('sl-infra');switchSLNav('budgetsettings')">ตั้งค่าที่นี่</span>`;
     setText('bgt-kpi-remaining', '—');
     setText('bgt-kpi-remaining-sub', 'ต้องตั้งงบก่อน');
     const fEl = document.getElementById('bgt-kpi-forecast');
@@ -571,9 +604,23 @@ function _ovRenderBvA() {
   }
 
   const rows = projKeys.map(proj => {
+    // SL: distributed by duration
     let actual = 0;
     const byMonth = buildActualByMonth(proj);
     Object.entries(byMonth).forEach(([k, v]) => { if (k >= fromKey && k <= toKey) actual += v.total; });
+
+    // Non-SL: by memo date
+    loadMemos()
+      .filter(m =>
+        memoStatusKey(m) === 'completed' &&
+        !['sl'].includes(m.type) &&
+        (m.project || '(ไม่ระบุ)') === proj
+      )
+      .forEach(m => {
+        const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
+        const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        if (k >= fromKey && k <= toKey) actual += Number(m.total) || 0;
+      });
 
     const annualBgt = slBudgets[proj] || 0;
     const budget    = annualBgt > 0 ? (annualBgt / 12) * numMonths : null;
@@ -1279,9 +1326,168 @@ function _renderBudgetVsActual(allProjects, infraEntries, licByProj) {
   </tr>`).join('');
 }
 
-// ════════════════════════════════════════
-// BUDGET SETTINGS (Annual budget per project)
-// ════════════════════════════════════════
+// ══════════════════════════════════════════
+// SUB-TAB 3: OTHERS (HW / INT / ENT / DEP)
+// ══════════════════════════════════════════
+const OTHERS_TYPES = ['hw','int','ent','dep'];
+
+function renderBudgetOthers() {
+  const rangeEl = document.getElementById('oth-range');
+  const projEl  = document.getElementById('oth-project');
+  const typeEl  = document.getElementById('oth-type');
+
+  const rangeVal = rangeEl?.value || '12';
+  const projVal  = projEl?.value  || 'all';
+  const typeVal  = typeEl?.value  || 'all';
+
+  const approved = loadMemos().filter(m =>
+    memoStatusKey(m) === 'completed' && OTHERS_TYPES.includes(m.type)
+  );
+
+  // Populate project dropdown once
+  if (projEl && projEl.options.length <= 1) {
+    const projs = [...new Set(approved.map(m => m.project || '(ไม่ระบุ)'))].sort();
+    projs.forEach(p => { const o = document.createElement('option'); o.value = o.textContent = p; projEl.appendChild(o); });
+  }
+
+  // Build month range
+  const now = new Date();
+  let fromKey = null, toKey = null;
+  const months = [];
+  if (rangeVal !== 'all') {
+    const n = parseInt(rangeVal);
+    for (let i = n - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({ key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`, label: d.toLocaleString('th-TH', { month:'short', year:'2-digit' }) });
+    }
+    fromKey = months[0]?.key;
+    toKey   = months[months.length - 1]?.key;
+  }
+
+  // Filter memos
+  let filtered = approved;
+  if (fromKey) {
+    filtered = filtered.filter(m => {
+      const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
+      const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      return k >= fromKey && k <= toKey;
+    });
+  }
+  if (projVal !== 'all') filtered = filtered.filter(m => (m.project || '(ไม่ระบุ)') === projVal);
+  if (typeVal !== 'all') filtered = filtered.filter(m => m.type === typeVal);
+
+  const total    = filtered.reduce((s, m) => s + (Number(m.total) || 0), 0);
+  const numMemos = filtered.length;
+
+  // Top type by spend
+  const byType = {};
+  OTHERS_TYPES.forEach(t => byType[t] = 0);
+  filtered.forEach(m => { byType[m.type] = (byType[m.type] || 0) + (Number(m.total) || 0); });
+  const topType = Object.entries(byType).sort((a, b) => b[1] - a[1])[0];
+
+  // ── KPI cards ──
+  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  setText('oth-kpi-total',    money(Math.round(total)));
+  setText('oth-kpi-memos',    numMemos);
+  setText('oth-kpi-top-type', topType?.[1] > 0 ? `${BGT_TYPE_LABELS[topType[0]]} (${money(Math.round(topType[1]))})` : '—');
+  setText('oth-kpi-period',   fromKey ? `${months[0]?.label} – ${months[months.length-1]?.label}` : 'ทั้งหมด');
+
+  // ── Monthly stacked bar ──
+  _renderOthersChart(filtered, months, rangeVal);
+
+  // ── Breakdown table ──
+  _renderOthersTable(filtered);
+}
+
+function _renderOthersChart(memos, months, rangeVal) {
+  const canvas = document.getElementById('oth-chart');
+  if (!canvas || typeof Chart === 'undefined') return;
+  if (canvas._chart) { canvas._chart.destroy(); canvas._chart = null; }
+
+  if (!months.length) {
+    // Build last 12 months if range=all
+    const now = new Date();
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({ key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`, label: d.toLocaleString('th-TH', { month:'short', year:'2-digit' }) });
+    }
+  }
+
+  const datasets = OTHERS_TYPES.map(tk => ({
+    label: BGT_TYPE_LABELS[tk],
+    backgroundColor: BGT_TYPE_COLORS[tk],
+    borderRadius: 3, borderSkipped: false,
+    data: months.map(m => memos
+      .filter(memo => {
+        if (memo.type !== tk) return false;
+        const d = parseThaiDate(memo.date) || new Date(memo.updatedAt || memo.createdAt);
+        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` === m.key;
+      })
+      .reduce((s, memo) => s + (Number(memo.total) || 0), 0)
+    ),
+  })).filter(ds => ds.data.some(v => v > 0));
+
+  canvas._chart = new Chart(canvas, {
+    type: 'bar',
+    data: { labels: months.map(m => m.label), datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 12 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const val = ctx.raw || 0; if (!val) return null;
+              const mIdx = ctx.dataIndex;
+              const monthTotal = datasets.reduce((s, ds) => s + (ds.data[mIdx] || 0), 0);
+              const pct = monthTotal > 0 ? Math.round(val / monthTotal * 100) : 0;
+              return ` ${ctx.dataset.label}: ${money(Math.round(val))} (${pct}%)`;
+            },
+            footer: ctx => {
+              if (!ctx.length) return '';
+              const t = datasets.reduce((s, ds) => s + (ds.data[ctx[0].dataIndex] || 0), 0);
+              return t > 0 ? `Total: ${money(Math.round(t))}` : '';
+            },
+          },
+        },
+      },
+      scales: {
+        x: { stacked: true, grid: { display: false }, ticks: { font: { size: 10 } } },
+        y: { stacked: true, ticks: { callback: v => '฿' + Number(v).toLocaleString('th-TH'), font: { size: 10 } } },
+      },
+    },
+  });
+}
+
+function _renderOthersTable(memos) {
+  const tbody = document.getElementById('oth-table-body');
+  if (!tbody) return;
+
+  if (!memos.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล</td></tr>`;
+    return;
+  }
+
+  const sorted = [...memos].sort((a, b) => (Number(b.total) || 0) - (Number(a.total) || 0));
+  const tdS = 'padding:7px 12px;border-bottom:1px solid var(--border);font-size:12px';
+
+  tbody.innerHTML = sorted.map(m => {
+    const d     = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
+    const dateStr = d.toLocaleString('th-TH', { day:'numeric', month:'short', year:'2-digit' });
+    const typeBg  = { hw:'#E8F5E0', int:'#FFF3E0', ent:'#EDE7F6', dep:'#FFEBEE' };
+    const typeClr = { hw:'#2E7D1C', int:'#E65100', ent:'#4527A0', dep:'#B71C1C' };
+    return `<tr>
+      <td style="${tdS};color:var(--text-3)">${dateStr}</td>
+      <td style="${tdS};font-weight:500">${esc(m.project || '(ไม่ระบุ)')}</td>
+      <td style="${tdS}"><span style="font-size:10px;padding:2px 7px;border-radius:4px;background:${typeBg[m.type]||'var(--bg)'};color:${typeClr[m.type]||'var(--text-2)'}">${BGT_TYPE_LABELS[m.type] || m.type}</span></td>
+      <td style="${tdS}">${esc(m.subject || m.memoNo || '—')}</td>
+      <td style="${tdS};text-align:right;font-weight:600">${money(Number(m.total) || 0)}</td>
+      <td style="${tdS};color:var(--blue);font-weight:500">${esc(m.memoNo || '—')}</td>
+    </tr>`;
+  }).join('');
+}
+
+
 const SLINF_BUDGET_KEY = 'orbit-pmo-sl-budgets-v1';
 
 function loadSLBudgets() {
