@@ -641,3 +641,261 @@ document.addEventListener('click', e => {
   if (e.target === document.getElementById('resource-status-modal'))   closeResStatus();
   if (e.target === document.getElementById('resource-transfer-modal')) closeResTransfer();
 });
+
+// ══════════════════════════════════════════
+// BULK UPLOAD — Resource Requests
+// ══════════════════════════════════════════
+
+// Columns shared between export, template, and import
+const RES_BULK_COLS = [
+  { key: 'resourceTeam',   header: 'Resource Team',  required: true },
+  { key: 'project',        header: 'Project',         required: true },
+  { key: 'position',       header: 'Position',        required: true },
+  { key: 'level',          header: 'Level',           required: true },
+  { key: 'hc',             header: 'HC',              required: true },
+  { key: 'hiringType',     header: 'Hiring Type',     required: true },
+  { key: 'startDate',      header: 'Start Date',      required: true },
+  { key: 'endDate',        header: 'End Date',        required: false },
+  { key: 'requestDate',    header: 'Request Date',    required: false },
+  { key: 'resolvedDate',   header: 'Resolved Date',   required: false },
+  { key: 'status',         header: 'Status',          required: false },
+  { key: 'requesterName',  header: 'Requester',       required: false },
+  { key: 'transferFrom',   header: 'Transfer From',   required: false },
+  { key: 'remark',         header: 'Remark',          required: false },
+];
+
+// ── Download Template ──
+function downloadResTemplate() {
+  if (typeof XLSX === 'undefined') { alert('ไม่พบ SheetJS library'); return; }
+
+  const headers = RES_BULK_COLS.map(c => c.header);
+  const sample  = [
+    'BA', 'Geo9', 'Senior Backend Developer', 'Senior', 1,
+    'Permanent (Direct)', '2025-01-15', '', '2025-01-10', '',
+    'pending', 'Chuen', '', 'ต้องการ resource เพิ่ม Q1',
+  ];
+
+  const ws = XLSX.utils.aoa_to_sheet([headers, sample]);
+
+  // Column widths
+  ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 16) }));
+
+  // Style header row (note: basic xlsx doesn't support full cell styling but we add a note)
+  ws['A1'].c = [{ a: 'PMO', t: '* = required field' }];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Resource Requests');
+  XLSX.writeFile(wb, 'Resource_Requests_Template.xlsx');
+}
+
+// ── Handle file select ──
+function handleResBulkUpload(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  if (typeof XLSX === 'undefined') { alert('ไม่พบ SheetJS library'); return; }
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb   = XLSX.read(e.target.result, { type: 'binary', cellDates: true });
+      const ws   = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+      if (!rows.length) { alert('ไม่พบข้อมูลในไฟล์'); return; }
+
+      _resParseAndPreview(rows);
+    } catch(err) {
+      alert('เกิดข้อผิดพลาดในการอ่านไฟล์: ' + err.message);
+    }
+  };
+  reader.readAsBinaryString(file);
+  event.target.value = ''; // reset so same file can be re-uploaded
+}
+
+// ── Parse rows + deduplicate + show preview ──
+function _resParseAndPreview(rows) {
+  const existing = loadResources();
+  const now      = new Date().toISOString();
+
+  const parsed  = [];
+  const errors  = [];
+
+  rows.forEach((row, i) => {
+    const rowNum = i + 2; // +2 because row 1 = header
+
+    // Map header → field
+    const get = header => {
+      const col = RES_BULK_COLS.find(c => c.header === header);
+      if (!col) return '';
+      // Support both header name and key name in the file
+      const v = row[header] ?? row[col.key] ?? '';
+      if (v instanceof Date) return v.toISOString().slice(0, 10);
+      return String(v).trim();
+    };
+
+    // Required field check
+    const missing = RES_BULK_COLS.filter(c => c.required && !get(c.header));
+    if (missing.length) {
+      errors.push(`Row ${rowNum}: ขาด field — ${missing.map(c => c.header).join(', ')}`);
+      return;
+    }
+
+    const hc = parseInt(get('HC')) || 0;
+    if (hc < 1) { errors.push(`Row ${rowNum}: HC ต้องมากกว่า 0`); return; }
+
+    const statusRaw = get('Status').toLowerCase().replace(/\s+/g, '');
+    const statusMap = {
+      'pending': 'pending', 'sourcing': 'sourcing',
+      'interviewing': 'interviewing', 'offer': 'offer',
+      'offerinprogress': 'offer', 'document': 'document',
+      'documentprocessing': 'document', 'filled': 'filled',
+      'mitigated': 'mitigated', 'resolved': 'resolved', 'cancelled': 'cancelled',
+    };
+    const status = statusMap[statusRaw] || 'pending';
+
+    const record = {
+      id:            nextResId() + '-' + String(i).padStart(3, '0'),
+      resourceTeam:  get('Resource Team'),
+      resourceTeamOther: null,
+      project:       get('Project'),
+      projectOther:  null,
+      position:      get('Position'),
+      level:         get('Level'),
+      levelOther:    null,
+      hc,
+      hiringType:    get('Hiring Type'),
+      hiringTypeOther: null,
+      startDate:     get('Start Date'),
+      endDate:       get('End Date') || null,
+      requestDate:   get('Request Date') || todayISO,
+      resolvedDate:  get('Resolved Date') || null,
+      status,
+      requesterName: get('Requester'),
+      transferFrom:  get('Transfer From') || null,
+      remark:        get('Remark'),
+      activityLog:   [{ action: 'Imported via bulk upload', by: 'PMO', at: now }],
+      createdAt:     now,
+      updatedAt:     now,
+    };
+    parsed.push(record);
+  });
+
+  // ── Deduplicate: compare ALL business fields against existing records ──
+  const COMPARE_KEYS = [
+    'resourceTeam','project','position','level','hc',
+    'hiringType','startDate','endDate','requestDate',
+    'resolvedDate','status','requesterName','transferFrom','remark',
+  ];
+
+  const fingerprint = r => COMPARE_KEYS.map(k => String(r[k] ?? '')).join('|');
+  const existingFPs = new Set(existing.map(fingerprint));
+
+  const toAdd   = parsed.filter(r => !existingFPs.has(fingerprint(r)));
+  const dupCount = parsed.length - toAdd.length;
+
+  _resShowBulkPreview(toAdd, dupCount, errors);
+}
+
+// ── Preview modal ──
+function _resShowBulkPreview(toAdd, dupCount, errors) {
+  const modal = document.getElementById('res-bulk-preview-modal');
+  const body  = document.getElementById('res-bulk-preview-body');
+  if (!modal || !body) return;
+
+  const tdS = 'padding:5px 8px;border-bottom:1px solid var(--border);font-size:11px';
+
+  body.innerHTML = `
+    <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <div style="background:var(--green-50,#F0FDF4);border-radius:var(--r-sm);padding:10px 16px;flex:1;min-width:120px">
+        <div style="font-size:11px;color:var(--text-3)">จะ Import</div>
+        <div style="font-size:22px;font-weight:700;color:var(--green)">${toAdd.length}</div>
+        <div style="font-size:10px;color:var(--text-3)">รายการใหม่</div>
+      </div>
+      <div style="background:var(--amber-50,#FFFBEB);border-radius:var(--r-sm);padding:10px 16px;flex:1;min-width:120px">
+        <div style="font-size:11px;color:var(--text-3)">ข้าม</div>
+        <div style="font-size:22px;font-weight:700;color:var(--amber)">${dupCount}</div>
+        <div style="font-size:10px;color:var(--text-3)">ซ้ำกับที่มีอยู่</div>
+      </div>
+      <div style="background:${errors.length ? 'var(--red-50,#FEF2F2)' : 'var(--bg)'};border-radius:var(--r-sm);padding:10px 16px;flex:1;min-width:120px">
+        <div style="font-size:11px;color:var(--text-3)">Error</div>
+        <div style="font-size:22px;font-weight:700;color:${errors.length ? 'var(--red)' : 'var(--text-3)'}">${errors.length}</div>
+        <div style="font-size:10px;color:var(--text-3)">row ที่ข้อมูลไม่ครบ</div>
+      </div>
+    </div>
+
+    ${errors.length ? `
+      <div style="background:var(--red-50,#FEF2F2);border-radius:var(--r-sm);padding:10px;margin-bottom:12px;font-size:11px;color:var(--red)">
+        <div style="font-weight:600;margin-bottom:4px">⚠ Rows ที่ไม่ผ่าน validation (จะไม่ถูก import):</div>
+        ${errors.map(e => `<div>• ${esc(e)}</div>`).join('')}
+      </div>` : ''}
+
+    ${toAdd.length ? `
+      <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:6px">Preview รายการที่จะ import:</div>
+      <div style="overflow-x:auto;max-height:300px;overflow-y:auto">
+        <table style="width:100%;border-collapse:collapse">
+          <thead style="position:sticky;top:0;background:var(--bg)"><tr>
+            <th style="${tdS};font-weight:600;text-align:left">Team</th>
+            <th style="${tdS};font-weight:600;text-align:left">Project</th>
+            <th style="${tdS};font-weight:600;text-align:left">Position</th>
+            <th style="${tdS};font-weight:600;text-align:left">Level</th>
+            <th style="${tdS};font-weight:600">HC</th>
+            <th style="${tdS};font-weight:600;text-align:left">Hiring Type</th>
+            <th style="${tdS};font-weight:600;text-align:left">Start</th>
+            <th style="${tdS};font-weight:600;text-align:left">Status</th>
+          </tr></thead>
+          <tbody>
+            ${toAdd.map(r => `<tr>
+              <td style="${tdS}">${esc(r.resourceTeam)}</td>
+              <td style="${tdS}">${esc(r.project)}</td>
+              <td style="${tdS}">${esc(r.position)}</td>
+              <td style="${tdS}">${esc(r.level)}</td>
+              <td style="${tdS};text-align:center">${r.hc}</td>
+              <td style="${tdS}">${esc(r.hiringType)}</td>
+              <td style="${tdS}">${r.startDate || '—'}</td>
+              <td style="${tdS}"><span class="badge ${RES_STATUS[r.status]?.cls || 'badge-gray'}" style="font-size:10px">${RES_STATUS[r.status]?.label || r.status}</span></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : `<div style="text-align:center;padding:20px;color:var(--text-3);font-size:12px">ไม่มีรายการใหม่ที่จะ import</div>`}`;
+
+  // Store toAdd for confirm step
+  modal._pendingRecords = toAdd;
+  modal.style.display = 'flex';
+}
+
+function closeResBulkPreview() {
+  const modal = document.getElementById('res-bulk-preview-modal');
+  if (modal) { modal.style.display = 'none'; modal._pendingRecords = null; }
+}
+
+async function confirmResBulkImport() {
+  const modal   = document.getElementById('res-bulk-preview-modal');
+  const records = modal?._pendingRecords || [];
+  if (!records.length) { closeResBulkPreview(); return; }
+
+  const btn = document.getElementById('res-bulk-confirm-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Importing...'; }
+
+  try {
+    // Save all to localStorage first for instant feedback
+    const existing = loadResources();
+    const merged   = [...existing, ...records];
+    storeResources(merged);
+    _resCache = merged;
+
+    // Then push to Supabase
+    if (await checkSupa()) {
+      await Promise.all(records.map(r => saveResourceAsync(r).catch(e =>
+        console.warn('Supabase save failed for', r.id, e.message)
+      )));
+    }
+
+    closeResBulkPreview();
+    renderResource();
+    alert(`✓ Import สำเร็จ — เพิ่ม ${records.length} รายการ`);
+  } catch(err) {
+    alert('เกิดข้อผิดพลาด: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '✓ Confirm Import'; }
+  }
+}
