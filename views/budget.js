@@ -167,32 +167,32 @@ function getLicenseCostByProject() {
 let _bgtCurrentTab = 'overview';
 function switchBudgetTab(tab, btn) {
   _bgtCurrentTab = tab;
-  // Hide all budget sub-tab panels
-  ['overview','sl-infra','others'].forEach(t => {
+  ['overview','actual-spend','forecast','bva','bgt-settings'].forEach(t => {
     const p = document.getElementById('bgt-tab-' + t);
-    if(p) p.style.display = 'none';
+    if (p) p.style.display = 'none';
   });
-  // Remove active from all budget tab buttons
   document.querySelectorAll('#view-budget .cost-stab').forEach(b => {
     b.classList.remove('active');
     b.style.background = '';
     b.style.color = '';
   });
-  // Show selected panel
   const panel = document.getElementById('bgt-tab-' + tab);
-  if(panel) panel.style.display = '';
-  if(btn) btn.classList.add('active');
-  // Render content
-  if(tab === 'overview')  { _ov.initialized = false; renderBudgetOverview(); }
-  if(tab === 'sl-infra')  renderBudgetSLInfra();
-  if(tab === 'others')    renderBudgetOthers();
+  if (panel) panel.style.display = '';
+  if (btn) btn.classList.add('active');
+  if (tab === 'overview')      { _ov.initialized = false; renderBudgetOverview(); }
+  if (tab === 'actual-spend')  renderActualSpend();
+  if (tab === 'forecast')      renderBudgetSLInfra();
+  if (tab === 'bva')           renderBudgetVsActual();
+  if (tab === 'bgt-settings')  { switchBgtSettings('budget'); renderBudgetSettings(); }
 }
 
 // ── Main entry ──
 function renderBudget() {
-  if(_bgtCurrentTab === 'overview')  renderBudgetOverview();
-  if(_bgtCurrentTab === 'sl-infra')  renderBudgetSLInfra();
-  if(_bgtCurrentTab === 'others')    renderBudgetOthers();
+  if (_bgtCurrentTab === 'overview')     renderBudgetOverview();
+  if (_bgtCurrentTab === 'actual-spend') renderActualSpend();
+  if (_bgtCurrentTab === 'forecast')     renderBudgetSLInfra();
+  if (_bgtCurrentTab === 'bva')          renderBudgetVsActual();
+  if (_bgtCurrentTab === 'bgt-settings') renderBudgetSettings();
 }
 
 // ══════════════════════════════════════════
@@ -1502,12 +1502,12 @@ function getSLBudgetForProject(proj, year) {
   return d[year]?.[proj] || 0;
 }
 
-function renderBudgetSettings() {
-  const body = document.getElementById('sl-budget-settings-body');
-  if(!body) return;
-  const year = document.getElementById('sl-bgt-year')?.value || '2569';
-  const budgets = loadSLBudgets();
-  const yearData = budgets[year] || {};
+// Old per-project annual budget helpers kept for backward compat with Overview KPI
+function updateMonthlyPreview(proj) {}
+function saveBudgetRow(proj) {}
+function clearBudgetRow(proj) {}
+function addBudgetRow() {}
+
 
   const s = typeof loadSettings === 'function' ? loadSettings() : null;
   // Combine: settings projects + projects from actual memos + Company-Wide + already budgeted
@@ -1560,37 +1560,6 @@ function renderBudgetSettings() {
       </tbody>
     </table>
     <div style="font-size:11px;color:var(--text-3)">* Company-Wide = งบกลาง เช่น AI tools ที่ใช้ทั้งบริษัท</div>`;
-}
-
-function updateMonthlyPreview(proj) {
-  const inp = document.getElementById('bgt-inp-' + proj);
-  const moEl = document.getElementById('bgt-mo-' + proj);
-  if(!inp || !moEl) return;
-  const annual = parseFloat(inp.value)||0;
-  moEl.textContent = annual ? money(Math.round(annual/12)) : '—';
-}
-
-function saveBudgetRow(proj) {
-  const inp = document.getElementById('bgt-inp-' + proj);
-  const year = document.getElementById('sl-bgt-year')?.value || '2569';
-  const annual = parseFloat(inp?.value)||0;
-  const budgets = loadSLBudgets();
-  if(!budgets[year]) budgets[year] = {};
-  if(annual > 0) budgets[year][proj] = annual;
-  else delete budgets[year][proj];
-  storeSLBudgets(budgets);
-  renderBudgetSettings();
-  // refresh BvA if visible
-  if(document.getElementById('sl-panel-bva')?.style.display !== 'none') renderBudgetSLInfra();
-}
-
-function clearBudgetRow(proj) {
-  if(!confirm(`ลบงบประมาณของ "${proj}" ออก?`)) return;
-  const year = document.getElementById('sl-bgt-year')?.value || '2569';
-  const budgets = loadSLBudgets();
-  if(budgets[year]) delete budgets[year][proj];
-  storeSLBudgets(budgets);
-  renderBudgetSettings();
 }
 
 function addBudgetRow() {
@@ -1712,4 +1681,394 @@ function _renderSpendBreakdown() {
       <td style="${tdS};font-weight:700;color:var(--blue)">${money(grandTotal)}</td>
     </tr>`;
   }
+}
+
+// ══════════════════════════════════════════
+// TAB: ACTUAL SPEND
+// ══════════════════════════════════════════
+function renderActualSpend() {
+  const rangeVal  = document.getElementById('as-range')?.value || '12';
+  const projVal   = document.getElementById('as-project')?.value || 'all';
+  const typeVal   = document.getElementById('as-type')?.value || 'all';
+  const container = document.getElementById('as-content');
+  if (!container) return;
+
+  // Populate project dropdown once
+  const projSel = document.getElementById('as-project');
+  if (projSel && projSel.options.length <= 1) {
+    const projs = [...new Set(loadMemos().filter(m => memoStatusKey(m) === 'completed').map(m => m.project || '(ไม่ระบุ)'))].sort();
+    projs.forEach(p => { const o = document.createElement('option'); o.value = o.textContent = p; projSel.appendChild(o); });
+  }
+
+  let approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
+
+  // Period filter
+  if (rangeVal !== 'all') {
+    const n   = parseInt(rangeVal);
+    const now = new Date();
+    const fromKey = `${new Date(now.getFullYear(), now.getMonth() - n + 1, 1).getFullYear()}-${String(new Date(now.getFullYear(), now.getMonth() - n + 1, 1).getMonth() + 1).padStart(2,'0')}`;
+    approved = approved.filter(m => {
+      const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
+      const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      return k >= fromKey;
+    });
+  }
+  if (projVal !== 'all') approved = approved.filter(m => (m.project || '(ไม่ระบุ)') === projVal);
+  if (typeVal !== 'all') approved = approved.filter(m => m.type === typeVal);
+
+  if (!approved.length) {
+    container.innerHTML = `<div class="card" style="padding:32px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล</div>`;
+    return;
+  }
+
+  // Group by project → type
+  const byProj = {};
+  approved.forEach(m => {
+    const p = m.project || '(ไม่ระบุ)';
+    const t = m.type || 'other';
+    if (!byProj[p]) byProj[p] = {};
+    if (!byProj[p][t]) byProj[p][t] = { total: 0, memos: [] };
+    byProj[p][t].total += Number(m.total) || 0;
+    byProj[p][t].memos.push(m);
+  });
+
+  const grandTotal = approved.reduce((s, m) => s + (Number(m.total) || 0), 0);
+  const tdS = 'padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px';
+
+  container.innerHTML = `
+    <div class="metric-card" style="margin-bottom:14px;display:inline-block;min-width:200px">
+      <div class="metric-label">Total Actual Spend</div>
+      <div class="metric-val" style="color:var(--blue)">${money(Math.round(grandTotal))}</div>
+      <div class="metric-sub">${approved.length} memos</div>
+    </div>
+    ${Object.entries(byProj).sort((a,b) => {
+      const ta = Object.values(a[1]).reduce((s,v) => s+v.total, 0);
+      const tb = Object.values(b[1]).reduce((s,v) => s+v.total, 0);
+      return tb - ta;
+    }).map(([proj, types]) => {
+      const projTotal = Object.values(types).reduce((s, v) => s + v.total, 0);
+      return `
+        <div class="card" style="padding:0;overflow:hidden;margin-bottom:10px">
+          <div style="padding:10px 14px;background:var(--bg);display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)">
+            <span style="font-size:13px;font-weight:600">${esc(proj)}</span>
+            <span style="font-size:13px;font-weight:600;color:var(--blue)">${money(Math.round(projTotal))}</span>
+          </div>
+          <table class="hist-table">
+            <thead><tr>
+              <th style="${tdS};text-align:left">Type</th>
+              <th style="${tdS};text-align:right">Amount</th>
+              <th style="${tdS};text-align:right">Memos</th>
+              <th style="${tdS};text-align:right">% of project</th>
+            </tr></thead>
+            <tbody>
+              ${Object.entries(types).sort((a,b) => b[1].total - a[1].total).map(([type, data]) => `
+                <tr>
+                  <td style="${tdS}">
+                    <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:var(--bg);color:var(--text-2)">${BGT_TYPE_LABELS[type] || type}</span>
+                  </td>
+                  <td style="${tdS};text-align:right;font-weight:500">${money(Math.round(data.total))}</td>
+                  <td style="${tdS};text-align:right;color:var(--text-3)">${data.memos.length}</td>
+                  <td style="${tdS};text-align:right;color:var(--text-2)">${projTotal > 0 ? Math.round(data.total / projTotal * 100) : 0}%</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    }).join('')}`;
+}
+
+// ══════════════════════════════════════════
+// TAB: BUDGET VS ACTUAL (pool-based)
+// ══════════════════════════════════════════
+const BGT_POOLS_KEY = 'orbit-pmo-budget-pools-v1';
+
+function loadBudgetPools() {
+  try { return JSON.parse(localStorage.getItem(BGT_POOLS_KEY) || '[]'); } catch(e) { return []; }
+}
+function storeBudgetPools(arr) {
+  try { localStorage.setItem(BGT_POOLS_KEY, JSON.stringify(arr)); } catch(e) {}
+}
+
+function renderBudgetVsActual() {
+  const yearVal = document.getElementById('bva-year')?.value || '2569';
+  const projVal = document.getElementById('bva-project')?.value || 'all';
+  const container = document.getElementById('bva-content');
+  if (!container) return;
+
+  // Populate project dropdown
+  const projSel = document.getElementById('bva-project');
+  if (projSel && projSel.options.length <= 1) {
+    const projs = [...new Set([
+      ...loadBudgetPools().map(p => p.project),
+      ...loadMemos().filter(m => memoStatusKey(m) === 'completed').map(m => m.project || '(ไม่ระบุ)')
+    ])].filter(Boolean).sort();
+    projs.forEach(p => { const o = document.createElement('option'); o.value = o.textContent = p; projSel.appendChild(o); });
+  }
+
+  const pools   = loadBudgetPools().filter(p => p.year === yearVal && (projVal === 'all' || p.project === projVal));
+  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
+
+  // Count untagged memos
+  const untagged = approved.filter(m => !m.budgetPoolId && (projVal === 'all' || (m.project || '(ไม่ระบุ)') === projVal));
+  const alertEl  = document.getElementById('bva-untagged-alert');
+  if (alertEl) {
+    if (untagged.length > 0) {
+      alertEl.style.display = '';
+      alertEl.textContent   = `⚠ ${untagged.length} memo ยังไม่ได้ assign pool`;
+    } else {
+      alertEl.style.display = 'none';
+    }
+  }
+
+  if (!pools.length) {
+    container.innerHTML = `
+      <div class="card" style="padding:32px;text-align:center">
+        <div style="font-size:32px;margin-bottom:12px">📋</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:8px">ยังไม่มี Budget Pool</div>
+        <div style="font-size:12px;color:var(--text-3);margin-bottom:16px">ไปที่ Settings → Budget Pools เพื่อตั้งงบประมาณก่อน</div>
+        <button class="btn-primary" onclick="switchBudgetTab('bgt-settings')" style="font-size:12px">ไปที่ Settings →</button>
+      </div>`;
+    return;
+  }
+
+  const tdS = 'padding:9px 14px;border-bottom:1px solid var(--border);font-size:12px';
+
+  // Group pools by project
+  const byProj = {};
+  pools.forEach(pool => {
+    if (!byProj[pool.project]) byProj[pool.project] = [];
+    byProj[pool.project].push(pool);
+  });
+
+  // Get actual per pool
+  const getPoolActual = pool => approved
+    .filter(m => m.budgetPoolId === pool.id)
+    .reduce((s, m) => s + (Number(m.total) || 0), 0);
+
+  // Get unbudgeted per project
+  const getUnbudgeted = proj => approved
+    .filter(m => !m.budgetPoolId && (m.project || '(ไม่ระบุ)') === proj &&
+      (projVal === 'all' || proj === projVal))
+    .reduce((s, m) => s + (Number(m.total) || 0), 0);
+
+  container.innerHTML = Object.entries(byProj).map(([proj, projPools]) => {
+    const projBudget     = projPools.reduce((s, p) => s + (p.budget || 0), 0);
+    const projActual     = projPools.reduce((s, p) => s + getPoolActual(p), 0);
+    const projUnbudgeted = getUnbudgeted(proj);
+    const projPct        = projBudget > 0 ? Math.round(projActual / projBudget * 100) : null;
+
+    return `
+      <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
+        <div style="padding:10px 14px;background:var(--bg);display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)">
+          <span style="font-size:13px;font-weight:600">${esc(proj)}</span>
+          <span style="font-size:12px;color:var(--text-2)">Budget: ${money(Math.round(projBudget))} · Actual: ${money(Math.round(projActual))}${projPct !== null ? ` · <span style="font-weight:600;color:${projPct > 100 ? 'var(--red)' : projPct >= 90 ? 'var(--amber)' : 'var(--green)'}">${projPct}%</span>` : ''}</span>
+        </div>
+        <table class="hist-table">
+          <thead><tr>
+            <th style="${tdS};text-align:left">Pool</th>
+            <th style="${tdS};text-align:left">ช่วงเวลา</th>
+            <th style="${tdS};text-align:right">Budget (฿)</th>
+            <th style="${tdS};text-align:right">Actual (฿)</th>
+            <th style="${tdS};text-align:right">Remaining</th>
+            <th style="${tdS}">Utilization</th>
+            <th style="${tdS};text-align:center">Action</th>
+          </tr></thead>
+          <tbody>
+            ${projPools.map(pool => {
+              const actual    = getPoolActual(pool);
+              const remaining = (pool.budget || 0) - actual;
+              const pct       = pool.budget > 0 ? Math.round(actual / pool.budget * 100) : 0;
+              const color     = pct > 100 ? 'var(--red)' : pct >= 90 ? 'var(--amber)' : 'var(--green)';
+              const barW      = Math.min(pct, 100);
+              return `<tr>
+                <td style="${tdS};font-weight:500">${esc(pool.name)}</td>
+                <td style="${tdS};color:var(--text-3);font-size:11px">${pool.startMonth || '—'} → ${pool.endMonth || '—'}</td>
+                <td style="${tdS};text-align:right">${money(pool.budget || 0)}</td>
+                <td style="${tdS};text-align:right;color:var(--blue);font-weight:500">${money(Math.round(actual))}</td>
+                <td style="${tdS};text-align:right;color:${remaining >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:500">${remaining >= 0 ? '' : '-'}${money(Math.abs(Math.round(remaining)))}</td>
+                <td style="${tdS}">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <div style="flex:1;background:var(--border);border-radius:4px;height:6px;overflow:hidden">
+                      <div style="width:${barW}%;height:100%;background:${color};border-radius:4px"></div>
+                    </div>
+                    <span style="font-size:11px;font-weight:500;color:${color};min-width:32px">${pct}%</span>
+                  </div>
+                </td>
+                <td style="${tdS};text-align:center">
+                  <button class="btn-sm" style="font-size:10px;padding:2px 8px" onclick="openAssignMemoModal('${pool.id}')">Assign memo</button>
+                </td>
+              </tr>`;
+            }).join('')}
+            ${projUnbudgeted > 0 ? `
+            <tr style="background:var(--amber-50,#FFFBEB)">
+              <td style="${tdS};color:var(--amber);font-weight:500">⚠ Unbudgeted</td>
+              <td style="${tdS};color:var(--text-3);font-size:11px">ยังไม่ได้ assign pool</td>
+              <td style="${tdS};text-align:right;color:var(--text-3)">—</td>
+              <td style="${tdS};text-align:right;color:var(--amber);font-weight:500">${money(Math.round(projUnbudgeted))}</td>
+              <td style="${tdS};color:var(--text-3)">—</td>
+              <td style="${tdS};color:var(--text-3);font-size:11px">ไม่มี budget อ้างอิง</td>
+              <td style="${tdS}"></td>
+            </tr>` : ''}
+          </tbody>
+        </table>
+      </div>`;
+  }).join('');
+}
+
+// ── Assign memo to pool modal (stub) ──
+function openAssignMemoModal(poolId) {
+  const pool     = loadBudgetPools().find(p => p.id === poolId);
+  if (!pool) return;
+  const approved = loadMemos().filter(m =>
+    memoStatusKey(m) === 'completed' &&
+    (m.project || '(ไม่ระบุ)') === pool.project &&
+    !m.budgetPoolId
+  );
+  alert(`Pool: ${pool.name}\nUnassigned memos for ${pool.project}: ${approved.length}\n\n(Assign UI coming next)`);
+}
+
+// ══════════════════════════════════════════
+// TAB: SETTINGS — Budget Pools + Infra
+// ══════════════════════════════════════════
+function switchBgtSettings(panel, btn) {
+  ['budget','infra'].forEach(p => {
+    const el  = document.getElementById('bset-panel-' + p);
+    const nav = document.getElementById('bset-nav-' + p);
+    if (el)  el.style.display  = p === panel ? '' : 'none';
+    if (nav) {
+      nav.style.borderLeft = p === panel ? '2px solid var(--blue)' : '2px solid transparent';
+      nav.style.background = p === panel ? 'var(--blue-50)' : '';
+      const span = nav.querySelector('span');
+      if (span) { span.style.color = p === panel ? 'var(--blue)' : 'var(--text-2)'; span.style.fontWeight = p === panel ? '600' : '400'; }
+      const svg = nav.querySelector('svg');
+      if (svg) svg.setAttribute('stroke', p === panel ? '#185FA5' : 'currentColor');
+    }
+  });
+  if (panel === 'infra') renderBudgetSLInfra();
+}
+
+function renderBudgetSettings() {
+  const body = document.getElementById('bset-budget-body');
+  if (!body) return;
+  const year  = document.getElementById('bset-year')?.value || '2569';
+  const pools = loadBudgetPools().filter(p => p.year === year);
+
+  if (!pools.length) {
+    body.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:12px">ยังไม่มี Budget Pool สำหรับปี ${year} — กด "+ Add Pool" เพื่อเริ่ม</div>`;
+    return;
+  }
+
+  const tdS = 'padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px';
+  // Group by project
+  const byProj = {};
+  pools.forEach(p => { if (!byProj[p.project]) byProj[p.project] = []; byProj[p.project].push(p); });
+
+  body.innerHTML = Object.entries(byProj).map(([proj, projPools]) => `
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:6px">${esc(proj)}</div>
+      <table class="hist-table">
+        <thead><tr>
+          <th style="${tdS};text-align:left">Pool Name</th>
+          <th style="${tdS};text-align:left">ช่วงเวลา</th>
+          <th style="${tdS};text-align:right">Budget (฿)</th>
+          <th style="${tdS};text-align:center">Actions</th>
+        </tr></thead>
+        <tbody>
+          ${projPools.map(p => `<tr>
+            <td style="${tdS};font-weight:500">${esc(p.name)}</td>
+            <td style="${tdS};font-size:11px;color:var(--text-3)">${p.startMonth || '—'} → ${p.endMonth || '—'}</td>
+            <td style="${tdS};text-align:right;font-weight:600">${money(p.budget || 0)}</td>
+            <td style="${tdS};text-align:center">
+              <button class="btn-sm" style="font-size:11px;padding:2px 7px" onclick="openBudgetPoolModal('${p.id}')">✎</button>
+              <button class="btn-sm" style="font-size:11px;padding:2px 7px;color:var(--red)" onclick="deleteBudgetPool('${p.id}')">✕</button>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`).join('');
+}
+
+function openBudgetPoolModal(editId) {
+  const s       = typeof loadSettings === 'function' ? loadSettings() : null;
+  const projects = s?.projects || [];
+  const pool    = editId ? loadBudgetPools().find(p => p.id === editId) : null;
+  const year    = document.getElementById('bset-year')?.value || '2569';
+
+  const g = (f, def = '') => pool ? (pool[f] ?? def) : def;
+  const projOpts = projects.map(p => `<option value="${esc(p)}" ${g('project') === p ? 'selected' : ''}>${esc(p)}</option>`).join('');
+
+  // Create inline modal
+  const existing = document.getElementById('bpool-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'bpool-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML = `
+    <div class="card" style="width:480px;max-width:95vw;padding:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+        <span style="font-size:15px;font-weight:700">${editId ? 'Edit' : 'New'} Budget Pool</span>
+        <button class="btn-sm" onclick="document.getElementById('bpool-modal').remove()" style="padding:4px 10px">✕</button>
+      </div>
+      <input type="hidden" id="bpool-edit-id" value="${editId || ''}">
+      <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg"><label>Project *</label>
+          <select id="bpool-project" class="ri"><option value="">— เลือก —</option>${projOpts}</select>
+        </div>
+        <div class="fg"><label>Pool Name *</label>
+          <input id="bpool-name" class="ri" placeholder="เช่น SL 2025, HW Q1" value="${esc(g('name'))}">
+        </div>
+        <div class="fg"><label>Budget (฿) *</label>
+          <input id="bpool-budget" class="ri" type="number" min="0" value="${g('budget')}">
+        </div>
+        <div class="fg"><label>ปี (Thai Buddhist Era)</label>
+          <input id="bpool-year" class="ri" value="${g('year', year)}" readonly style="background:var(--bg)">
+        </div>
+        <div class="fg"><label>Start Month (YYYY-MM)</label>
+          <input id="bpool-start" class="ri" type="month" value="${g('startMonth')}">
+        </div>
+        <div class="fg"><label>End Month (YYYY-MM)</label>
+          <input id="bpool-end" class="ri" type="month" value="${g('endMonth')}">
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px">
+        <button class="btn-ghost" onclick="document.getElementById('bpool-modal').remove()">Cancel</button>
+        <button class="btn-primary" onclick="saveBudgetPool()">💾 Save</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+function saveBudgetPool() {
+  const g      = id => document.getElementById(id)?.value?.trim() || '';
+  const project = g('bpool-project');
+  const name    = g('bpool-name');
+  const budget  = parseFloat(g('bpool-budget')) || 0;
+  const year    = g('bpool-year');
+  const start   = g('bpool-start') || null;
+  const end     = g('bpool-end')   || null;
+  const editId  = g('bpool-edit-id');
+
+  if (!project) { alert('กรุณาเลือก Project'); return; }
+  if (!name)    { alert('กรุณากรอกชื่อ Pool'); return; }
+  if (!budget)  { alert('กรุณากรอก Budget'); return; }
+
+  const pools = loadBudgetPools();
+  const id    = editId || `pool-${Date.now().toString(36).toUpperCase()}`;
+  const entry = { id, project, name, budget, year, startMonth: start, endMonth: end };
+
+  if (editId) {
+    const idx = pools.findIndex(p => p.id === editId);
+    if (idx >= 0) pools[idx] = entry; else pools.push(entry);
+  } else {
+    pools.push(entry);
+  }
+  storeBudgetPools(pools);
+  document.getElementById('bpool-modal')?.remove();
+  renderBudgetSettings();
+}
+
+function deleteBudgetPool(id) {
+  if (!confirm('ลบ pool นี้?')) return;
+  storeBudgetPools(loadBudgetPools().filter(p => p.id !== id));
+  renderBudgetSettings();
 }
