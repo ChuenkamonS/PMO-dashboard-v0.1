@@ -1508,60 +1508,6 @@ function saveBudgetRow(proj) {}
 function clearBudgetRow(proj) {}
 function addBudgetRow() {}
 
-
-  const s = typeof loadSettings === 'function' ? loadSettings() : null;
-  // Combine: settings projects + projects from actual memos + Company-Wide + already budgeted
-  const memoProjects = [...new Set(
-    loadMemos()
-      .filter(m => m.type === 'sl' && memoStatusKey(m) === 'completed')
-      .map(m => m.project || '(ไม่ระบุ)')
-      .filter(Boolean)
-  )];
-  const projects = [...new Set([
-    ...(s?.projects || []),
-    ...memoProjects,
-    'Company-Wide',
-    ...Object.keys(yearData)
-  ])].filter(p => p && p !== '(ไม่ระบุ)');
-
-  if(!projects.length) {
-    body.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:12px">ยังไม่มีโปรเจค — กด "+ เพิ่มโปรเจค" หรือตั้งค่าโปรเจคใน Settings ก่อน</div>`;
-    return;
-  }
-
-  const tdS = 'padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px';
-  body.innerHTML = `
-    <table class="hist-table" style="margin-bottom:12px">
-      <thead><tr>
-        <th style="padding:8px 12px;text-align:left;font-weight:500">Project</th>
-        <th style="padding:8px 12px;text-align:left;font-weight:500">Annual Budget (฿)</th>
-        <th style="padding:8px 12px;text-align:right;font-weight:500">Monthly (คำนวณให้)</th>
-        <th style="padding:8px 12px;text-align:center;font-weight:500">Actions</th>
-      </tr></thead>
-      <tbody>
-        ${projects.map(proj => {
-          const annual = yearData[proj] || 0;
-          const monthly = annual ? Math.round(annual/12) : 0;
-          const isCompany = proj === 'Company-Wide';
-          return `<tr style="${isCompany?'background:var(--blue-50)':''}">
-            <td style="${tdS};font-weight:500">${esc(proj)}${isCompany?'<span style="font-size:10px;background:#E6F1FB;color:#0C447C;padding:1px 6px;border-radius:4px;margin-left:6px">Shared</span>':''}</td>
-            <td style="${tdS}">
-              <input type="number" id="bgt-inp-${esc(proj)}" value="${annual||''}" placeholder="0"
-                style="font-size:12px;padding:4px 8px;width:160px"
-                oninput="updateMonthlyPreview('${esc(proj)}')">
-            </td>
-            <td style="${tdS};text-align:right;color:var(--text-3)" id="bgt-mo-${esc(proj)}">${annual ? money(monthly) : '—'}</td>
-            <td style="${tdS};text-align:center">
-              <button class="btn-primary" onclick="saveBudgetRow('${esc(proj)}')" style="font-size:11px;padding:3px 10px">Save</button>
-              ${annual ? `<button class="btn-sm" onclick="clearBudgetRow('${esc(proj)}')" style="font-size:11px;padding:3px 8px;margin-left:4px;color:var(--red)">✕</button>` : ''}
-            </td>
-          </tr>`;
-        }).join('')}
-      </tbody>
-    </table>
-    <div style="font-size:11px;color:var(--text-3)">* Company-Wide = งบกลาง เช่น AI tools ที่ใช้ทั้งบริษัท</div>`;
-}
-
 function addBudgetRow() {
   const proj = prompt('ชื่อโปรเจค หรือ "Company-Wide":');
   if(!proj || !proj.trim()) return;
