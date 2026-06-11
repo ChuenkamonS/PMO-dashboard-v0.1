@@ -1495,13 +1495,77 @@ svg.icon { display: inline-block; vertical-align: middle; }
           </div>
         </div>
 
-        <!-- ── SUB-TAB: OTHERS (Phase 2) ── -->
+        <!-- ── SUB-TAB: OTHERS (HW / INT / ENT / DEP) ── -->
         <div id="bgt-tab-others" class="cost-tab-panel" style="display:none">
-          <div class="card" style="padding:48px;text-align:center">
-            <div style="font-size:36px;margin-bottom:12px">🚧</div>
-            <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:8px">Coming Soon — Phase 2</div>
-            <div style="font-size:13px;color:var(--text-3);max-width:400px;margin:0 auto;line-height:1.8">Budget vs Actual สำหรับ HW / INT / ENT / DEP<br>อยู่ระหว่างรอ confirm budget structure กับทีม</div>
+
+          <!-- Filters -->
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+            <select id="oth-range" onchange="renderBudgetOthers()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+              <option value="3">3 เดือน</option>
+              <option value="6">6 เดือน</option>
+              <option value="12" selected>12 เดือน</option>
+              <option value="all">ทั้งหมด</option>
+            </select>
+            <select id="oth-project" onchange="renderBudgetOthers()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+              <option value="all">ทุกโปรเจค</option>
+            </select>
+            <select id="oth-type" onchange="renderBudgetOthers()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+              <option value="all">ทุกประเภท</option>
+              <option value="hw">Hardware</option>
+              <option value="int">Team Activity</option>
+              <option value="ent">Client Expense</option>
+              <option value="dep">Deployment</option>
+            </select>
           </div>
+
+          <!-- KPI row -->
+          <div class="metric-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px">
+            <div class="metric-card">
+              <div class="metric-label">Total Spend</div>
+              <div class="metric-val" id="oth-kpi-total" style="color:var(--blue)">฿0</div>
+              <div class="metric-sub" id="oth-kpi-period">—</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">จำนวน Memo</div>
+              <div class="metric-val" id="oth-kpi-memos" style="color:var(--text)">0</div>
+              <div class="metric-sub">รายการที่อนุมัติแล้ว</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Type ที่ใช้เงินสูงสุด</div>
+              <div class="metric-val" id="oth-kpi-top-type" style="font-size:14px;color:var(--amber)">—</div>
+              <div class="metric-sub">ในช่วงที่เลือก</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Budget</div>
+              <div class="metric-val" style="font-size:14px;color:var(--text-3)">—</div>
+              <div class="metric-sub">รอ confirm structure</div>
+            </div>
+          </div>
+
+          <!-- Monthly chart -->
+          <div class="card" style="padding:14px 16px;margin-bottom:12px">
+            <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:10px">Monthly Spend — HW / Team Activity / Client Expense / Deployment</div>
+            <div style="height:220px"><canvas id="oth-chart"></canvas></div>
+          </div>
+
+          <!-- Breakdown table -->
+          <div class="card" style="padding:0;overflow:hidden">
+            <div style="padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600">รายการทั้งหมด</div>
+            <div style="overflow-x:auto">
+              <table class="hist-table">
+                <thead><tr>
+                  <th style="padding:7px 12px;text-align:left">วันที่</th>
+                  <th style="padding:7px 12px;text-align:left">Project</th>
+                  <th style="padding:7px 12px;text-align:left">Type</th>
+                  <th style="padding:7px 12px;text-align:left">รายการ</th>
+                  <th style="padding:7px 12px;text-align:right">Amount</th>
+                  <th style="padding:7px 12px;text-align:left">Memo No.</th>
+                </tr></thead>
+                <tbody id="oth-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+
         </div>
 
       </div>
