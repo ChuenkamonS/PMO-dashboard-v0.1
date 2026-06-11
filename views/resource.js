@@ -160,20 +160,14 @@ function _renderResourceUI(all) {
   // ── Populate dynamic dropdowns ──
   _resPopulateProjectFilter(all);
 
-  // ── Filters ──
-  const search   = (document.getElementById('res-search')?.value || '').toLowerCase();
-  const fStatus  = document.getElementById('res-f-status')?.value  || 'all';
-  const fHiring  = document.getElementById('res-f-hiring')?.value  || 'all';
-  const fProject = document.getElementById('res-f-project')?.value || 'all';
-  const fTeam    = document.getElementById('res-f-team')?.value    || 'all';
-  const fLevel   = document.getElementById('res-f-level')?.value   || 'all';
-
+  // ── Apply filters (multi-select: empty set = show all) ──
+  const search = (document.getElementById('res-search')?.value || '').toLowerCase();
   let list = all;
-  if (fStatus  !== 'all') list = list.filter(r => r.status === fStatus);
-  if (fHiring  !== 'all') list = list.filter(r => resDisplayHiring(r) === fHiring);
-  if (fProject !== 'all') list = list.filter(r => resDisplayProject(r) === fProject);
-  if (fTeam    !== 'all') list = list.filter(r => resDisplayTeam(r) === fTeam);
-  if (fLevel   !== 'all') list = list.filter(r => resDisplayLevel(r) === fLevel);
+  if (_resFilters.status.size)  list = list.filter(r => _resFilters.status.has(r.status));
+  if (_resFilters.team.size)    list = list.filter(r => _resFilters.team.has(resDisplayTeam(r)));
+  if (_resFilters.level.size)   list = list.filter(r => _resFilters.level.has(resDisplayLevel(r)));
+  if (_resFilters.hiring.size)  list = list.filter(r => _resFilters.hiring.has(resDisplayHiring(r)));
+  if (_resFilters.project.size) list = list.filter(r => _resFilters.project.has(resDisplayProject(r)));
   if (search) list = list.filter(r =>
     `${resDisplayProject(r)} ${r.position} ${resDisplayTeam(r)} ${resDisplayLevel(r)}`.toLowerCase().includes(search));
 
@@ -218,11 +212,13 @@ function _renderResourceUI(all) {
         <td style="font-size:11px">${r.requestDate ? shortDate(r.requestDate) : '—'}</td>
         <td style="font-size:11px">${r.resolvedDate ? shortDate(r.resolvedDate) : '—'}</td>
         <td><span class="badge ${s.cls}" style="font-size:10px;white-space:nowrap">${esc(s.label)}</span></td>
-        <td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">
-          <button class="btn-sm" style="font-size:10px;padding:2px 7px" onclick="openResDetail('${r.id}')">👁</button>
-          <button class="btn-sm" style="font-size:10px;padding:2px 7px" onclick="openResModal('${r.id}')">✎</button>
-          <button class="btn-sm" style="font-size:10px;padding:2px 7px" onclick="openResStatus('${r.id}')">⇄</button>
-          ${r.status === 'filled' ? `<button class="btn-sm" style="font-size:10px;padding:2px 7px;color:var(--blue)" onclick="openResTransfer('${r.id}')">↗ Transfer</button>` : ''}
+        <td style="text-align:center;white-space:nowrap;padding:6px" onclick="event.stopPropagation()">
+          <div style="display:inline-flex;gap:3px;align-items:center;justify-content:center">
+            <button title="View" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:var(--r-sm);border:1px solid var(--border);background:transparent;cursor:pointer;color:var(--text-2);font-size:13px" onclick="openResDetail('${r.id}')">👁</button>
+            <button title="Edit" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:var(--r-sm);border:1px solid var(--border);background:transparent;cursor:pointer;color:var(--text-2);font-size:13px" onclick="openResModal('${r.id}')">✎</button>
+            <button title="Change Status" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:var(--r-sm);border:1px solid var(--border);background:transparent;cursor:pointer;color:var(--text-2);font-size:13px" onclick="openResStatus('${r.id}')">⇄</button>
+            ${r.status === 'filled' ? `<button title="Transfer" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:var(--r-sm);border:1px solid var(--blue);background:transparent;cursor:pointer;color:var(--blue);font-size:13px" onclick="openResTransfer('${r.id}')">↗</button>` : ''}
+          </div>
         </td>
       </tr>`;
     }).join('');
@@ -247,22 +243,79 @@ function resSortBy(col) {
   _renderResourceUI(loadResources());
 }
 
-// ── Populate all filters dynamically from actual records ──
-function _resPopulateProjectFilter(all) {
-  _resPopulateFilter('res-f-project', all.map(r => resDisplayProject(r)));
-  _resPopulateFilter('res-f-team',    all.map(r => resDisplayTeam(r)));
-  _resPopulateFilter('res-f-level',   all.map(r => resDisplayLevel(r)));
-  _resPopulateFilter('res-f-hiring',  all.map(r => resDisplayHiring(r)));
+// ── Filter state (multi-select sets) ──
+const _resFilters = {
+  status:  new Set(), // empty = all selected
+  team:    new Set(),
+  level:   new Set(),
+  hiring:  new Set(),
+  project: new Set(),
+};
+
+function resToggleFilterPanel() {
+  const panel = document.getElementById('res-filter-panel');
+  const btn   = document.getElementById('res-filter-btn');
+  if (!panel) return;
+  const open = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : '';
+  if (btn) btn.style.background = open ? '' : 'var(--bg)';
 }
 
-function _resPopulateFilter(selId, values) {
-  const sel = document.getElementById(selId);
-  if (!sel) return;
-  const current = sel.value;
-  const unique  = [...new Set(values.filter(Boolean))].sort();
-  // Keep "all" option, rebuild the rest
-  sel.innerHTML = `<option value="all">${sel.options[0]?.text || 'ทั้งหมด'}</option>` +
-    unique.map(v => `<option value="${esc(v)}" ${v === current ? 'selected' : ''}>${esc(v)}</option>`).join('');
+function resClearAllFilters() {
+  Object.values(_resFilters).forEach(s => s.clear());
+  _resRenderChips(loadResources());
+  _resUpdateFilterBadge();
+  _renderResourceUI(loadResources());
+}
+
+function resToggleChip(group, value) {
+  const s = _resFilters[group];
+  if (s.has(value)) s.delete(value); else s.add(value);
+  _resUpdateFilterBadge();
+  _renderResourceUI(loadResources());
+}
+
+function _resUpdateFilterBadge() {
+  const total = Object.values(_resFilters).reduce((n, s) => n + s.size, 0);
+  const badge   = document.getElementById('res-filter-badge');
+  const summary = document.getElementById('res-filter-summary');
+  if (badge) {
+    badge.style.display = total > 0 ? 'inline-flex' : 'none';
+    badge.textContent   = total;
+  }
+  if (summary) summary.textContent = total > 0 ? `— ${total} filter(s) active` : '— ทั้งหมด';
+}
+
+// ── Chip style helper ──
+function _resChipHtml(group, value, label) {
+  const on = _resFilters[group].has(value);
+  const onStyle  = 'background:var(--blue);color:#fff;border-color:var(--blue)';
+  const offStyle = 'background:transparent;color:var(--text-2);border:0.5px solid var(--border)';
+  return `<span onclick="resToggleChip('${group}','${esc(value)}')" style="display:inline-flex;align-items:center;font-size:11px;padding:3px 10px;border-radius:20px;cursor:pointer;user-select:none;margin:2px;${on ? onStyle : offStyle}">${esc(label)}</span>`;
+}
+
+// ── Populate all filter chip areas from actual data ──
+function _resPopulateProjectFilter(all) {
+  _resRenderChips(all);
+}
+
+function _resRenderChips(all) {
+  const statuses = Object.keys(RES_STATUS);
+  const teams    = [...new Set(all.map(r => resDisplayTeam(r)).filter(Boolean))].sort();
+  const levels   = [...new Set(all.map(r => resDisplayLevel(r)).filter(Boolean))].sort();
+  const hirings  = [...new Set(all.map(r => resDisplayHiring(r)).filter(Boolean))].sort();
+  const projects = [...new Set(all.map(r => resDisplayProject(r)).filter(Boolean))].sort();
+
+  const fill = (id, group, items, labelFn = v => v) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = items.map(v => _resChipHtml(group, v, labelFn(v))).join('');
+  };
+
+  fill('res-chips-status',  'status',  statuses, v => RES_STATUS[v]?.label || v);
+  fill('res-chips-team',    'team',    teams);
+  fill('res-chips-level',   'level',   levels);
+  fill('res-chips-hiring',  'hiring',  hirings);
+  fill('res-chips-project', 'project', projects);
 }
 
 // ── New/Edit Modal ──
