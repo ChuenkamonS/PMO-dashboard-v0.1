@@ -88,12 +88,17 @@ let _resSortCol = 'requestDate';
 let _resSortAsc = false;
 
 async function renderResource() {
-  // Render from local cache immediately so layout is stable
-  const local = loadResources ? loadResources() : [];
-  if (local.length) _renderResourceUI(local);
-  // Then fetch fresh from Supabase and re-render
-  const all = await loadResourcesAsync();
-  _renderResourceUI(all);
+  try {
+    const local = loadResources ? loadResources() : [];
+    if (local.length) _renderResourceUI(local);
+    const all = await loadResourcesAsync();
+    _renderResourceUI(all);
+  } catch(e) {
+    console.error('renderResource failed:', e);
+    // Fallback: show error in KPI area
+    const kpiEl = document.getElementById('res-kpi');
+    if (kpiEl) kpiEl.innerHTML = `<div style="color:var(--red);font-size:12px;padding:12px">Error loading resource data: ${e.message}</div>`;
+  }
 }
 
 function _renderResourceUI(all) {
