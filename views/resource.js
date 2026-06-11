@@ -648,7 +648,8 @@ document.addEventListener('click', e => {
 
 // Columns shared between export, template, and import
 const RES_BULK_COLS = [
-  { key: 'resourceTeam',   header: 'Resource Team',  required: true },
+  { key: 'id',             header: 'Request ID',      required: false },
+  { key: 'resourceTeam',   header: 'Resource Team',   required: true },
   { key: 'project',        header: 'Project',         required: true },
   { key: 'position',       header: 'Position',        required: true },
   { key: 'level',          header: 'Level',           required: true },
@@ -670,6 +671,7 @@ function downloadResTemplate() {
 
   const headers = RES_BULK_COLS.map(c => c.header);
   const sample  = [
+    'RES-2501-ABC123',  // Request ID — ใส่ถ้ามี ID เดิม / ว่างไว้ถ้าเป็น record ใหม่
     'BA', 'Geo9', 'Senior Backend Developer', 'Senior', 1,
     'Permanent (Direct)', '2025-01-15', '', '2025-01-10', '',
     'pending', 'Chuen', '', 'ต้องการ resource เพิ่ม Q1',
@@ -754,7 +756,7 @@ function _resParseAndPreview(rows) {
     const status = statusMap[statusRaw] || 'pending';
 
     const record = {
-      id:            nextResId() + '-' + String(i).padStart(3, '0'),
+      id:            get('Request ID').trim() || (nextResId() + '-' + String(i).padStart(3, '0')),
       resourceTeam:  get('Resource Team'),
       resourceTeamOther: null,
       project:       get('Project'),
@@ -780,17 +782,18 @@ function _resParseAndPreview(rows) {
     parsed.push(record);
   });
 
-  // ── Deduplicate: compare ALL business fields against existing records ──
+  // ── Deduplicate: check by ID (exact match) OR all business fields ──
   const COMPARE_KEYS = [
     'resourceTeam','project','position','level','hc',
     'hiringType','startDate','endDate','requestDate',
     'resolvedDate','status','requesterName','transferFrom','remark',
   ];
 
-  const fingerprint = r => COMPARE_KEYS.map(k => String(r[k] ?? '')).join('|');
-  const existingFPs = new Set(existing.map(fingerprint));
+  const fingerprint  = r => COMPARE_KEYS.map(k => String(r[k] ?? '')).join('|');
+  const existingFPs  = new Set(existing.map(fingerprint));
+  const existingIDs  = new Set(existing.map(r => r.id));
 
-  const toAdd   = parsed.filter(r => !existingFPs.has(fingerprint(r)));
+  const toAdd    = parsed.filter(r => !existingIDs.has(r.id) && !existingFPs.has(fingerprint(r)));
   const dupCount = parsed.length - toAdd.length;
 
   _resShowBulkPreview(toAdd, dupCount, errors);
