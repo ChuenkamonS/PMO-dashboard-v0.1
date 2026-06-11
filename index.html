@@ -1495,77 +1495,13 @@ svg.icon { display: inline-block; vertical-align: middle; }
           </div>
         </div>
 
-        <!-- ── SUB-TAB: OTHERS (HW / INT / ENT / DEP) ── -->
+        <!-- ── SUB-TAB: OTHERS (Phase 2) ── -->
         <div id="bgt-tab-others" class="cost-tab-panel" style="display:none">
-
-          <!-- Filters -->
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
-            <select id="oth-range" onchange="renderBudgetOthers()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-              <option value="3">3 เดือน</option>
-              <option value="6">6 เดือน</option>
-              <option value="12" selected>12 เดือน</option>
-              <option value="all">ทั้งหมด</option>
-            </select>
-            <select id="oth-project" onchange="renderBudgetOthers()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-              <option value="all">ทุกโปรเจค</option>
-            </select>
-            <select id="oth-type" onchange="renderBudgetOthers()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-              <option value="all">ทุกประเภท</option>
-              <option value="hw">Hardware</option>
-              <option value="int">Team Activity</option>
-              <option value="ent">Client Expense</option>
-              <option value="dep">Deployment</option>
-            </select>
+          <div class="card" style="padding:48px;text-align:center">
+            <div style="font-size:36px;margin-bottom:12px">🚧</div>
+            <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:8px">Coming Soon — Phase 2</div>
+            <div style="font-size:13px;color:var(--text-3);max-width:400px;margin:0 auto;line-height:1.8">Budget vs Actual สำหรับ HW / INT / ENT / DEP<br>อยู่ระหว่างรอ confirm budget structure กับทีม</div>
           </div>
-
-          <!-- KPI row -->
-          <div class="metric-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px">
-            <div class="metric-card">
-              <div class="metric-label">Total Spend</div>
-              <div class="metric-val" id="oth-kpi-total" style="color:var(--blue)">฿0</div>
-              <div class="metric-sub" id="oth-kpi-period">—</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">จำนวน Memo</div>
-              <div class="metric-val" id="oth-kpi-memos" style="color:var(--text)">0</div>
-              <div class="metric-sub">รายการที่อนุมัติแล้ว</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">Type ที่ใช้เงินสูงสุด</div>
-              <div class="metric-val" id="oth-kpi-top-type" style="font-size:14px;color:var(--amber)">—</div>
-              <div class="metric-sub">ในช่วงที่เลือก</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">Budget</div>
-              <div class="metric-val" style="font-size:14px;color:var(--text-3)">—</div>
-              <div class="metric-sub">รอ confirm structure</div>
-            </div>
-          </div>
-
-          <!-- Monthly chart -->
-          <div class="card" style="padding:14px 16px;margin-bottom:12px">
-            <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:10px">Monthly Spend — HW / Team Activity / Client Expense / Deployment</div>
-            <div style="height:220px"><canvas id="oth-chart"></canvas></div>
-          </div>
-
-          <!-- Breakdown table -->
-          <div class="card" style="padding:0;overflow:hidden">
-            <div style="padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600">รายการทั้งหมด</div>
-            <div style="overflow-x:auto">
-              <table class="hist-table">
-                <thead><tr>
-                  <th style="padding:7px 12px;text-align:left">วันที่</th>
-                  <th style="padding:7px 12px;text-align:left">Project</th>
-                  <th style="padding:7px 12px;text-align:left">Type</th>
-                  <th style="padding:7px 12px;text-align:left">รายการ</th>
-                  <th style="padding:7px 12px;text-align:right">Amount</th>
-                  <th style="padding:7px 12px;text-align:left">Memo No.</th>
-                </tr></thead>
-                <tbody id="oth-table-body"></tbody>
-              </table>
-            </div>
-          </div>
-
         </div>
 
       </div>
@@ -1839,8 +1775,8 @@ svg.icon { display: inline-block; vertical-align: middle; }
       <!-- ════ RESOURCE MANAGEMENT ════ -->
       <div id="view-resource" class="view">
 
-        <!-- KPI cards -->
-        <div class="metric-row" id="res-kpi" style="grid-template-columns:repeat(5,1fr);margin-bottom:14px;min-height:72px"></div>
+        <!-- KPI cards (3) -->
+        <div class="metric-row" id="res-kpi" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px;min-height:72px"></div>
 
         <!-- Filter row -->
         <div class="filter-row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px">
@@ -1859,21 +1795,27 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <option value="resolved">Resolved</option>
             <option value="cancelled">Cancelled</option>
           </select>
+          <select id="res-f-team" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+            <option value="all">ทุก Team</option>
+            <option>BA</option><option>BE</option><option>FE</option>
+            <option>UX/UI</option><option>SA</option><option>PMO</option>
+            <option>PM</option><option>QA</option><option>Others</option>
+          </select>
           <select id="res-f-hiring" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
             <option value="all">ทุก Hiring Type</option>
             <option>Permanent (Direct)</option>
             <option>Secondment</option>
             <option>Sub-contract</option>
+            <option>Others</option>
           </select>
           <select id="res-f-project" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
             <option value="all">ทุกโครงการ</option>
-            <option>AOA-MP</option><option>TTB</option><option>Geo9</option>
-            <option>Release 2.1</option><option>Release 3</option>
           </select>
           <select id="res-f-level" onchange="renderResource()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
             <option value="all">ทุก Level</option>
             <option>Junior</option><option>Mid</option><option>Senior</option>
             <option>Lead</option><option>Manager</option>
+            <option>Senior Manager</option><option>Director</option><option>Others</option>
           </select>
           <button class="btn-export" onclick="exportResourceCsv()">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -1885,21 +1827,21 @@ svg.icon { display: inline-block; vertical-align: middle; }
           </button>
         </div>
 
-        <!-- Table -->
+        <!-- Table with sortable headers -->
         <div class="card" style="padding:0;overflow:hidden">
           <table class="hist-table">
             <thead><tr>
-              <th style="padding-left:12px;width:12%">Request ID</th>
-              <th style="width:9%">Team</th>
-              <th style="width:9%">Project</th>
-              <th style="width:12%">Position</th>
-              <th style="width:7%">Level</th>
+              <th class="res-th-sort" data-col="id" onclick="resSortBy('id')" style="padding-left:12px;width:12%;cursor:pointer">Request ID <span class="sort-arrow"></span></th>
+              <th class="res-th-sort" data-col="resourceTeam" onclick="resSortBy('resourceTeam')" style="width:8%;cursor:pointer">Team <span class="sort-arrow"></span></th>
+              <th class="res-th-sort" data-col="project" onclick="resSortBy('project')" style="width:9%;cursor:pointer">Project <span class="sort-arrow"></span></th>
+              <th class="res-th-sort" data-col="position" onclick="resSortBy('position')" style="width:12%;cursor:pointer">Position <span class="sort-arrow"></span></th>
+              <th class="res-th-sort" data-col="level" onclick="resSortBy('level')" style="width:7%;cursor:pointer">Level <span class="sort-arrow"></span></th>
               <th style="width:4%;text-align:center">HC</th>
               <th style="width:10%">Hiring Type</th>
-              <th style="width:7%">Start</th>
+              <th class="res-th-sort" data-col="startDate" onclick="resSortBy('startDate')" style="width:7%;cursor:pointer">Start <span class="sort-arrow"></span></th>
               <th style="width:7%">End</th>
-              <th style="width:7%">Request Date</th>
-              <th style="width:7%">Resolved</th>
+              <th class="res-th-sort" data-col="requestDate" onclick="resSortBy('requestDate')" style="width:7%;cursor:pointer">Request Date <span class="sort-arrow"></span></th>
+              <th class="res-th-sort" data-col="resolvedDate" onclick="resSortBy('resolvedDate')" style="width:7%;cursor:pointer">Resolved <span class="sort-arrow"></span></th>
               <th style="width:8%;text-align:center">Status</th>
               <th style="width:11%;text-align:center">Action</th>
             </tr></thead>
