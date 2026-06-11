@@ -170,10 +170,10 @@ function _renderResourceUI(all) {
 
   let list = all;
   if (fStatus  !== 'all') list = list.filter(r => r.status === fStatus);
-  if (fHiring  !== 'all') list = list.filter(r => r.hiringType === fHiring);
-  if (fProject !== 'all') list = list.filter(r => r.project === fProject);
-  if (fTeam    !== 'all') list = list.filter(r => r.resourceTeam === fTeam);
-  if (fLevel   !== 'all') list = list.filter(r => r.level === fLevel);
+  if (fHiring  !== 'all') list = list.filter(r => resDisplayHiring(r) === fHiring);
+  if (fProject !== 'all') list = list.filter(r => resDisplayProject(r) === fProject);
+  if (fTeam    !== 'all') list = list.filter(r => resDisplayTeam(r) === fTeam);
+  if (fLevel   !== 'all') list = list.filter(r => resDisplayLevel(r) === fLevel);
   if (search) list = list.filter(r =>
     `${resDisplayProject(r)} ${r.position} ${resDisplayTeam(r)} ${resDisplayLevel(r)}`.toLowerCase().includes(search));
 
@@ -247,19 +247,22 @@ function resSortBy(col) {
   _renderResourceUI(loadResources());
 }
 
-// ── Populate project filter from Settings ──
+// ── Populate all filters dynamically from actual records ──
 function _resPopulateProjectFilter(all) {
-  const sel = document.getElementById('res-f-project');
+  _resPopulateFilter('res-f-project', all.map(r => resDisplayProject(r)));
+  _resPopulateFilter('res-f-team',    all.map(r => resDisplayTeam(r)));
+  _resPopulateFilter('res-f-level',   all.map(r => resDisplayLevel(r)));
+  _resPopulateFilter('res-f-hiring',  all.map(r => resDisplayHiring(r)));
+}
+
+function _resPopulateFilter(selId, values) {
+  const sel = document.getElementById(selId);
   if (!sel) return;
   const current = sel.value;
-  // Build list: from Settings + from existing records
-  const s = typeof loadSettings === 'function' ? loadSettings() : null;
-  const fromSettings = s?.projects || [];
-  const fromRecords  = [...new Set(all.map(r => r.project).filter(Boolean))];
-  const projects = [...new Set([...fromSettings, ...fromRecords])].filter(p => p !== 'Others').sort();
-  // Rebuild options
-  sel.innerHTML = `<option value="all">ทุกโครงการ</option>` +
-    projects.map(p => `<option value="${esc(p)}" ${p === current ? 'selected' : ''}>${esc(p)}</option>`).join('');
+  const unique  = [...new Set(values.filter(Boolean))].sort();
+  // Keep "all" option, rebuild the rest
+  sel.innerHTML = `<option value="all">${sel.options[0]?.text || 'ทั้งหมด'}</option>` +
+    unique.map(v => `<option value="${esc(v)}" ${v === current ? 'selected' : ''}>${esc(v)}</option>`).join('');
 }
 
 // ── New/Edit Modal ──
