@@ -88,6 +88,10 @@ let _resSortCol = 'requestDate';
 let _resSortAsc = false;
 
 async function renderResource() {
+  // Render from local cache immediately so layout is stable
+  const local = loadResources ? loadResources() : [];
+  if (local.length) _renderResourceUI(local);
+  // Then fetch fresh from Supabase and re-render
   const all = await loadResourcesAsync();
   _renderResourceUI(all);
 }
