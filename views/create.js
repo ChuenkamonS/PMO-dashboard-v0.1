@@ -37,6 +37,9 @@ function selectType(type, btn) {
       const el = document.getElementById(id);
       if(el) el.innerHTML = '';
     });
+    // Reset DEP items
+    const depItems = document.getElementById('dep-items');
+    if(depItems) depItems.innerHTML = '';
     // Reset totals
     ['sl-total','hw-total','int-total','ent-total','dep-total'].forEach(id => {
       const el = document.getElementById(id);
@@ -95,6 +98,8 @@ function selectType(type, btn) {
   document.getElementById('form-body').style.display = 'block';
   document.getElementById('acct-card').style.display = type==='sl' ? 'block' : 'none';
   document.getElementById('rev-num').textContent = type==='sl' ? '5' : '4';
+  // Init DEP items if switching to dep
+  if (type === 'dep') setTimeout(initDepItems, 50);
 }
 
 function toggleOtherProject() {
@@ -148,46 +153,102 @@ function addHWRow() {
   d.innerHTML = `<input class="ri" type="text" placeholder="ชื่ออุปกรณ์"><input class="ri hw-price" type="number" placeholder="ราคา" oninput="calcHW()"><input class="ri hw-qty" type="number" placeholder="จำนวน" oninput="calcHW()"><button class="rm-btn" onclick="rmRow(this,'hw-rows');calcHW()" title="ลบ">${TRASH}</button>`;
   document.getElementById('hw-rows').appendChild(d);
 }
-// ── DEP items ──
-function addDepItem() {
+// ── DEP items — two types: calc (price×qty) and text (free text) ──
+function _depItemNum() {
+  return document.querySelectorAll('#dep-items .dep-row').length + 1;
+}
+
+function addDepCalcItem() {
   const container = document.getElementById('dep-items');
   if (!container) return;
+  const qty = parseInt(document.getElementById('dep-emp-count')?.value) || 0;
+  const n   = _depItemNum();
   const row = document.createElement('div');
-  row.className = 'item-row dep-item-row';
-  row.style.cssText = 'display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:6px;margin-bottom:6px;align-items:center';
+  row.className = 'dep-row dep-calc-row';
+  row.style.cssText = 'margin-bottom:8px';
   row.innerHTML = `
-    <input class="ri dep-item-name" type="text" placeholder="รายการ เช่น ค่าเดินทาง">
-    <input class="ri dep-item-price" type="number" placeholder="ราคา/หัว (฿)" min="0" oninput="calcDepRow(this)">
-    <input class="ri dep-item-qty" type="number" placeholder="จำนวนคน" min="1" oninput="calcDepRow(this)">
-    <input class="ri dep-item-total" type="text" placeholder="รวม (฿)" readonly style="background:var(--bg);font-weight:600">
-    <button class="rm-btn" onclick="rmDepItem(this)" title="ลบ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>`;
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+      <span style="font-size:11px;color:var(--text-3);min-width:18px">${n}.</span>
+      <span style="font-size:10px;padding:1px 7px;border-radius:10px;background:#E6F1FB;color:#0C447C;font-weight:500">คำนวณ</span>
+    </div>
+    <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:6px;align-items:center">
+      <input class="ri dep-item-name" type="text" placeholder="ชื่อรายการ เช่น ค่าอาหารมื้อหลัก" style="font-size:12px">
+      <input class="ri dep-item-price" type="number" placeholder="ราคา/หัว (฿)" min="0" style="font-size:12px" oninput="calcDepRow(this)">
+      <input class="ri dep-item-qty dep-qty-auto" type="number" placeholder="จำนวนคน" min="1" value="${qty||''}" style="font-size:12px" oninput="calcDepRow(this)">
+      <input class="ri dep-item-total" type="text" readonly style="background:var(--bg);font-weight:600;font-size:12px" placeholder="฿0">
+      <button class="rm-btn" onclick="rmDepRow(this)" title="ลบ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
+    </div>`;
   container.appendChild(row);
 }
-function rmDepItem(btn) {
-  const rows = document.querySelectorAll('#dep-items .dep-item-row');
-  if (rows.length > 1) { btn.closest('.dep-item-row').remove(); calcDepGrand(); }
+
+function addDepTextItem() {
+  const container = document.getElementById('dep-items');
+  if (!container) return;
+  const n = _depItemNum();
+  const row = document.createElement('div');
+  row.className = 'dep-row dep-text-row';
+  row.style.cssText = 'margin-bottom:8px';
+  row.innerHTML = `
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+      <span style="font-size:11px;color:var(--text-3);min-width:18px">${n}.</span>
+      <span style="font-size:10px;padding:1px 7px;border-radius:10px;background:#F1EFE8;color:#444441;font-weight:500">ขอสนับสนุน</span>
+      <span style="font-size:10px;color:var(--text-3)">ไม่ระบุจำนวนเงิน</span>
+      <button class="rm-btn" onclick="rmDepRow(this)" title="ลบ" style="margin-left:auto"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
+    </div>
+    <textarea class="ri dep-item-text" rows="2" style="width:100%;font-size:12px;resize:vertical" placeholder="อธิบายรายการที่ขอสนับสนุน เช่น ขอสนับสนุนอุปกรณ์อิเล็กทรอนิกส์ รายละเอียดตามใบแจ้งอุปกรณ์..."></textarea>`;
+  container.appendChild(row);
 }
+
+function rmDepRow(btn) {
+  btn.closest('.dep-row').remove();
+  depRenumber();
+  calcDepGrand();
+}
+
+function depRenumber() {
+  document.querySelectorAll('#dep-items .dep-row').forEach((row, i) => {
+    const numEl = row.querySelector('span:first-child');
+    if (numEl && numEl.style.minWidth) numEl.textContent = (i + 1) + '.';
+  });
+}
+
 function calcDepRow(inp) {
-  const row   = inp.closest('.dep-item-row');
+  const row   = inp.closest('.dep-calc-row');
+  if (!row) return;
   const price = parseFloat(row.querySelector('.dep-item-price')?.value) || 0;
   const qty   = parseInt(row.querySelector('.dep-item-qty')?.value)   || 0;
   const total = price * qty;
   const totalInp = row.querySelector('.dep-item-total');
-  if (totalInp) totalInp.value = total > 0 ? total.toLocaleString() : '';
+  if (totalInp) totalInp.value = total > 0 ? '฿' + total.toLocaleString() : '';
   calcDepGrand();
 }
+
 function calcDepGrand() {
   let grand = 0;
-  document.querySelectorAll('#dep-items .dep-item-row').forEach(row => {
+  document.querySelectorAll('#dep-items .dep-calc-row').forEach(row => {
     const price = parseFloat(row.querySelector('.dep-item-price')?.value) || 0;
     const qty   = parseInt(row.querySelector('.dep-item-qty')?.value)   || 0;
     grand += price * qty;
   });
-  const el = document.getElementById('dep-grand-total');
-  if (el) el.textContent = '฿' + grand.toLocaleString();
-  // Sync total field
+  const grandEl = document.getElementById('dep-grand-total');
+  if (grandEl) grandEl.textContent = '฿' + grand.toLocaleString();
   const totalEl = document.getElementById('dep-total');
   if (totalEl) { totalEl.value = grand; totalEl.dispatchEvent(new Event('input')); }
+  updateTotal();
+}
+
+function depSyncQty() {
+  const n = parseInt(document.getElementById('dep-emp-count')?.value) || 0;
+  document.querySelectorAll('#dep-items .dep-qty-auto').forEach(inp => {
+    if (!inp.dataset.edited) { inp.value = n; calcDepRow(inp); }
+  });
+}
+
+// Init one calc row on form load
+function initDepItems() {
+  const container = document.getElementById('dep-items');
+  if (!container || container.children.length > 0) return;
+  addDepCalcItem();
 }
 
 function addName(cid, cls, doCalc) {
@@ -352,39 +413,39 @@ function collectMemoData() {
     const start    = document.getElementById('dep-start')?.value || '';
     const end      = document.getElementById('dep-end')?.value   || '';
     const location = document.getElementById('dep-location')?.value.trim() || '';
+    const empCount = parseInt(document.getElementById('dep-emp-count')?.value) || 0;
     data.amountWords = document.getElementById('dep-amount-words')?.value.trim() || '';
+    data.depEmpCount = empCount;
+    data.depLocation = location;
+    data.depStart    = start ? dateInput(start) : '';
+    data.depEnd      = end   ? dateInput(end)   : '';
 
-    // Collect items
-    const itemRows = document.querySelectorAll('#dep-items .dep-item-row');
-    const items = [];
+    // Collect both item types
     let grandTotal = 0;
-    itemRows.forEach((row, idx) => {
-      const name  = row.querySelector('.dep-item-name')?.value.trim() || '';
-      const price = parseFloat(row.querySelector('.dep-item-price')?.value) || 0;
-      const qty   = parseInt(row.querySelector('.dep-item-qty')?.value)   || 0;
-      const total = price * qty;
-      if (name) { items.push([idx+1, name, price, qty, total]); grandTotal += total; }
+    const itemsHtml = [];
+
+    document.querySelectorAll('#dep-items .dep-row').forEach((row, idx) => {
+      const n = idx + 1;
+      if (row.classList.contains('dep-calc-row')) {
+        const name  = row.querySelector('.dep-item-name')?.value.trim() || '';
+        const price = parseFloat(row.querySelector('.dep-item-price')?.value) || 0;
+        const qty   = parseInt(row.querySelector('.dep-item-qty')?.value)   || 0;
+        const total = price * qty;
+        if (name) {
+          grandTotal += total;
+          itemsHtml.push(`<li>${esc(name)} ราคา ${price.toLocaleString()} บาท × ${qty} คน = ${total.toLocaleString()} บาท (รวมภาษีมูลค่าเพิ่ม)</li>`);
+        }
+      } else if (row.classList.contains('dep-text-row')) {
+        const text = row.querySelector('.dep-item-text')?.value.trim() || '';
+        if (text) itemsHtml.push(`<li>${esc(text)}</li>`);
+      }
     });
 
-    // Override total with computed sum
-    if (items.length) data.total = grandTotal;
+    if (grandTotal > 0) data.total = grandTotal;
 
-    // Inject location into subject if not already there
-    if (location && data.subject && !data.subject.includes(location)) {
-      data.subject = data.subject.replace(/(ในวันที่.*)/, `ณ ${location} $1`);
-    }
-
-    // Build numbered list section for PDF
-    const itemsHtml = items.map(([n, name, price, qty, total]) =>
-      `<li>${esc(name)} ราคา ${price.toLocaleString()} บาท × ${qty} คน = ${total.toLocaleString()} บาท (รวมภาษีมูลค่าเพิ่ม)</li>`
-    ).join('');
-    data.depItems   = items;
-    data.depLocation = location;
-    data.depStart   = start ? dateInput(start) : '';
-    data.depEnd     = end   ? dateInput(end)   : '';
     data.sections.push({
       title: 'รายการค่าใช้จ่าย',
-      html:  `<ol style="margin:0;padding-left:20px;line-height:2">${itemsHtml}</ol>`
+      html:  `<ol style="margin:0;padding-left:20px;line-height:2.2">${itemsHtml.join('')}</ol>`
     });
   }
   return data;
