@@ -12,7 +12,7 @@ async function supaFetch(table, method='GET', body=null, query='') {
     'apikey': SUPA_KEY,
     'Authorization': 'Bearer ' + SUPA_KEY,
     'Content-Type': 'application/json',
-    'Prefer': method === 'POST' ? 'return=representation' : 'return=representation',
+    'Prefer': (method === 'POST' && query.includes('on_conflict')) ? 'return=representation,resolution=merge-duplicates' : 'return=representation',
   };
   if(method === 'GET') headers['Accept'] = 'application/json';
   const resp = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : null });
