@@ -137,26 +137,27 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
 
   // ── Multi-approver flow logic ──
   const approvers = memo.approvers || [];
-  if (status === 'approved_a1' && approvers.length >= 2) {
-    // A1 approved → move to pending_a2
-    updated.status    = 'pending_a2';
+  const currentPendingIdx = approvers.findIndex(a => !a.status || a.status === 'pending');
+
+  if (status === 'approved_a1' || status === 'approved_a2' || status === 'approved_a3') {
+    // Find which approver is approving
+    const approvingIdx = status === 'approved_a1' ? 0 : status === 'approved_a2' ? 1 : 2;
+    const nextIdx = approvingIdx + 1;
+
     updated.approvers = approvers.map((a, i) =>
-      i === 0 ? { ...a, status: 'approved', approvedAt: now, approvedBy: extra.approvedBy || currentUser() } : a
+      i === approvingIdx
+        ? { ...a, status: 'approved', approvedAt: now, approvedBy: extra.approvedBy || currentUser() }
+        : a
     );
-  } else if (status === 'approved_a1' && approvers.length < 2) {
-    // Only 1 approver → complete
-    updated.status      = 'completed';
-    updated.approvedAt  = now;
-    updated.approvers   = approvers.map((a, i) =>
-      i === 0 ? { ...a, status: 'approved', approvedAt: now, approvedBy: extra.approvedBy || currentUser() } : a
-    );
-  } else if (status === 'approved_a2') {
-    updated.status    = 'completed';
-    updated.approvedAt = now;
-    updated.approvers  = approvers.map((a, i) =>
-      i === 1 ? { ...a, status: 'approved', approvedAt: now, approvedBy: extra.approvedBy || currentUser() } : a
-    );
-  } else if (status === 'completed') {
+
+    if (nextIdx < approvers.length && approvers[nextIdx]) {
+      // Still more approvers
+      updated.status = nextIdx === 1 ? 'pending_a2' : 'pending_a3';
+    } else {
+      // All done
+      updated.status    = 'completed';
+      updated.approvedAt = now;
+    }
     updated.approvedAt = now;
   } else if (status === 'rejected') {
     updated.rejectedAt = now;
