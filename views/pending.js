@@ -341,6 +341,8 @@ function openDetailModal(memoNo) {
       <span style="color:var(--text-2);margin-left:8px">${esc(memo.pmoOverrideNote)}</span>
       ${memo.pmoOverrideBy ? `<div style="font-size:10px;color:var(--text-3);margin-top:2px">โดย ${esc(memo.pmoOverrideBy)}</div>` : ''}
     </div>` : '';
+
+  const sections = (memo.sections||[]).map(s=>`
     <div style="margin-bottom:16px">
       <div style="font-size:11px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">${esc(s.title)}</div>
       <div style="border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden;font-size:12px">${s.html}</div>
@@ -356,9 +358,6 @@ function openDetailModal(memoNo) {
           </div>
         </div>`).join('')
     : '<div style="font-size:12px;color:var(--text-3);padding:8px 0">ยังไม่มีประวัติ</div>';
-
-  const isOwn  = (memo.requesterName || '') === currentUser();
-  const canAct = (!memo.status||memo.status==='pending') && !isOwn;
 
   document.getElementById('detail-content').innerHTML = `
     <!-- Header -->
