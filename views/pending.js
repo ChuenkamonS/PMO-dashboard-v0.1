@@ -84,7 +84,7 @@ function renderPendingMemos() {
   populatePendingFilters();
 
   const allMemos = loadMemos();
-  const pending  = allMemos.filter(m => !m.status || m.status === 'pending');
+  const pending  = allMemos.filter(m => m.status === 'pending' || m.status === 'pending_a2');
 
   // Sidebar badge
   const badge = document.querySelector('#memo-sub .sb-badge');
@@ -110,7 +110,7 @@ function renderPendingContent() {
   if (!list) return;
 
   // Inbox = pending only
-  let memos = loadMemos().filter(m => !m.status || m.status === 'pending');
+  let memos = loadMemos().filter(m => m.status === 'pending' || m.status === 'pending_a2');
   if(_pendingSearch) {
     const s = _pendingSearch.toLowerCase();
     memos = memos.filter(m => (m.memoNo||'').toLowerCase().includes(s)||(m.project||'').toLowerCase().includes(s)||(m.reviewerName||'').toLowerCase().includes(s));
@@ -176,7 +176,7 @@ const TYPE_TEXT_PENDING  = { sl:'#0C447C', hw:'#2C2C2A', int:'#27500A', ent:'#63
 function buildPendingRow(memo) {
   const days    = pendingAge(memo);
   const amt     = Number(memo.total)||0;
-  const stage   = memo.approvalStage || 'Pending A1';
+  const stage   = memo.status === 'pending_a2' ? 'Pending A2' : 'Pending A1';
   const isOwn   = (memo.requesterName||'') === currentUser();
   const canAct  = !isOwn;
   const accent  = TYPE_COLOR_PENDING[memo.type] || '#888780';
@@ -187,7 +187,7 @@ function buildPendingRow(memo) {
   const statusCls = memo.status==='completed'?'background:#EAF3DE;color:#27500A':memo.status==='rejected'?'background:#FCEBEB;color:#791F1F':'background:#EEEDFE;color:#3C3489';
   const statusLbl = memo.status==='completed'?'Completed':memo.status==='rejected'?'Rejected':stage;
 
-  const isPending = !memo.status || memo.status === 'pending';
+  const isPending = memo.status === 'pending' || memo.status === 'pending_a2';
   const actionBtns = canAct
     ? `<button class="btn-approve" data-action="approve" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 7px">✓</button>
        <button class="btn-reject"  data-action="reject"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 7px;margin-left:2px">✕</button>
@@ -252,11 +252,23 @@ function confirmApprove() {
   const targets = JSON.parse(document.getElementById('approve-modal').dataset.targets || '[]');
   const note    = document.getElementById('approve-note').value.trim();
   const memos   = loadMemos();
+
   targets.forEach(memoNo => {
-    appendAuditLog(memos, memoNo, 'approved', note);
+    const memo      = memos.find(m => m.memoNo === memoNo);
+    if (!memo) return;
+    const approvers = memo.approvers || [];
+    const user      = currentUser();
+
+    // Determine which approver step we're on
+    const isPendingA2 = memo.status === 'pending_a2';
+    const actionKey   = isPendingA2 ? 'approved_a2' : 'approved_a1';
+
+    appendAuditLog(memos, memoNo,
+      isPendingA2 ? `A2 Approved by ${user}` : `A1 Approved by ${user}`, note);
+
+    updateMemoStatusAsync(memoNo, actionKey, { approvalNote: note, approvedBy: user });
   });
   storeMemos(memos);
-  targets.forEach(memoNo => updateMemoStatus(memoNo, 'completed', { approvalNote:note, approvedBy:currentUser() }));
   closeApproveModal();
   alert(`✓ Approved ${targets.length} รายการแล้ว`);
 }
@@ -294,10 +306,40 @@ function openDetailModal(memoNo) {
 
   const typeLabel = { sl:'Software License', hw:'Hardware', int:'Team Activity', ent:'Client Expense', dep:'Deployment' }[memo.type] || (memo.type||'').toUpperCase();
   const accentColor = { sl:'#185FA5', hw:'#444441', int:'#3B6D11', ent:'#854F0B', dep:'#3C3489' }[memo.type] || '#888780';
-  const statusCls = memo.status==='completed'?'badge-green':memo.status==='rejected'?'badge-red':memo.status==='draft'?'badge-gray':'badge-amber';
-  const statusLabel = memo.status==='completed'?'Completed':memo.status==='rejected'?'Rejected':memo.status==='draft'?'Draft':'Pending';
+  const statusCls   = memo.status==='completed'?'badge-green':memo.status==='rejected'?'badge-red':memo.status==='draft'?'badge-gray':'badge-amber';
+  const statusLabel = memo.status==='completed'?'Completed':memo.status==='rejected'?'Rejected':memo.status==='draft'?'Draft':memo.status==='pending_a2'?'Pending A2':'Pending A1';
 
-  const sections = (memo.sections||[]).map(s=>`
+  const isOwn  = (memo.requesterName || '') === currentUser();
+  const isPMO  = true; // TODO: replace with role check after auth
+  const canAct = (memo.status==='pending'||memo.status==='pending_a2') && !isOwn;
+
+  // Approval chain display
+  const approvers = memo.approvers || [];
+  const approvalChain = approvers.length ? `
+    <div style="margin-bottom:16px">
+      <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Approval Chain</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${approvers.map((a, i) => {
+          const dotColor = a.status==='approved' ? 'var(--green)' : a.status==='rejected' ? 'var(--red)' : 'var(--amber)';
+          const dotLabel = a.status==='approved' ? '✅' : a.status==='rejected' ? '❌' : '⏳';
+          return `<div style="border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 12px;min-width:140px">
+            <div style="font-size:10px;color:var(--text-3);margin-bottom:2px">A${i+1} ${dotLabel}</div>
+            <div style="font-size:12px;font-weight:600">${esc(a.name||'-')}</div>
+            <div style="font-size:11px;color:var(--text-3)">${esc(a.title||'-')}</div>
+            ${a.approvedAt ? `<div style="font-size:10px;color:var(--green);margin-top:3px">${shortDate(a.approvedAt)}</div>` : ''}
+            ${a.status==='rejected' ? `<div style="font-size:10px;color:var(--red);margin-top:3px">Rejected</div>` : ''}
+          </div>`;
+        }).join('<div style="display:flex;align-items:center;color:var(--text-3);font-size:18px;padding-top:12px">→</div>')}
+      </div>
+    </div>` : '';
+
+  // PMO override note (if any)
+  const pmoNote = memo.pmoOverrideNote ? `
+    <div style="padding:8px 12px;background:#FFF7E6;border-radius:var(--r-sm);margin-bottom:12px;font-size:12px;border-left:3px solid var(--amber)">
+      <span style="font-weight:600;color:var(--amber)">⚠ PMO Override</span>
+      <span style="color:var(--text-2);margin-left:8px">${esc(memo.pmoOverrideNote)}</span>
+      ${memo.pmoOverrideBy ? `<div style="font-size:10px;color:var(--text-3);margin-top:2px">โดย ${esc(memo.pmoOverrideBy)}</div>` : ''}
+    </div>` : '';
     <div style="margin-bottom:16px">
       <div style="font-size:11px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">${esc(s.title)}</div>
       <div style="border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden;font-size:12px">${s.html}</div>
@@ -365,6 +407,8 @@ function openDetailModal(memoNo) {
     <!-- Approval/Rejection note -->
     ${memo.approvalNote?`<div style="padding:10px 12px;background:var(--green-50);border-radius:var(--r-sm);margin-bottom:12px;font-size:12px;color:var(--green)"><span style="font-weight:600">Approval Note:</span> ${esc(memo.approvalNote)}</div>`:''}
     ${memo.rejectionReason?`<div style="padding:10px 12px;background:var(--red-50);border-radius:var(--r-sm);margin-bottom:12px;font-size:12px;color:var(--red)"><span style="font-weight:600">Rejection Reason:</span> ${esc(memo.rejectionReason)}</div>`:''}
+    ${approvalChain}
+    ${pmoNote}
 
     <!-- Audit log -->
     <div>
@@ -378,9 +422,218 @@ function openDetailModal(memoNo) {
        <button class="btn-reject" onclick="closeDetailModal();openRejectModal('${esc(memo.memoNo)}')">✕ Reject</button>`
     : '';
   acts.innerHTML += `<button class="btn-sm" onclick="openMemoPdf('${esc(memo.memoNo)}')">📄 PDF</button>`;
+  if (isPMO && memo.status !== 'draft') {
+    acts.innerHTML += `
+      <button class="btn-sm" style="color:var(--blue);margin-left:4px" onclick="closeDetailModal();openPmoEditApproversModal('${esc(memo.memoNo)}')">✎ Approvers</button>
+      <button class="btn-sm" style="color:var(--red);margin-left:4px" onclick="closeDetailModal();openPmoOverrideModal('${esc(memo.memoNo)}')">⚠ Override</button>`;
+  }
   document.getElementById('detail-modal').style.display = 'flex';
 }
 function closeDetailModal() { document.getElementById('detail-modal').style.display='none'; }
+
+// ══════════════════════════════════════════
+// PMO TOOLS
+// ══════════════════════════════════════════
+
+// ── PMO Override Status ──
+function openPmoOverrideModal(memoNo) {
+  const memo = loadMemos().find(m => m.memoNo === memoNo);
+  if (!memo) return;
+  document.getElementById('pmo-override-memo-no')?.remove?.();
+
+  const existing = document.getElementById('pmo-override-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'pmo-override-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:400;display:flex;align-items:center;justify-content:center';
+
+  const statusOpts = [
+    { v: 'pending',    l: 'Pending (A1)' },
+    { v: 'pending_a2', l: 'Pending A2' },
+    { v: 'completed',  l: 'Completed (Approved)' },
+    { v: 'rejected',   l: 'Rejected' },
+  ].map(o => `<option value="${o.v}" ${memo.status === o.v ? 'selected' : ''}>${o.l}</option>`).join('');
+
+  modal.innerHTML = `
+    <div class="card" style="width:460px;max-width:95vw;padding:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <span style="font-size:15px;font-weight:700;color:var(--red)">⚠ PMO Override Status</span>
+        <button class="btn-sm" onclick="document.getElementById('pmo-override-modal').remove()" style="padding:4px 10px">✕</button>
+      </div>
+      <div style="font-size:12px;color:var(--text-2);margin-bottom:14px">
+        Memo: <strong>${esc(memo.memoNo)}</strong> · ${esc(memo.subject || memo.project || '-')}
+      </div>
+      <div class="fg" style="margin-bottom:10px">
+        <label style="font-size:11px;font-weight:600;color:var(--text-2)">เปลี่ยนสถานะเป็น *</label>
+        <select id="pmo-new-status" class="ri" style="margin-top:4px">${statusOpts}</select>
+      </div>
+      <div class="fg" style="margin-bottom:10px">
+        <label style="font-size:11px;font-weight:600;color:var(--text-2)">อนุมัติโดย (ชื่อผู้อนุมัติจริง)</label>
+        <input id="pmo-approved-by" class="ri" style="margin-top:4px" placeholder="เช่น นาย ปกรณ์ เจียมสกุลทิพย์">
+      </div>
+      <div class="fg" style="margin-bottom:16px">
+        <label style="font-size:11px;font-weight:600;color:var(--red)">เหตุผล/หมายเหตุ * (บังคับ)</label>
+        <textarea id="pmo-override-note" class="ri" rows="3" style="margin-top:4px" placeholder="ระบุเหตุผล เช่น อนุมัติผ่าน Email เมื่อ 10/06/69 จาก CEO"></textarea>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px">
+        <button class="btn-ghost" onclick="document.getElementById('pmo-override-modal').remove()">Cancel</button>
+        <button class="btn-primary" style="background:var(--red);border-color:var(--red)" onclick="confirmPmoOverride('${esc(memoNo)}')">⚠ Override</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+}
+
+function confirmPmoOverride(memoNo) {
+  const newStatus   = document.getElementById('pmo-new-status')?.value;
+  const note        = document.getElementById('pmo-override-note')?.value.trim();
+  const approvedBy  = document.getElementById('pmo-approved-by')?.value.trim();
+
+  if (!note) { alert('กรุณาระบุเหตุผล/หมายเหตุ'); return; }
+
+  const memos = loadMemos();
+  const user  = currentUser();
+  appendAuditLog(memos, memoNo, `PMO Override → ${newStatus} by ${user}`, note);
+  storeMemos(memos);
+
+  updateMemoStatusAsync(memoNo, newStatus, {
+    pmoOverrideNote: note,
+    pmoOverrideBy:   user,
+    approvedBy:      approvedBy || user,
+    approvalNote:    note,
+  });
+
+  document.getElementById('pmo-override-modal')?.remove();
+  closeDetailModal();
+  alert('✓ Override เสร็จสิ้น');
+}
+
+// ── PMO Edit Approvers ──
+function openPmoEditApproversModal(memoNo) {
+  const memo      = loadMemos().find(m => m.memoNo === memoNo);
+  if (!memo) return;
+  const approvers = memo.approvers || [];
+  const s         = typeof loadSettings === 'function' ? loadSettings() : null;
+  const names     = s?.approverNames || [];
+  const titles    = s?.approverTitles || [];
+
+  const existing = document.getElementById('pmo-approvers-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'pmo-approvers-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:400;display:flex;align-items:center;justify-content:center';
+
+  const nameOpts  = names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  const titleOpts = titles.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+
+  const renderApproverRow = (a, idx) => `
+    <div class="approver-edit-row" style="border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:8px">
+      <div style="font-size:10px;font-weight:600;color:var(--text-3);margin-bottom:6px">
+        A${idx+1} ${a.status === 'approved' ? '✅ Approved แล้ว — แก้ไขไม่ได้' : ''}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end">
+        <div>
+          <label style="font-size:11px;color:var(--text-3)">ชื่อ</label>
+          <input class="ri appr-name" style="margin-top:3px;font-size:12px" value="${esc(a.name||'')}" ${a.status==='approved'?'disabled':''}>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--text-3)">ตำแหน่ง</label>
+          <input class="ri appr-title" style="margin-top:3px;font-size:12px" value="${esc(a.title||'')}" ${a.status==='approved'?'disabled':''}>
+        </div>
+        ${a.status !== 'approved' && idx > 0 ? `<button class="btn-sm" onclick="this.closest('.approver-edit-row').remove()" style="color:var(--red);padding:6px 8px">✕</button>` : '<div></div>'}
+      </div>
+    </div>`;
+
+  modal.innerHTML = `
+    <div class="card" style="width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;padding:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <span style="font-size:15px;font-weight:700">แก้ไข Approvers</span>
+        <button class="btn-sm" onclick="document.getElementById('pmo-approvers-modal').remove()" style="padding:4px 10px">✕</button>
+      </div>
+      <div style="font-size:12px;color:var(--text-2);margin-bottom:14px">
+        Memo: <strong>${esc(memo.memoNo)}</strong>
+      </div>
+      <div id="approver-rows">${approvers.map(renderApproverRow).join('')}</div>
+      ${approvers.length < 3 ? `
+        <button class="add-btn" onclick="addApproverRow()" style="margin-bottom:14px">+ เพิ่ม Approver</button>` : ''}
+      <div class="fg" style="margin-bottom:16px">
+        <label style="font-size:11px;font-weight:600;color:var(--text-2)">เหตุผลที่แก้ไข *</label>
+        <textarea id="pmo-appr-note" class="ri" rows="2" style="margin-top:4px" placeholder="เช่น เปลี่ยน Approver ตามคำขอ CEO"></textarea>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px">
+        <button class="btn-ghost" onclick="document.getElementById('pmo-approvers-modal').remove()">Cancel</button>
+        <button class="btn-primary" onclick="confirmPmoEditApprovers('${esc(memoNo)}')">💾 บันทึก</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+}
+
+function addApproverRow() {
+  const container = document.getElementById('approver-rows');
+  if (!container) return;
+  const idx = container.querySelectorAll('.approver-edit-row').length;
+  if (idx >= 3) { alert('มี Approver ได้สูงสุด 3 คน'); return; }
+  const row = document.createElement('div');
+  row.className = 'approver-edit-row';
+  row.style.cssText = 'border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:8px';
+  row.innerHTML = `
+    <div style="font-size:10px;font-weight:600;color:var(--text-3);margin-bottom:6px">A${idx+1}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end">
+      <div><label style="font-size:11px;color:var(--text-3)">ชื่อ</label><input class="ri appr-name" style="margin-top:3px;font-size:12px" placeholder="ชื่อ-นามสกุล"></div>
+      <div><label style="font-size:11px;color:var(--text-3)">ตำแหน่ง</label><input class="ri appr-title" style="margin-top:3px;font-size:12px" placeholder="ตำแหน่ง"></div>
+      <button class="btn-sm" onclick="this.closest('.approver-edit-row').remove()" style="color:var(--red);padding:6px 8px">✕</button>
+    </div>`;
+  container.appendChild(row);
+}
+
+function confirmPmoEditApprovers(memoNo) {
+  const note = document.getElementById('pmo-appr-note')?.value.trim();
+  if (!note) { alert('กรุณาระบุเหตุผลที่แก้ไข'); return; }
+
+  const rows      = document.querySelectorAll('#approver-rows .approver-edit-row');
+  const memo      = loadMemos().find(m => m.memoNo === memoNo);
+  if (!memo) return;
+
+  const newApprovers = Array.from(rows).map((row, i) => {
+    const name  = row.querySelector('.appr-name')?.value.trim()  || '';
+    const title = row.querySelector('.appr-title')?.value.trim() || '';
+    const orig  = (memo.approvers || [])[i];
+    // Keep existing status/dates for already-approved approvers
+    if (orig?.status === 'approved') return orig;
+    return { name, title, status: 'pending', approvedAt: null, approvedBy: null };
+  }).filter(a => a.name);
+
+  if (!newApprovers.length) { alert('ต้องมี Approver อย่างน้อย 1 คน'); return; }
+
+  const memos = loadMemos();
+  const idx   = memos.findIndex(m => m.memoNo === memoNo);
+  if (idx < 0) return;
+
+  // Determine correct status based on approvers chain
+  const firstPending = newApprovers.findIndex(a => a.status !== 'approved');
+  let newStatus = memo.status;
+  if (firstPending === 0) newStatus = 'pending';
+  else if (firstPending === 1) newStatus = 'pending_a2';
+  else if (firstPending < 0) newStatus = 'completed';
+
+  const user = currentUser();
+  appendAuditLog(memos, memoNo, `PMO แก้ไข Approvers by ${user}`, note);
+  memos[idx] = { ...memos[idx], approvers: newApprovers, status: newStatus, updatedAt: new Date().toISOString() };
+  storeMemos(memos);
+
+  updateMemoStatusAsync(memoNo, newStatus, {
+    approvers:       newApprovers,
+    pmoOverrideNote: note,
+    pmoOverrideBy:   user,
+  });
+
+  document.getElementById('pmo-approvers-modal')?.remove();
+  closeDetailModal();
+  alert('✓ แก้ไข Approvers เสร็จสิ้น');
+}
 
 // ── Budget Settings ──
 function openBudgetSettings() {
