@@ -337,10 +337,6 @@ function collectMemoData() {
 
   // Read reviewer name/title from dropdowns
   const revNameSel = document.getElementById('f-reviewer-name');
-  const revName = revNameSel?.value === 'other' ? (val('#f-reviewer-name-other') || '') : (revNameSel?.value || '');
-  const revTitleSel = document.getElementById('f-reviewer-title');
-  const revTitle = revTitleSel?.value === 'other' ? (val('#f-reviewer-title-other') || '') : (revTitleSel?.value || '');
-
   // Read approvers from dynamic rows
   const approverRows = document.querySelectorAll('#approver-rows-form .appr-form-row');
   const approversArr = Array.from(approverRows).map(row => {
@@ -353,7 +349,7 @@ function collectMemoData() {
     return { name, title, status: 'pending', approvedAt: null, approvedBy: null };
   }).filter(a => a.name);
 
-  // Backward compat: keep reviewerName/approverName from first two
+  // Backward compat aliases
   const revName   = approversArr[0]?.name  || '';
   const revTitle  = approversArr[0]?.title || '';
   const apprName  = approversArr[1]?.name  || '';
