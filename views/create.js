@@ -100,6 +100,7 @@ function selectType(type, btn) {
   document.getElementById('rev-num').textContent = type==='sl' ? '5' : '4';
   // Init DEP items if switching to dep
   if (type === 'dep') setTimeout(initDepItems, 50);
+  setTimeout(initApproverRows, 50);
 }
 
 function toggleOtherProject() {
@@ -340,17 +341,23 @@ function collectMemoData() {
   const revTitleSel = document.getElementById('f-reviewer-title');
   const revTitle = revTitleSel?.value === 'other' ? (val('#f-reviewer-title-other') || '') : (revTitleSel?.value || '');
 
-  // Read approver A2
-  const apprNameSel = document.getElementById('f-approver-name');
-  const apprName = apprNameSel?.value === 'other' ? (val('#f-approver-name-other') || '') : (apprNameSel?.value || '');
-  const apprTitleSel = document.getElementById('f-appr-title');
-  const apprTitle = apprTitleSel?.value === 'other' ? (val('#f-appr-title-other') || '') : (apprTitleSel?.value || '');
+  // Read approvers from dynamic rows
+  const approverRows = document.querySelectorAll('#approver-rows-form .appr-form-row');
+  const approversArr = Array.from(approverRows).map(row => {
+    const nameSel  = row.querySelector('.appr-name-sel');
+    const nameOth  = row.querySelector('.appr-name-other');
+    const titleSel = row.querySelector('.appr-title-sel');
+    const titleOth = row.querySelector('.appr-title-other');
+    const name  = nameSel?.value === 'other' ? (nameOth?.value.trim() || '') : (nameSel?.value || '');
+    const title = titleSel?.value === 'other' ? (titleOth?.value.trim() || '') : (titleSel?.value || '');
+    return { name, title, status: 'pending', approvedAt: null, approvedBy: null };
+  }).filter(a => a.name);
 
-  // Read approver A3
-  const appr3NameSel = document.getElementById('f-approver3-name');
-  const appr3Name = appr3NameSel?.value === 'other' ? (val('#f-approver3-name-other') || '') : (appr3NameSel?.value || '');
-  const appr3TitleSel = document.getElementById('f-approver3-title');
-  const appr3Title = appr3TitleSel?.value === 'other' ? (val('#f-approver3-title-other') || '') : (appr3TitleSel?.value || '');
+  // Backward compat: keep reviewerName/approverName from first two
+  const revName   = approversArr[0]?.name  || '';
+  const revTitle  = approversArr[0]?.title || '';
+  const apprName  = approversArr[1]?.name  || '';
+  const apprTitle = approversArr[1]?.title || '';
 
   // Get current logged-in user from sidebar
   const requesterName  = document.querySelector('.sb-uname')?.textContent?.trim() || 'User';
@@ -366,12 +373,8 @@ function collectMemoData() {
     reviewerDate: dateInput(val('#f-signdate')) || TODAY,
     approverName: apprName || '-', approverTitle: apprTitle || '-',
     approverDate: dateInput(val('#f-apprdate')) || TODAY,
-    // Build approvers chain — A1=reviewer, A2=approver (optional), A3=approver3 (optional)
-    approvers: [
-      { name: revName || '-', title: revTitle || '-', status: 'pending', approvedAt: null, approvedBy: null },
-      ...(apprName ? [{ name: apprName, title: apprTitle || '-', status: 'pending', approvedAt: null, approvedBy: null }] : []),
-      ...(appr3Name ? [{ name: appr3Name, title: appr3Title || '-', status: 'pending', approvedAt: null, approvedBy: null }] : []),
-    ],
+    // Build approvers chain from dynamic rows
+    approvers: approversArr,
     sections: [], total: 0, amountWords: ''
   };
   // Use typed subject if user filled it, else auto-generate from current form state
@@ -585,26 +588,104 @@ function toggleReviewerTitleOther() {
   const el  = document.getElementById('f-reviewer-title-other');
   if(el) el.style.display = sel?.value === 'other' ? 'block' : 'none';
 }
-function toggleApproverNameOther() {
-  const sel = document.getElementById('f-approver-name');
-  const el  = document.getElementById('f-approver-name-other');
-  if(el) el.style.display = sel?.value === 'other' ? 'block' : 'none';
+// ── Dynamic Approver Rows ──
+const APPROVER_NAMES  = ['นาย นวพล งามวรโรจน์สกุล', 'นาย ปกรณ์ เจียมสกุลทิพย์'];
+const APPROVER_TITLES = ['ผู้อำนวยการโครงการ', 'ประธานเจ้าหน้าที่บริหาร', 'ผู้อำนวยการ'];
+
+function _approverNameOpts(selected = '') {
+  return `<option value="">— เลือก —</option>` +
+    APPROVER_NAMES.map(n => `<option ${n === selected ? 'selected' : ''}>${esc(n)}</option>`).join('') +
+    `<option value="other" ${selected === 'other' ? 'selected' : ''}>อื่นๆ (กรอกเอง)</option>`;
 }
-function toggleApproverTitleOther() {
-  const sel = document.getElementById('f-appr-title');
-  const el  = document.getElementById('f-appr-title-other');
-  if(el) el.style.display = sel?.value === 'other' ? 'block' : 'none';
+function _approverTitleOpts(selected = '') {
+  return `<option value="">— เลือก —</option>` +
+    APPROVER_TITLES.map(t => `<option ${t === selected ? 'selected' : ''}>${esc(t)}</option>`).join('') +
+    `<option value="other" ${selected === 'other' ? 'selected' : ''}>อื่นๆ (กรอกเอง)</option>`;
 }
-function toggleA3Section() {
-  const a2  = document.getElementById('f-approver-name')?.value || '';
-  const a3  = document.getElementById('a3-section');
-  if (a3) a3.style.display = (a2 && a2 !== '') ? '' : 'none';
+
+function initApproverRows() {
+  const container = document.getElementById('approver-rows-form');
+  if (!container || container.children.length > 0) return;
+  // Start with A1 (required)
+  _appendApproverRow(true);
+  _updateApproverUI();
 }
-function toggleApprover3NameOther() {
-  const sel = document.getElementById('f-approver3-name');
-  const el  = document.getElementById('f-approver3-name-other');
-  if(el) el.style.display = sel?.value === 'other' ? 'block' : 'none';
+
+function addApproverFormRow() {
+  const rows = document.querySelectorAll('#approver-rows-form .appr-form-row');
+  if (rows.length >= 3) { alert('สามารถมี Approver ได้สูงสุด 3 คน'); return; }
+  _appendApproverRow(false);
+  _updateApproverUI();
 }
+
+function _appendApproverRow(isFirst) {
+  const container = document.getElementById('approver-rows-form');
+  if (!container) return;
+  const idx = container.querySelectorAll('.appr-form-row').length;
+  const label = idx === 0 ? 'A1 — Reviewer (บังคับ)' : `A${idx + 1} — Approver (optional)`;
+
+  const row = document.createElement('div');
+  row.className = 'appr-form-row';
+  row.style.cssText = 'border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:8px';
+  row.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span class="appr-row-label" style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em">${label}</span>
+      ${!isFirst ? `<button class="rm-btn" onclick="rmApproverFormRow(this)" title="ลบ" style="width:22px;height:22px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>` : ''}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div class="fg">
+        <label>ชื่อ${isFirst ? ' *' : ''}</label>
+        <select class="ri appr-name-sel" onchange="onApproverNameChange(this)" style="margin-top:3px">${_approverNameOpts()}</select>
+        <input class="ri appr-name-other" type="text" placeholder="กรอกชื่อ-นามสกุล" style="display:none;margin-top:6px">
+      </div>
+      <div class="fg">
+        <label>ตำแหน่ง${isFirst ? ' *' : ''}</label>
+        <select class="ri appr-title-sel" onchange="onApproverTitleChange(this)" style="margin-top:3px">${_approverTitleOpts()}</select>
+        <input class="ri appr-title-other" type="text" placeholder="กรอกตำแหน่ง" style="display:none;margin-top:6px">
+      </div>
+    </div>`;
+  container.appendChild(row);
+}
+
+function rmApproverFormRow(btn) {
+  btn.closest('.appr-form-row').remove();
+  _renumberApproverRows();
+  _updateApproverUI();
+}
+
+function _renumberApproverRows() {
+  document.querySelectorAll('#approver-rows-form .appr-form-row').forEach((row, i) => {
+    const label = row.querySelector('.appr-row-label');
+    if (label) label.textContent = i === 0 ? 'A1 — Reviewer (บังคับ)' : `A${i+1} — Approver (optional)`;
+  });
+}
+
+function _updateApproverUI() {
+  const count  = document.querySelectorAll('#approver-rows-form .appr-form-row').length;
+  const addBtn = document.getElementById('btn-add-approver');
+  const label  = document.getElementById('approver-count-label');
+  if (addBtn) addBtn.style.display = count >= 3 ? 'none' : '';
+  if (label)  label.textContent = `${count} คน (สูงสุด 3 คน)`;
+}
+
+function onApproverNameChange(sel) {
+  const row   = sel.closest('.appr-form-row');
+  const other = row?.querySelector('.appr-name-other');
+  if (other) other.style.display = sel.value === 'other' ? '' : 'none';
+}
+function onApproverTitleChange(sel) {
+  const row   = sel.closest('.appr-form-row');
+  const other = row?.querySelector('.appr-title-other');
+  if (other) other.style.display = sel.value === 'other' ? '' : 'none';
+}
+
+// Keep backward compat for old toggle functions referenced elsewhere
+function toggleReviewerNameOther()  {}
+function toggleReviewerTitleOther() {}
+function toggleApproverNameOther()  {}
+function toggleApproverTitleOther() {}
+function toggleA3Section()          {}
+function toggleApprover3NameOther() {}
 
 // ── Bulk Name Modal ──
 let _bulkTargetId = '', _bulkCls = '', _bulkCalc = false;
