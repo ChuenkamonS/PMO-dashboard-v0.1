@@ -37,8 +37,11 @@ function memoToDb(m) {
     requester_name: m.requesterName, requester_title: m.requesterTitle,
     reviewer_name: m.reviewerName, reviewer_title: m.reviewerTitle, reviewer_date: m.reviewerDate,
     approver_name: m.approverName, approver_title: m.approverTitle, approver_date: m.approverDate,
+    approvers: m.approvers || [],
     approved_by: m.approvedBy, rejected_by: m.rejectedBy,
     approval_note: m.approvalNote, rejection_reason: m.rejectionReason,
+    pmo_override_note: m.pmoOverrideNote || null,
+    pmo_override_by: m.pmoOverrideBy || null,
     fx_rate: m.fxRate || null,
     sections: m.sections || [], sl_items: m.slItems || [], audit_log: m.auditLog || [],
     budget_source: m.budgetSource || null,
@@ -57,8 +60,10 @@ function dbToMemo(r) {
     requesterName: r.requester_name, requesterTitle: r.requester_title,
     reviewerName: r.reviewer_name, reviewerTitle: r.reviewer_title, reviewerDate: r.reviewer_date,
     approverName: r.approver_name, approverTitle: r.approver_title, approverDate: r.approver_date,
+    approvers: r.approvers || [],
     approvedBy: r.approved_by, rejectedBy: r.rejected_by,
     approvalNote: r.approval_note, rejectionReason: r.rejection_reason,
+    pmoOverrideNote: r.pmo_override_note || null, pmoOverrideBy: r.pmo_override_by || null,
     fxRate: r.fx_rate, sections: r.sections || [], slItems: r.sl_items || [], auditLog: r.audit_log || [],
     budgetSource: r.budget_source || null,
     submittedAt: r.submitted_at, approvedAt: r.approved_at, rejectedAt: r.rejected_at,
@@ -124,29 +129,67 @@ async function saveMemoAsync(data) {
 
 async function updateMemoStatusAsync(memoNo, status, extra={}) {
   const memos = await loadMemosAsync();
-  const memo = memos.find(m => m.memoNo === memoNo);
-  if(!memo) return null;
-  const updated = { ...memo, ...extra, status, updatedAt: new Date().toISOString() };
-  if(status==='completed') updated.approvedAt = updated.updatedAt;
-  if(status==='rejected')  updated.rejectedAt = updated.updatedAt;
+  const memo  = memos.find(m => m.memoNo === memoNo);
+  if (!memo) return null;
 
-  if(await checkSupa()) {
+  const now     = new Date().toISOString();
+  const updated = { ...memo, ...extra, status, updatedAt: now };
+
+  // ── Multi-approver flow logic ──
+  const approvers = memo.approvers || [];
+  if (status === 'approved_a1' && approvers.length >= 2) {
+    // A1 approved → move to pending_a2
+    updated.status    = 'pending_a2';
+    updated.approvers = approvers.map((a, i) =>
+      i === 0 ? { ...a, status: 'approved', approvedAt: now, approvedBy: extra.approvedBy || currentUser() } : a
+    );
+  } else if (status === 'approved_a1' && approvers.length < 2) {
+    // Only 1 approver → complete
+    updated.status      = 'completed';
+    updated.approvedAt  = now;
+    updated.approvers   = approvers.map((a, i) =>
+      i === 0 ? { ...a, status: 'approved', approvedAt: now, approvedBy: extra.approvedBy || currentUser() } : a
+    );
+  } else if (status === 'approved_a2') {
+    updated.status    = 'completed';
+    updated.approvedAt = now;
+    updated.approvers  = approvers.map((a, i) =>
+      i === 1 ? { ...a, status: 'approved', approvedAt: now, approvedBy: extra.approvedBy || currentUser() } : a
+    );
+  } else if (status === 'completed') {
+    updated.approvedAt = now;
+  } else if (status === 'rejected') {
+    updated.rejectedAt = now;
+    // Mark current pending approver as rejected
+    const pendingIdx = approvers.findIndex(a => !a.status || a.status === 'pending');
+    if (pendingIdx >= 0) {
+      updated.approvers = approvers.map((a, i) =>
+        i === pendingIdx ? { ...a, status: 'rejected', rejectedAt: now, rejectedBy: extra.rejectedBy || currentUser() } : a
+      );
+    }
+  }
+
+  // Sync to Supabase
+  if (await checkSupa()) {
     try {
-      // camelCase → snake_case: approvalNote → approval_note
       const toSnake = s => s.replace(/([A-Z])/g, '_$1').toLowerCase();
-      const patch = { status, updated_at: updated.updatedAt, ...Object.fromEntries(
-        Object.entries(extra).map(([k,v]) => [toSnake(k), v])
-      )};
-      if(status==='completed') patch.approved_at = updated.approvedAt;
-      if(status==='rejected')  patch.rejected_at = updated.rejectedAt;
+      const patch = {
+        status: updated.status,
+        updated_at: now,
+        approvers: updated.approvers,
+        ...Object.fromEntries(Object.entries(extra).map(([k,v]) => [toSnake(k), v]))
+      };
+      if (updated.approvedAt)  patch.approved_at  = updated.approvedAt;
+      if (updated.rejectedAt)  patch.rejected_at  = updated.rejectedAt;
       await supaFetch('memos', 'PATCH', patch, '?memo_no=eq.' + encodeURIComponent(memoNo));
       _memCache = null;
     } catch(e) { console.warn('Supabase patch failed', e.message); }
   }
-  // also update localStorage
+
+  // localStorage
   const lsMemos = loadMemos();
   const idx = lsMemos.findIndex(m => m.memoNo === memoNo);
-  if(idx>=0) { lsMemos[idx]=updated; storeMemos(lsMemos); }
+  if (idx >= 0) { lsMemos[idx] = updated; storeMemos(lsMemos); }
   renderPendingMemos();
   renderHistoryMemos();
   return updated;
