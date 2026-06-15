@@ -360,6 +360,11 @@ function collectMemoData() {
     reviewerDate: dateInput(val('#f-signdate')) || TODAY,
     approverName: apprName || '-', approverTitle: apprTitle || '-',
     approverDate: dateInput(val('#f-apprdate')) || TODAY,
+    // Build approvers chain — reviewer is A1, approver is A2 (if provided)
+    approvers: [
+      { name: revName || '-', title: revTitle || '-', status: 'pending', approvedAt: null, approvedBy: null },
+      ...(apprName && apprName !== '-' ? [{ name: apprName || '-', title: apprTitle || '-', status: 'pending', approvedAt: null, approvedBy: null }] : []),
+    ],
     sections: [], total: 0, amountWords: ''
   };
   // Use typed subject if user filled it, else auto-generate from current form state
