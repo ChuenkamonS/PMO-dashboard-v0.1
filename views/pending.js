@@ -84,7 +84,7 @@ function renderPendingMemos() {
   populatePendingFilters();
 
   const allMemos = loadMemos();
-  const pending  = allMemos.filter(m => m.status === 'pending' || m.status === 'pending_a2');
+  const pending  = allMemos.filter(m => m.status === 'pending' || m.status === 'pending_a2' || m.status === 'pending_a3');
 
   // Sidebar badge
   const badge = document.querySelector('#memo-sub .sb-badge');
@@ -110,7 +110,7 @@ function renderPendingContent() {
   if (!list) return;
 
   // Inbox = pending only
-  let memos = loadMemos().filter(m => m.status === 'pending' || m.status === 'pending_a2');
+  let memos = loadMemos().filter(m => m.status === 'pending' || m.status === 'pending_a2' || m.status === 'pending_a3');
   if(_pendingSearch) {
     const s = _pendingSearch.toLowerCase();
     memos = memos.filter(m => (m.memoNo||'').toLowerCase().includes(s)||(m.project||'').toLowerCase().includes(s)||(m.reviewerName||'').toLowerCase().includes(s));
@@ -261,10 +261,11 @@ function confirmApprove() {
 
     // Determine which approver step we're on
     const isPendingA2 = memo.status === 'pending_a2';
-    const actionKey   = isPendingA2 ? 'approved_a2' : 'approved_a1';
+    const isPendingA3 = memo.status === 'pending_a3';
+    const actionKey   = isPendingA3 ? 'approved_a3' : isPendingA2 ? 'approved_a2' : 'approved_a1';
+    const stageLabel  = isPendingA3 ? 'A3' : isPendingA2 ? 'A2' : 'A1';
 
-    appendAuditLog(memos, memoNo,
-      isPendingA2 ? `A2 Approved by ${user}` : `A1 Approved by ${user}`, note);
+    appendAuditLog(memos, memoNo, `${stageLabel} Approved by ${user}`, note);
 
     updateMemoStatusAsync(memoNo, actionKey, { approvalNote: note, approvedBy: user });
   });
@@ -307,11 +308,11 @@ function openDetailModal(memoNo) {
   const typeLabel = { sl:'Software License', hw:'Hardware', int:'Team Activity', ent:'Client Expense', dep:'Deployment' }[memo.type] || (memo.type||'').toUpperCase();
   const accentColor = { sl:'#185FA5', hw:'#444441', int:'#3B6D11', ent:'#854F0B', dep:'#3C3489' }[memo.type] || '#888780';
   const statusCls   = memo.status==='completed'?'badge-green':memo.status==='rejected'?'badge-red':memo.status==='draft'?'badge-gray':'badge-amber';
-  const statusLabel = memo.status==='completed'?'Completed':memo.status==='rejected'?'Rejected':memo.status==='draft'?'Draft':memo.status==='pending_a2'?'Pending A2':'Pending A1';
+  const statusLabel = memo.status==='completed'?'Completed':memo.status==='rejected'?'Rejected':memo.status==='draft'?'Draft':memo.status==='pending_a3'?'Pending A3':memo.status==='pending_a2'?'Pending A2':'Pending A1';
 
   const isOwn  = (memo.requesterName || '') === currentUser();
   const isPMO  = true; // TODO: replace with role check after auth
-  const canAct = (memo.status==='pending'||memo.status==='pending_a2') && !isOwn;
+  const canAct = (memo.status==='pending'||memo.status==='pending_a2'||memo.status==='pending_a3') && !isOwn;
 
   // Approval chain display
   const approvers = memo.approvers || [];
