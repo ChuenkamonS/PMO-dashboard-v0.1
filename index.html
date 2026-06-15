@@ -1025,12 +1025,16 @@ svg.icon { display: inline-block; vertical-align: middle; }
           <div class="card">
             <div class="card-head">
               <div class="card-num" id="rev-num">4</div>
-              <span class="card-title">Reviewer & Approver</span>
+              <span class="card-title">Reviewer & Approvers</span>
             </div>
-            <div style="font-size:11px;font-weight:600;color:var(--text-3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px">Reviewer</div>
+
+            <!-- Reviewer (A1 — always required) -->
+            <div style="font-size:11px;font-weight:600;color:var(--text-3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px">
+              A1 — Reviewer <span style="font-weight:400;color:var(--text-3)">(บังคับ)</span>
+            </div>
             <div class="form-grid-3" style="margin-bottom:14px">
               <div class="fg">
-                <label>ชื่อ Reviewer *</label>
+                <label>ชื่อ *</label>
                 <select id="f-reviewer-name" onchange="toggleReviewerNameOther()">
                   <option value="">— เลือก —</option>
                   <option>นาย นวพล งามวรโรจน์สกุล</option>
@@ -1052,12 +1056,16 @@ svg.icon { display: inline-block; vertical-align: middle; }
               </div>
               <div class="fg"><label>วันที่ลงนาม *</label><input type="date" id="f-signdate"></div>
             </div>
-            <div style="font-size:11px;font-weight:600;color:var(--text-3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px">Approver</div>
-            <div class="form-grid-3">
+
+            <!-- A2 Approver -->
+            <div style="font-size:11px;font-weight:600;color:var(--text-3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px">
+              A2 — Approver <span style="font-weight:400;color:var(--text-3)">(optional)</span>
+            </div>
+            <div class="form-grid-3" style="margin-bottom:14px">
               <div class="fg">
-                <label>ชื่อ Approver *</label>
-                <select id="f-approver-name" onchange="toggleApproverNameOther()">
-                  <option value="">— เลือก —</option>
+                <label>ชื่อ</label>
+                <select id="f-approver-name" onchange="toggleApproverNameOther();toggleA3Section()">
+                  <option value="">— ไม่มี A2 —</option>
                   <option>นาย นวพล งามวรโรจน์สกุล</option>
                   <option>นาย ปกรณ์ เจียมสกุลทิพย์</option>
                   <option value="other">อื่นๆ (กรอกเอง)</option>
@@ -1065,7 +1073,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 <input type="text" id="f-approver-name-other" placeholder="กรอกชื่อ-นามสกุล" style="display:none;margin-top:6px">
               </div>
               <div class="fg">
-                <label>ตำแหน่ง *</label>
+                <label>ตำแหน่ง</label>
                 <select id="f-appr-title" onchange="toggleApproverTitleOther()">
                   <option value="">— เลือก —</option>
                   <option>ผู้อำนวยการโครงการ</option>
@@ -1075,8 +1083,40 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 </select>
                 <input type="text" id="f-appr-title-other" placeholder="กรอกตำแหน่ง" style="display:none;margin-top:6px">
               </div>
-              <div class="fg"><label>วันที่ลงนาม *</label><input type="date" id="f-apprdate"></div>
+              <div class="fg"><label>วันที่ลงนาม</label><input type="date" id="f-apprdate"></div>
             </div>
+
+            <!-- A3 Approver (shown only when A2 is filled) -->
+            <div id="a3-section" style="display:none">
+              <div style="font-size:11px;font-weight:600;color:var(--text-3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px">
+                A3 — Approver <span style="font-weight:400;color:var(--text-3)">(optional)</span>
+              </div>
+              <div class="form-grid-3" style="margin-bottom:8px">
+                <div class="fg">
+                  <label>ชื่อ</label>
+                  <select id="f-approver3-name" onchange="toggleApprover3NameOther()">
+                    <option value="">— ไม่มี A3 —</option>
+                    <option>นาย นวพล งามวรโรจน์สกุล</option>
+                    <option>นาย ปกรณ์ เจียมสกุลทิพย์</option>
+                    <option value="other">อื่นๆ (กรอกเอง)</option>
+                  </select>
+                  <input type="text" id="f-approver3-name-other" placeholder="กรอกชื่อ-นามสกุล" style="display:none;margin-top:6px">
+                </div>
+                <div class="fg">
+                  <label>ตำแหน่ง</label>
+                  <select id="f-approver3-title">
+                    <option value="">— เลือก —</option>
+                    <option>ผู้อำนวยการโครงการ</option>
+                    <option>ประธานเจ้าหน้าที่บริหาร</option>
+                    <option>ผู้อำนวยการ</option>
+                    <option value="other">อื่นๆ (กรอกเอง)</option>
+                  </select>
+                  <input type="text" id="f-approver3-title-other" placeholder="กรอกตำแหน่ง" style="display:none;margin-top:6px">
+                </div>
+                <div class="fg"><label>วันที่ลงนาม</label><input type="date" id="f-apprdate3"></div>
+              </div>
+            </div>
+
           </div>
 
           <div class="action-row">
