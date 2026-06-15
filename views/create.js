@@ -340,11 +340,17 @@ function collectMemoData() {
   const revTitleSel = document.getElementById('f-reviewer-title');
   const revTitle = revTitleSel?.value === 'other' ? (val('#f-reviewer-title-other') || '') : (revTitleSel?.value || '');
 
-  // Read approver name/title from dropdowns
+  // Read approver A2
   const apprNameSel = document.getElementById('f-approver-name');
   const apprName = apprNameSel?.value === 'other' ? (val('#f-approver-name-other') || '') : (apprNameSel?.value || '');
   const apprTitleSel = document.getElementById('f-appr-title');
   const apprTitle = apprTitleSel?.value === 'other' ? (val('#f-appr-title-other') || '') : (apprTitleSel?.value || '');
+
+  // Read approver A3
+  const appr3NameSel = document.getElementById('f-approver3-name');
+  const appr3Name = appr3NameSel?.value === 'other' ? (val('#f-approver3-name-other') || '') : (appr3NameSel?.value || '');
+  const appr3TitleSel = document.getElementById('f-approver3-title');
+  const appr3Title = appr3TitleSel?.value === 'other' ? (val('#f-approver3-title-other') || '') : (appr3TitleSel?.value || '');
 
   // Get current logged-in user from sidebar
   const requesterName  = document.querySelector('.sb-uname')?.textContent?.trim() || 'User';
@@ -360,10 +366,11 @@ function collectMemoData() {
     reviewerDate: dateInput(val('#f-signdate')) || TODAY,
     approverName: apprName || '-', approverTitle: apprTitle || '-',
     approverDate: dateInput(val('#f-apprdate')) || TODAY,
-    // Build approvers chain — reviewer is A1, approver is A2 (if provided)
+    // Build approvers chain — A1=reviewer, A2=approver (optional), A3=approver3 (optional)
     approvers: [
       { name: revName || '-', title: revTitle || '-', status: 'pending', approvedAt: null, approvedBy: null },
-      ...(apprName && apprName !== '-' ? [{ name: apprName || '-', title: apprTitle || '-', status: 'pending', approvedAt: null, approvedBy: null }] : []),
+      ...(apprName ? [{ name: apprName, title: apprTitle || '-', status: 'pending', approvedAt: null, approvedBy: null }] : []),
+      ...(appr3Name ? [{ name: appr3Name, title: appr3Title || '-', status: 'pending', approvedAt: null, approvedBy: null }] : []),
     ],
     sections: [], total: 0, amountWords: ''
   };
@@ -586,6 +593,16 @@ function toggleApproverNameOther() {
 function toggleApproverTitleOther() {
   const sel = document.getElementById('f-appr-title');
   const el  = document.getElementById('f-appr-title-other');
+  if(el) el.style.display = sel?.value === 'other' ? 'block' : 'none';
+}
+function toggleA3Section() {
+  const a2  = document.getElementById('f-approver-name')?.value || '';
+  const a3  = document.getElementById('a3-section');
+  if (a3) a3.style.display = (a2 && a2 !== '') ? '' : 'none';
+}
+function toggleApprover3NameOther() {
+  const sel = document.getElementById('f-approver3-name');
+  const el  = document.getElementById('f-approver3-name-other');
   if(el) el.style.display = sel?.value === 'other' ? 'block' : 'none';
 }
 
