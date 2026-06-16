@@ -94,8 +94,12 @@ async function loadMemosAsync() {
   if(await checkSupa()) {
     try {
       const rows = await supaFetch('memos', 'GET', null, '?order=created_at.desc&limit=500');
-      _memCache = (rows||[]).map(dbToMemo);
-      // Sync to localStorage as backup
+      const fromSupa = (rows||[]).map(dbToMemo);
+      // Merge with localStorage: localStorage wins for memos not yet synced to Supabase
+      const lsMemos = loadMemos();
+      const supaIds = new Set(fromSupa.map(m => m.memoNo));
+      const localOnly = lsMemos.filter(m => !supaIds.has(m.memoNo));
+      _memCache = [...fromSupa, ...localOnly];
       try { localStorage.setItem(MEMO_KEY, JSON.stringify(_memCache)); } catch(e) {}
       return _memCache;
     } catch(e) {
@@ -130,8 +134,16 @@ async function saveMemoAsync(data) {
 }
 
 async function updateMemoStatusAsync(memoNo, status, extra={}) {
-  const memos = await loadMemosAsync();
-  const memo  = memos.find(m => m.memoNo === memoNo);
+  // Check localStorage first (faster + catches memos not yet synced to Supabase)
+  const lsMemos = loadMemos();
+  const lsMemo  = lsMemos.find(m => m.memoNo === memoNo);
+
+  // Fall back to Supabase only if not in localStorage
+  let memo = lsMemo;
+  if (!memo) {
+    const supaList = await loadMemosAsync();
+    memo = supaList.find(m => m.memoNo === memoNo);
+  }
   if (!memo) return null;
 
   const now     = new Date().toISOString();
@@ -194,9 +206,9 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   }
 
   // localStorage
-  const lsMemos = loadMemos();
-  const idx = lsMemos.findIndex(m => m.memoNo === memoNo);
-  if (idx >= 0) { lsMemos[idx] = updated; storeMemos(lsMemos); }
+  const allMemos = loadMemos();
+  const idx = allMemos.findIndex(m => m.memoNo === memoNo);
+  if (idx >= 0) { allMemos[idx] = updated; storeMemos(allMemos); }
   renderPendingMemos();
   renderHistoryMemos();
   return updated;
@@ -305,12 +317,15 @@ function saveMemo(data) {
   const now = new Date().toISOString();
   const memos = loadMemos();
   const idx = memos.findIndex(m => m.memoNo === data.memoNo);
-  const isNew = idx < 0;
-  const saved = { ...data, id:data.memoNo, status:data.status||'pending',
-    createdAt:   idx>=0 ? memos[idx].createdAt : now,
-    submittedAt: idx>=0 ? (memos[idx].submittedAt || (data.status !== 'draft' ? now : null))
-                        : (data.status !== 'draft' ? now : null),
-    updatedAt: now };
+  const existing = idx >= 0 ? memos[idx] : null;
+  const saved = {
+    ...data,
+    id:          data.memoNo,
+    status:      data.status || 'pending',
+    createdAt:   existing?.createdAt || data.createdAt || now,  // always preserve original
+    submittedAt: existing?.submittedAt || (data.status !== 'draft' ? now : null),
+    updatedAt:   now,
+  };
   if(idx>=0) memos[idx]=saved; else memos.push(saved);
   storeMemos(memos);
   // Async push to Supabase in background
