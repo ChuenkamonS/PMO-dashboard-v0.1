@@ -405,13 +405,21 @@ function collectMemoData() {
     if(owner) data.sections.push({ title:'ผู้รับผิดชอบดูแลอุปกรณ์', html:`<p>${esc(owner)}</p>` });
   }
   if(data.type==='int') {
-    const fs = document.querySelector('#fs-int');
-    const inp = fs.querySelectorAll('input');
-    const pp = Number(inp[2]?.value)||0;
-    const names = Array.from(fs.querySelectorAll('.int-name')).map((i,idx)=>[idx+1,i.value.trim()||'-']);
-    data.total = pp*names.length;
-    data.amountWords = inp[3]?.value.trim()||'';
-    data.sections.push({ title:'รายละเอียดกิจกรรม', html:`<p>ไตรมาส/ครั้งที่: ${esc(inp[0]?.value||'-')}<br>วันที่: ${esc(dateInput(inp[1]?.value))}<br>วงเงิน/คน: ${esc(money(pp))}</p>` });
+    const pp        = Number(document.getElementById('int-pp')?.value) || 0;
+    const activity  = document.getElementById('int-activity')?.value.trim() || '';
+    const dateVal   = document.getElementById('int-date')?.value || '';
+    const objSel    = document.getElementById('int-objective');
+    const objective = objSel?.value === 'other'
+      ? (document.getElementById('int-objective-other')?.value.trim() || '')
+      : (objSel?.value || '');
+    const names     = Array.from(document.querySelectorAll('.int-name')).map((i,idx) => [idx+1, i.value.trim()||'-']);
+    data.total       = pp * names.length;
+    data.amountWords = document.getElementById('int-amount-words')?.value.trim() || '';
+    data.intActivity  = activity;
+    data.intDate      = dateInput(dateVal);
+    data.intObjective = objective;
+    data.intPP        = pp;
+    data.sections.push({ title:'รายละเอียดกิจกรรม', html:`<p>รายละเอียด / ชื่อกิจกรรม: ${esc(activity||'-')}<br>วันที่: ${esc(dateInput(dateVal))}<br>วงเงิน/คน: ${esc(money(pp))} บาท/คน</p>` });
     data.sections.push({ title:'รายชื่อผู้เข้าร่วม', html:table(['#','ชื่อ-นามสกุล / ตำแหน่ง'], names, []) });
   }
   if(data.type==='ent') {
@@ -517,14 +525,14 @@ function validateMemo(data) {
 
   // ── INT ──
   if(data.type==='int') {
-    if(!Array.from(document.querySelectorAll('.int-name')).some(i=>i.value.trim()))
-      missing.push('รายชื่อผู้เข้าร่วม (อย่างน้อย 1 คน)');
-    const fs = document.querySelector('#fs-int');
-    const inp = fs?.querySelectorAll('input');
-    if(!inp?.[0]?.value?.trim()) missing.push('ไตรมาส/ครั้งที่');
-    if(!inp?.[1]?.value?.trim()) missing.push('วันที่จัดกิจกรรม');
-    if(!(parseFloat(inp?.[2]?.value) > 0)) missing.push('วงเงิน/คน');
-    if(!inp?.[3]?.value?.trim()) missing.push('จำนวนเงินเป็นตัวอักษร (INT)');
+    if(!document.getElementById('int-activity')?.value?.trim()) missing.push('รายละเอียด / ชื่อกิจกรรม');
+    if(!document.getElementById('int-date')?.value) missing.push('วันที่จัดกิจกรรม');
+    const objSel = document.getElementById('int-objective');
+    if(!objSel?.value) missing.push('วัตถุประสงค์');
+    else if(objSel.value === 'other' && !document.getElementById('int-objective-other')?.value?.trim()) missing.push('วัตถุประสงค์ (กรอกเอง)');
+    if(!(parseFloat(document.getElementById('int-pp')?.value) > 0)) missing.push('วงเงินต่อคน');
+    if(!document.getElementById('int-amount-words')?.value?.trim()) missing.push('จำนวนเงินรวมเป็นตัวอักษร');
+    if(!Array.from(document.querySelectorAll('.int-name')).some(i => i.value.trim())) missing.push('รายชื่อผู้เข้าร่วม (อย่างน้อย 1 คน)');
   }
 
   // ── ENT ──
@@ -573,6 +581,11 @@ function resetMemoForm() {
 }
 
 // ── Dropdown toggle helpers ──
+function toggleIntObjectiveOther() {
+  const sel = document.getElementById('int-objective');
+  const el  = document.getElementById('int-objective-other');
+  if (el) el.style.display = sel?.value === 'other' ? '' : 'none';
+}
 function toggleToOther() {
   const sel = document.getElementById('f-to');
   const wrap = document.getElementById('to-other-wrap');
