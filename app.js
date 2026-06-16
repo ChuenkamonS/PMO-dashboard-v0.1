@@ -134,15 +134,17 @@ async function saveMemoAsync(data) {
 }
 
 async function updateMemoStatusAsync(memoNo, status, extra={}) {
-  // Check localStorage first (faster + catches memos not yet synced to Supabase)
-  const lsMemos = loadMemos();
-  const lsMemo  = lsMemos.find(m => m.memoNo === memoNo);
+  // Always read fresh from localStorage first — never use stale cache
+  _memCache = null;
+  const freshMemos = loadMemos();
+  let memo = freshMemos.find(m => m.memoNo === memoNo);
 
-  // Fall back to Supabase only if not in localStorage
-  let memo = lsMemo;
+  // Fall back to Supabase only if truly not in localStorage
   if (!memo) {
-    const supaList = await loadMemosAsync();
-    memo = supaList.find(m => m.memoNo === memoNo);
+    try {
+      const supaList = await loadMemosAsync();
+      memo = supaList.find(m => m.memoNo === memoNo);
+    } catch(e) {}
   }
   if (!memo) return null;
 
