@@ -780,20 +780,32 @@ function applyDraftEdit() {
         else { reasonSel.value = 'other'; toggleOther(); const oth = document.getElementById('f-reason-other'); if(oth) oth.value = memo.reason || ''; }
       }
 
-      // Reviewer/Approver
-      const revNameSel = document.getElementById('f-reviewer-name');
-      if(revNameSel) { const opt = [...revNameSel.options].find(o => o.value === memo.reviewerName); if(opt) revNameSel.value = memo.reviewerName; else { revNameSel.value = 'other'; toggleReviewerNameOther(); const oth = document.getElementById('f-reviewer-name-other'); if(oth) oth.value = memo.reviewerName || ''; } }
-      const revTitleSel = document.getElementById('f-reviewer-title');
-      if(revTitleSel) { const opt = [...revTitleSel.options].find(o => o.value === memo.reviewerTitle); if(opt) revTitleSel.value = memo.reviewerTitle; }
+      // Sign date
       const signDate = document.getElementById('f-signdate');
       if(signDate && memo.reviewerDate) signDate.value = memo.reviewerDate.slice(0,10);
 
-      const apprNameSel = document.getElementById('f-approver-name');
-      if(apprNameSel) { const opt = [...apprNameSel.options].find(o => o.value === memo.approverName); if(opt) apprNameSel.value = memo.approverName; else { apprNameSel.value = 'other'; toggleApproverNameOther(); const oth = document.getElementById('f-approver-name-other'); if(oth) oth.value = memo.approverName || ''; } }
-      const apprTitleSel = document.getElementById('f-appr-title');
-      if(apprTitleSel) { const opt = [...apprTitleSel.options].find(o => o.value === memo.approverTitle); if(opt) apprTitleSel.value = memo.approverTitle; }
-      const apprDate = document.getElementById('f-apprdate');
-      if(apprDate && memo.approverDate) apprDate.value = memo.approverDate.slice(0,10);
+      // Fill dynamic approver rows from approvers[]
+      const apprContainer = document.getElementById('approver-rows-form');
+      if (apprContainer && (memo.approvers || []).length > 0) {
+        apprContainer.innerHTML = '';
+        memo.approvers.forEach((a, i) => {
+          _appendApproverRow(i === 0);
+          const rows = apprContainer.querySelectorAll('.appr-form-row');
+          const row  = rows[rows.length - 1];
+          if (!row) return;
+          const nameSel = row.querySelector('.appr-name-sel');
+          const nameOth = row.querySelector('.appr-name-other');
+          const titleSel = row.querySelector('.appr-title-sel');
+          const titleOth = row.querySelector('.appr-title-other');
+          const nameOpt = nameSel && [...nameSel.options].find(o => o.value === a.name);
+          if (nameOpt) { nameSel.value = a.name; }
+          else if (nameSel) { nameSel.value = 'other'; if (nameOth) { nameOth.style.display = ''; nameOth.value = a.name || ''; } }
+          const titleOpt = titleSel && [...titleSel.options].find(o => o.value === a.title);
+          if (titleOpt) { titleSel.value = a.title; }
+          else if (titleSel) { titleSel.value = 'other'; if (titleOth) { titleOth.style.display = ''; titleOth.value = a.title || ''; } }
+        });
+        _updateApproverUI();
+      }
 
     }, 150);
   } catch(e) { console.error('applyDraftEdit error', e); }
