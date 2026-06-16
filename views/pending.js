@@ -669,12 +669,18 @@ function cancelMemo(memoNo) {
   const memo = loadMemos().find(m => m.memoNo === memoNo);
   if(!memo) return;
   if(!confirm(`ยกเลิก Memo "${memoNo}"?\nหลังจากยกเลิกแล้วจะไม่สามารถกู้คืนได้`)) return;
-  updateMemoStatus(memoNo, 'cancelled', {
-    rejectionReason: 'ยกเลิกโดยผู้ขอ',
-    rejectedBy: currentUser(),
+  const user = currentUser();
+  const memos = loadMemos();
+  appendAuditLog(memos, memoNo, `Cancelled by ${user}`, 'ยกเลิกโดยผู้ขอ');
+  storeMemos(memos);
+  updateMemoStatusAsync(memoNo, 'cancelled', {
+    cancellationReason: 'ยกเลิกโดยผู้ขอ',
+    cancelledBy:  user,
+    cancelledAt:  new Date().toISOString(),
+  }).then(() => {
+    renderPendingMemos();
+    renderHistoryMemos();
   });
-  renderPendingMemos();
-  renderHistoryMemos();
 }
 
 function approveMemo(memoNo) { openApproveModal(memoNo); }
