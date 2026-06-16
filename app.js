@@ -338,10 +338,13 @@ function saveMemo(data) {
     ...data,
     id:          data.memoNo,
     status:      data.status || 'pending',
-    createdAt:   existing?.createdAt || data.createdAt || now,  // always preserve original
-    submittedAt: existing?.submittedAt || (data.status !== 'draft' ? now : null),
+    createdAt:   existing?.createdAt || data.createdAt || now,
     updatedAt:   now,
   };
+  // Set submittedAt after spread so it always wins over data.submittedAt=null
+  if (!saved.submittedAt && saved.status !== 'draft') {
+    saved.submittedAt = existing?.submittedAt || now;
+  }
   if(idx>=0) memos[idx]=saved; else memos.push(saved);
   storeMemos(memos);
   // Async push to Supabase in background
