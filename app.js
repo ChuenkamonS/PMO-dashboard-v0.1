@@ -514,13 +514,15 @@ function renderMemoPdf(data) {
         ]).map((a, i, arr) => {
           const isFirst = i === 0;
           const isLast  = i === arr.length - 1;
-          const headText = isFirst
+          const headText = isFirst && arr.length > 1
+            ? `เรียน ${esc(data.to || 'ผู้อำนวยการโครงการ')} เพื่อโปรดพิจารณาอนุมัติ<br>ดำเนินการ`
+            : isFirst && arr.length === 1
             ? `เรียน ${esc(data.to || 'ผู้อำนวยการโครงการ')} เพื่อโปรดพิจารณาอนุมัติ<br>ดำเนินการ`
             : '';
-          const optText = isFirst
-            ? `<div class="mp-appr-opt">&#9675; เห็นชอบ, เพื่อโปรดพิจารณาอนุมัติ</div>
+          const optText = isLast
+            ? `<div class="mp-appr-opt">&#9675; อนุมัติ, เพื่อโปรดพิจารณาดำเนินการ</div>
                <div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>`
-            : `<div class="mp-appr-opt">&#9675; อนุมัติ, เพื่อโปรดพิจารณาดำเนินการ</div>
+            : `<div class="mp-appr-opt">&#9675; เห็นชอบ, เพื่อโปรดพิจารณาอนุมัติ</div>
                <div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>`;
           const sigDate = isFirst ? reviewerDate : approverDate;
           return `<div class="mp-appr-cell">
