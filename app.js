@@ -42,6 +42,11 @@ function memoToDb(m) {
     approval_note: m.approvalNote, rejection_reason: m.rejectionReason,
     pmo_override_note: m.pmoOverrideNote || null,
     pmo_override_by: m.pmoOverrideBy || null,
+    ent_client: m.entClient || null,
+    ent_date: m.entDate || null,
+    ent_time: m.entTime || null,
+    ent_place: m.entPlace || null,
+    ent_people: m.entPeople || null,
     fx_rate: m.fxRate || null,
     sections: m.sections || [], sl_items: m.slItems || [], audit_log: m.auditLog || [],
     budget_source: m.budgetSource || null,
@@ -64,6 +69,8 @@ function dbToMemo(r) {
     approvedBy: r.approved_by, rejectedBy: r.rejected_by,
     approvalNote: r.approval_note, rejectionReason: r.rejection_reason,
     pmoOverrideNote: r.pmo_override_note || null, pmoOverrideBy: r.pmo_override_by || null,
+    entClient: r.ent_client || null, entDate: r.ent_date || null,
+    entTime: r.ent_time || null, entPlace: r.ent_place || null, entPeople: r.ent_people || null,
     fxRate: r.fx_rate, sections: r.sections || [], slItems: r.sl_items || [], auditLog: r.audit_log || [],
     budgetSource: r.budget_source || null,
     submittedAt: r.submitted_at, approvedAt: r.approved_at, rejectedAt: r.rejected_at,
@@ -370,7 +377,7 @@ function renderMemoPdf(data) {
     sl: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} - บริษัท ออร์บิท ดิจิทัล จำกัด มีความจำเป็นต้องใช้งานโปรแกรม เพื่อพัฒนาโครงการและช่วยทีมพัฒนาสามารถทำงานได้อย่างมีประสิทธิภาพ จึงขออนุมัติงบประมาณเพื่อต่ออายุการใช้งานโปรแกรม ตามรายละเอียดดังต่อไปนี้`,
     hw: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} - บริษัท ออร์บิท ดิจิทัล จำกัด มีความจำเป็นต้องจัดซื้ออุปกรณ์ Hardware เพื่อสนับสนุนการดำเนินงานของโครงการ จึงขออนุมัติงบประมาณตามรายละเอียดดังต่อไปนี้`,
     int: `เนื่องด้วยฝ่าย PMO มีความประสงค์จัดกิจกรรม Team Activity เพื่อเสริมสร้างกำลังใจและส่งเสริมการทำงานเป็นทีมของพนักงานโครงการ ${esc(data.project||'-')} จึงขออนุมัติงบประมาณตามรายละเอียดดังต่อไปนี้`,
-    ent: `เนื่องด้วยฝ่าย PMO มีความประสงค์จัดงานเลี้ยงรับรองลูกค้าโครงการ ${esc(data.project||'-')} เพื่อเสริมสร้างความสัมพันธ์อันดีและรักษาความพึงพอใจของลูกค้า จึงขออนุมัติงบประมาณตามรายละเอียดดังต่อไปนี้`,
+    ent: `สืบเนื่องจากพนักงานโครงการ ${esc(data.project||'-')} บริษัท ออร์บิท ดิจิทัล จำกัด ได้วางแผนจัดงานบริษัทเลี้ยงรับรองลูกค้าเพื่อขอบคุณ ซึ่งจะจัดวันที่ ${esc(data.entDate||'-')}${data.entTime ? ` เวลา ${esc(data.entTime)} น.` : ''} สถานที่จัดคือ ${esc(data.entPlace||'-')} จำนวนผู้เข้าร่วมโดยประมาณ ${esc(data.entPeople||'-')} คน โดยกำหนดงบประมาณสำหรับค่าใช้จ่ายเลี้ยงรับรองลูกค้าเป็นจำนวนเงินไม่เกิน ${amtStr} บาท`,
     dep: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} - บริษัท ออร์บิท ดิจิทัล จำกัด วางแผนดำเนินการปฏิบัติงานที่ ${esc(data.depLocation||'-')} ในช่วงวันที่ ${esc(data.depStart||'-')}${data.depEnd && data.depEnd !== data.depStart ? ` – ${esc(data.depEnd)}` : ''} โดยมีจำนวนทั้งสิ้น ${data.depEmpCount||'-'} คน โดยมีรายละเอียดดังต่อไปนี้`,
   };
   const bodyText = typeBody[data.type] || `ด้วยฝ่าย PMO มีความประสงค์ขออนุมัติรายการตามรายละเอียดด้านล่าง เพื่อสนับสนุนการดำเนินงานของโครงการ ${esc(data.project||'-')} ให้เป็นไปตามแผนงาน`;
@@ -402,7 +409,7 @@ function renderMemoPdf(data) {
     })() : '',
     hw:  data.total ? `จึงขอความกรุณาโปรดพิจารณาอนุมัติค่าใช้จ่ายสำหรับรายการจัดซื้อจ้างอ้างต้น ในวงเงิน ${amtStr} ถ้าอ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงิน (ที่มีการตั้งงบประมาณไว้) หมวดการชำระค่าบริการ ซึ่งให้อำนาจแก่ประธานเจ้าหน้าที่บริหารในวงเงินไม่เกิน 500,000 บาท` : '',
     int: data.total ? `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณสำหรับค่ากิจกรรม Team Activity ดังกล่าว เป็นวงเงินจำนวนไม่เกิน ${amtStr} (แปดหมื่นสี่พันบาทถ้วน) ${authorityRef500k}` : '',
-    ent: data.total ? `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณค่ารับรองลูกค้าจาก ${esc(data.project||'-')} ในช่วงเวลาดังกล่าว ${authorityRef}` : '',
+    ent: data.total ? `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณค่ารับรองลูกค้าจาก ${esc(data.entClient||data.project||'-')} ในช่วงเวลาดังกล่าว อ้างอิงอำนาจอนุมัติตามคู่มืออำนาจอนุมัติ พ.ศ. 2564 ข้อ 3.2 การชำระเงิน (ที่มีการตั้งงบประมาณไว้) หมวดค่าเลี้ยงรับรอง วงเงินไม่เกิน 150,000 บาท ซึ่งให้อำนาจแก่ประธานเจ้าหน้าที่บริหารในการอนุมัติงบประมาณ` : '',
     dep: data.total ? `จึงขอความอนุเคราะห์อนุมัติค่าใช้จ่ายสำหรับรายการ Deployment ข้างต้น ในวงเงิน ${amtStr} (${esc(data.amountWords||'')}) ถ้าอ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงิน (ที่มีการตั้งงบประมาณไว้) หมวดการชำระค่าสวัสดิการพนักงาน ซึ่งให้อำนาจแก่ประธานเจ้าหน้าที่บริหารในการอนุมัติการชำระเงินในวงเงินไม่เกิน 500,000 บาท` : '',
   };
   const closingText = closingMap[data.type] || (data.total ? `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณรวมเป็นจำนวนเงินไม่เกิน ${amtStr}` : '');
