@@ -423,7 +423,6 @@ function collectMemoData() {
     data.entPeople   = inp[4]?.value || '';
     data.total       = Number(inp[5]?.value)||0;
     data.amountWords = inp[6]?.value.trim()||'';
-    data.sections.push({ title:'รายละเอียดงานเลี้ยงรับรอง', html:`<p>ลูกค้า: ${esc(data.entClient||'-')}<br>วันที่: ${esc(data.entDate)} ${esc(data.entTime||'')}<br>สถานที่: ${esc(data.entPlace||'-')}<br>จำนวน: ${esc(data.entPeople||'-')} คน</p>` });
   }
   if(data.type==='dep') {
     const start    = document.getElementById('dep-start')?.value || '';
