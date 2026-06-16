@@ -371,7 +371,7 @@ function renderMemoPdf(data) {
     hw: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} - บริษัท ออร์บิท ดิจิทัล จำกัด มีความจำเป็นต้องจัดซื้ออุปกรณ์ Hardware เพื่อสนับสนุนการดำเนินงานของโครงการ จึงขออนุมัติงบประมาณตามรายละเอียดดังต่อไปนี้`,
     int: `เนื่องด้วยฝ่าย PMO มีความประสงค์จัดกิจกรรม Team Activity เพื่อเสริมสร้างกำลังใจและส่งเสริมการทำงานเป็นทีมของพนักงานโครงการ ${esc(data.project||'-')} จึงขออนุมัติงบประมาณตามรายละเอียดดังต่อไปนี้`,
     ent: `เนื่องด้วยฝ่าย PMO มีความประสงค์จัดงานเลี้ยงรับรองลูกค้าโครงการ ${esc(data.project||'-')} เพื่อเสริมสร้างความสัมพันธ์อันดีและรักษาความพึงพอใจของลูกค้า จึงขออนุมัติงบประมาณตามรายละเอียดดังต่อไปนี้`,
-    dep: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} - บริษัท ออร์บิท ดิจิทัล จำกัด${data.depLocation ? ` ${esc(data.depLocation)}` : ''}${data.depStart ? ` ในช่วงวันที่ ${esc(data.depStart)}${data.depEnd && data.depEnd !== data.depStart ? ` – ${esc(data.depEnd)}` : ''}` : ''}${data.depEmpCount ? ` โดยมีจำนวนทั้งสิ้น <strong>${data.depEmpCount} คน</strong>` : ''} โดยมีรายละเอียดดังต่อไปนี้`,
+    dep: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} - บริษัท ออร์บิท ดิจิทัล จำกัด วางแผนดำเนินการปฏิบัติงานที่ ${esc(data.depLocation||'-')} ในช่วงวันที่ ${esc(data.depStart||'-')}${data.depEnd && data.depEnd !== data.depStart ? ` – ${esc(data.depEnd)}` : ''} โดยมีจำนวนทั้งสิ้น ${data.depEmpCount||'-'} คน โดยมีรายละเอียดดังต่อไปนี้`,
   };
   const bodyText = typeBody[data.type] || `ด้วยฝ่าย PMO มีความประสงค์ขออนุมัติรายการตามรายละเอียดด้านล่าง เพื่อสนับสนุนการดำเนินงานของโครงการ ${esc(data.project||'-')} ให้เป็นไปตามแผนงาน`;
 
@@ -507,7 +507,7 @@ function renderMemoPdf(data) {
     ${closingText ? `<div class="mp-closing"><p>${closingText}</p></div>` : ''}
 
     <!-- Signature boxes -->
-    <div class="mp-approval" style="display:grid;grid-template-columns:repeat(${Math.max(1, (data.approvers||[]).length)}, 1fr);gap:0;border:1px solid #000;width:100%;margin-top:8px">
+    <div class="mp-approval" style="display:grid;grid-template-columns:repeat(${Math.max(1, (data.approvers||[]).length)}, 1fr);gap:0;outline:1px solid #000;width:100%;margin-top:8px">
       ${(data.approvers && data.approvers.length > 0 ? data.approvers : [
           { name: data.reviewerName || '-', title: data.reviewerTitle || '-' },
           ...(data.approverName && data.approverName !== '-' ? [{ name: data.approverName, title: data.approverTitle || '-' }] : [])
