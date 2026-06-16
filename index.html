@@ -937,17 +937,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
                   <input type="text" id="int-activity" placeholder="เช่น งานเลี้ยงสังสรรค์ประจำปี Q2/2568">
                 </div>
                 <div class="fg"><label>วันที่จัดกิจกรรม *</label><input type="date" id="int-date"></div>
-                <div class="fg">
-                  <label>วัตถุประสงค์ *</label>
-                  <select id="int-objective" onchange="toggleIntObjectiveOther()">
-                    <option value="">— เลือก —</option>
-                    <option value="เพื่อเสริมสร้างกำลังใจในการปฏิบัติงาน">เพื่อเสริมสร้างกำลังใจในการปฏิบัติงาน</option>
-                    <option value="เพื่อเสริมสร้างความสัมพันธ์ในทีม">เพื่อเสริมสร้างความสัมพันธ์ในทีม</option>
-                    <option value="เพื่อส่งเสริมการทำงานเป็นทีม">เพื่อส่งเสริมการทำงานเป็นทีม</option>
-                    <option value="other">อื่นๆ (กรอกเอง)</option>
-                  </select>
-                  <input type="text" id="int-objective-other" placeholder="ระบุวัตถุประสงค์" style="display:none;margin-top:6px" oninput="">
-                </div>
                 <div class="fg"><label>วงเงินต่อคน (บาท) *</label><input type="number" id="int-pp" value="1500" oninput="calcINT()"></div>
                 <div class="fg"><label>จำนวนเงินรวมเป็นตัวอักษร *</label><input type="text" id="int-amount-words" placeholder="เช่น สี่หมื่นห้าพันบาทถ้วน"></div>
               </div>
