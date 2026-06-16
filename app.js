@@ -507,26 +507,32 @@ function renderMemoPdf(data) {
     ${closingText ? `<div class="mp-closing"><p>${closingText}</p></div>` : ''}
 
     <!-- Signature boxes -->
-    <div class="mp-approval">
-      <div class="mp-appr-cell">
-        <div class="mp-appr-head">เรียนประธานเจ้าหน้าที่บริหาร เพื่อโปรดพิจารณาอนุมัติ<br>ดำเนินการ</div>
-        <div class="mp-appr-opt">&#9675; เห็นชอบ, เพื่อโปรดพิจารณาอนุมัติ</div>
-        <div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>
-        <div style="flex:1"></div>
-        <div class="mp-sig-space"></div>
-        <div class="mp-sig-name">( ${esc(data.reviewerName||'-')} )</div>
-        <div class="mp-sig-role">${esc(data.reviewerTitle||'-')}</div>
-        <div class="mp-sig-date">${reviewerDate}</div>
-      </div>
-      <div class="mp-appr-cell">
-        <div class="mp-appr-opt">&#9675; อนุมัติ, เพื่อโปรดพิจารณาดำเนินการ</div>
-        <div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>
-        <div style="flex:1"></div>
-        <div class="mp-sig-space"></div>
-        <div class="mp-sig-name">( ${esc(data.approverName||'-')} )</div>
-        <div class="mp-sig-role">${esc(data.approverTitle||'-')}</div>
-        <div class="mp-sig-date">${approverDate}</div>
-      </div>
+    <div class="mp-approval" style="display:grid;grid-template-columns:repeat(${Math.max(1, (data.approvers||[]).length)}, 1fr);gap:0">
+      ${(data.approvers && data.approvers.length > 0 ? data.approvers : [
+          { name: data.reviewerName || '-', title: data.reviewerTitle || '-' },
+          ...(data.approverName && data.approverName !== '-' ? [{ name: data.approverName, title: data.approverTitle || '-' }] : [])
+        ]).map((a, i, arr) => {
+          const isFirst = i === 0;
+          const isLast  = i === arr.length - 1;
+          const headText = isFirst
+            ? `เรียน ${esc(data.to || 'ผู้อำนวยการโครงการ')} เพื่อโปรดพิจารณาอนุมัติ<br>ดำเนินการ`
+            : '';
+          const optText = isFirst
+            ? `<div class="mp-appr-opt">&#9675; เห็นชอบ, เพื่อโปรดพิจารณาอนุมัติ</div>
+               <div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>`
+            : `<div class="mp-appr-opt">&#9675; อนุมัติ, เพื่อโปรดพิจารณาดำเนินการ</div>
+               <div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>`;
+          const sigDate = isFirst ? reviewerDate : approverDate;
+          return `<div class="mp-appr-cell">
+            ${headText ? `<div class="mp-appr-head">${headText}</div>` : ''}
+            ${optText}
+            <div style="flex:1"></div>
+            <div class="mp-sig-space"></div>
+            <div class="mp-sig-name">( ${esc(a.name || '-')} )</div>
+            <div class="mp-sig-role">${esc(a.title || '-')}</div>
+            <div class="mp-sig-date">${sigDate}</div>
+          </div>`;
+        }).join('')}
     </div>
   </div>`;
 }
