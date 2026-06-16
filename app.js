@@ -507,7 +507,7 @@ function renderMemoPdf(data) {
     ${closingText ? `<div class="mp-closing"><p>${closingText}</p></div>` : ''}
 
     <!-- Signature boxes -->
-    <div class="mp-approval" style="display:grid;grid-template-columns:repeat(${Math.max(1, (data.approvers||[]).length)}, 1fr);gap:0">
+    <div class="mp-approval" style="display:grid;grid-template-columns:repeat(${Math.max(1, (data.approvers||[]).length)}, 1fr);gap:0;border:1px solid #000;width:100%;margin-top:8px">
       ${(data.approvers && data.approvers.length > 0 ? data.approvers : [
           { name: data.reviewerName || '-', title: data.reviewerTitle || '-' },
           ...(data.approverName && data.approverName !== '-' ? [{ name: data.approverName, title: data.approverTitle || '-' }] : [])
@@ -525,7 +525,7 @@ function renderMemoPdf(data) {
             : `<div class="mp-appr-opt">&#9675; เห็นชอบ, เพื่อโปรดพิจารณาอนุมัติ</div>
                <div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>`;
           const sigDate = isFirst ? reviewerDate : approverDate;
-          return `<div class="mp-appr-cell" ${i > 0 ? 'style="border-left:1px solid #000"' : ""}>
+          return `<div class="mp-appr-cell" style="padding:10px 12px;min-height:160px;display:flex;flex-direction:column;${i > 0 ? 'border-left:1px solid #000;' : ''}">
             ${headText ? `<div class="mp-appr-head">${headText}</div>` : ''}
             ${optText}
             <div style="flex:1"></div>
