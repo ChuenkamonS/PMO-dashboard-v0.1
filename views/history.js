@@ -63,7 +63,7 @@ function approvalDurationMs(memo) {
 function formatApprovalDuration(memo) {
   const ms = approvalDurationMs(memo);
   if (ms == null) {
-    if (!memo.status || memo.status === 'pending' || memo.status === 'draft') return '—';
+    if (!memo.status || (memo.status === 'pending' || memo.status === 'pending_a2' || memo.status === 'pending_a3') || memo.status === 'draft') return '—';
     return '—';
   }
   const hrs = Math.floor(ms / 3600000);
@@ -153,7 +153,7 @@ function populateHistTabCounts() {
   const counts = {
     all:       all.length,
     draft:     all.filter(m => m.status === 'draft').length,
-    pending:   all.filter(m => !m.status || m.status === 'pending').length,
+    pending:   all.filter(m => !m.status || (m.status === 'pending' || m.status === 'pending_a2' || m.status === 'pending_a3')).length,
     completed: all.filter(m => m.status === 'completed').length,
     rejected:  all.filter(m => m.status === 'rejected').length,
   };
@@ -359,7 +359,7 @@ function openHistoryDetail(memoNo) {
   `;
 
   const acts = document.getElementById('detail-actions');
-  const isPending = !memo.status || memo.status === 'pending';
+  const isPending = !memo.status || (memo.status === 'pending' || memo.status === 'pending_a2' || memo.status === 'pending_a3');
   const isOwn     = (memo.requesterName || '') === (typeof currentUser === 'function' ? currentUser() : '');
   const canAct    = isPending && !isOwn;
   const isCompleted = memo.status === 'completed';
