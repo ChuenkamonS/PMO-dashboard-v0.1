@@ -472,13 +472,13 @@ function validateMemo(data) {
   if(!data.subject || !data.subject.trim()) missing.push('หัวข้อเรื่อง (ห้ามว่าง)');
   if(!data.reason) missing.push('เหตุผลในการขอ');
 
-  // ── Signature fields ──
-  if(!data.reviewerName || data.reviewerName==='-') missing.push('ชื่อ Reviewer');
-  if(!data.reviewerTitle || data.reviewerTitle==='-') missing.push('ตำแหน่ง Reviewer');
-  if(!val('#f-signdate')) missing.push('วันที่ลงนาม Reviewer');
-  if(!data.approverName || data.approverName==='-') missing.push('ชื่อ Approver');
-  if(!data.approverTitle || data.approverTitle==='-') missing.push('ตำแหน่ง Approver');
-  if(!val('#f-apprdate')) missing.push('วันที่ลงนาม Approver');
+  // ── Signature fields — use approvers[] array ──
+  if(!data.approvers || data.approvers.length === 0) missing.push('ต้องมี Reviewer อย่างน้อย 1 คน');
+  else {
+    if(!data.approvers[0]?.name || data.approvers[0].name === '-') missing.push('ชื่อ Reviewer (A1)');
+    if(!data.approvers[0]?.title || data.approvers[0].title === '-') missing.push('ตำแหน่ง Reviewer (A1)');
+  }
+  if(!val('#f-signdate')) missing.push('วันที่ลงนาม');
 
   // ── SL ──
   if(data.type==='sl') {
