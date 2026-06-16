@@ -369,7 +369,7 @@ function collectMemoData() {
     reviewerName: revName || '-', reviewerTitle: revTitle || '-',
     reviewerDate: dateInput(val('#f-signdate')) || TODAY,
     approverName: apprName || '-', approverTitle: apprTitle || '-',
-    approverDate: dateInput(val('#f-apprdate')) || TODAY,
+    approverDate: dateInput(val('#f-signdate')) || TODAY,
     // Build approvers chain from dynamic rows
     approvers: approversArr,
     sections: [], total: 0, amountWords: ''
