@@ -161,6 +161,8 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
       updated.approvedAt = now;
     }
     updated.approvedAt = now;
+  } else if (status === 'cancelled') {
+    updated.cancelledAt = extra.cancelledAt || now;
   } else if (status === 'rejected') {
     updated.rejectedAt = now;
     // Mark current pending approver as rejected
@@ -180,10 +182,12 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
         status: updated.status,
         updated_at: now,
         approvers: updated.approvers,
+        audit_log: updated.auditLog || memo.auditLog || [],
         ...Object.fromEntries(Object.entries(extra).map(([k,v]) => [toSnake(k), v]))
       };
       if (updated.approvedAt)  patch.approved_at  = updated.approvedAt;
       if (updated.rejectedAt)  patch.rejected_at  = updated.rejectedAt;
+      if (updated.cancelledAt) patch.cancelled_at = updated.cancelledAt;
       await supaFetch('memos', 'PATCH', patch, '?memo_no=eq.' + encodeURIComponent(memoNo));
       _memCache = null;
     } catch(e) { console.warn('Supabase patch failed', e.message); }
@@ -301,8 +305,12 @@ function saveMemo(data) {
   const now = new Date().toISOString();
   const memos = loadMemos();
   const idx = memos.findIndex(m => m.memoNo === data.memoNo);
+  const isNew = idx < 0;
   const saved = { ...data, id:data.memoNo, status:data.status||'pending',
-    createdAt: idx>=0 ? memos[idx].createdAt : now, updatedAt: now };
+    createdAt:   idx>=0 ? memos[idx].createdAt : now,
+    submittedAt: idx>=0 ? (memos[idx].submittedAt || (data.status !== 'draft' ? now : null))
+                        : (data.status !== 'draft' ? now : null),
+    updatedAt: now };
   if(idx>=0) memos[idx]=saved; else memos.push(saved);
   storeMemos(memos);
   // Async push to Supabase in background
