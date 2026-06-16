@@ -148,6 +148,17 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   }
   if (!memo) return null;
 
+  // ── Terminal state guard ──
+  // completed and rejected memos cannot be changed except by PMO override
+  const isPmoOverride = extra.pmoOverrideNote || extra.pmoOverrideBy;
+  const isTerminal    = memo.status === 'completed' || memo.status === 'rejected' || memo.status === 'cancelled';
+  if (isTerminal && !isPmoOverride) return memo; // silently return current state
+
+  // ── Approver order enforcement ──
+  // Prevent A2 from approving if A1 hasn't approved yet
+  if (status === 'approved_a2' && memo.status !== 'pending_a2') return memo;
+  if (status === 'approved_a3' && memo.status !== 'pending_a3') return memo;
+
   const now     = new Date().toISOString();
   const updated = { ...memo, ...extra, status, updatedAt: now };
 
