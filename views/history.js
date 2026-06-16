@@ -156,6 +156,7 @@ function populateHistTabCounts() {
     pending:   all.filter(m => !m.status || (m.status === 'pending' || m.status === 'pending_a2' || m.status === 'pending_a3')).length,
     completed: all.filter(m => m.status === 'completed').length,
     rejected:  all.filter(m => m.status === 'rejected').length,
+    cancelled: all.filter(m => m.status === 'cancelled').length,
   };
   document.querySelectorAll('.hist-tab-btn').forEach(btn => {
     const countEl = btn.querySelector('.hist-tab-count');
