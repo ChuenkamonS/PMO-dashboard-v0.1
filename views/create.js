@@ -408,17 +408,12 @@ function collectMemoData() {
     const pp        = Number(document.getElementById('int-pp')?.value) || 0;
     const activity  = document.getElementById('int-activity')?.value.trim() || '';
     const dateVal   = document.getElementById('int-date')?.value || '';
-    const objSel    = document.getElementById('int-objective');
-    const objective = objSel?.value === 'other'
-      ? (document.getElementById('int-objective-other')?.value.trim() || '')
-      : (objSel?.value || '');
     const names     = Array.from(document.querySelectorAll('.int-name')).map((i,idx) => [idx+1, i.value.trim()||'-']);
     data.total       = pp * names.length;
     data.amountWords = document.getElementById('int-amount-words')?.value.trim() || '';
-    data.intActivity  = activity;
-    data.intDate      = dateInput(dateVal);
-    data.intObjective = objective;
-    data.intPP        = pp;
+    data.intActivity = activity;
+    data.intDate     = dateInput(dateVal);
+    data.intPP       = pp;
     data.sections.push({ title:'รายละเอียดกิจกรรม', html:`<p>รายละเอียด / ชื่อกิจกรรม: ${esc(activity||'-')}<br>วันที่: ${esc(dateInput(dateVal))}<br>วงเงิน/คน: ${esc(money(pp))} บาท/คน</p>` });
     data.sections.push({ title:'รายชื่อผู้เข้าร่วม', html:table(['#','ชื่อ-นามสกุล / ตำแหน่ง'], names, []) });
   }
@@ -527,9 +522,6 @@ function validateMemo(data) {
   if(data.type==='int') {
     if(!document.getElementById('int-activity')?.value?.trim()) missing.push('รายละเอียด / ชื่อกิจกรรม');
     if(!document.getElementById('int-date')?.value) missing.push('วันที่จัดกิจกรรม');
-    const objSel = document.getElementById('int-objective');
-    if(!objSel?.value) missing.push('วัตถุประสงค์');
-    else if(objSel.value === 'other' && !document.getElementById('int-objective-other')?.value?.trim()) missing.push('วัตถุประสงค์ (กรอกเอง)');
     if(!(parseFloat(document.getElementById('int-pp')?.value) > 0)) missing.push('วงเงินต่อคน');
     if(!document.getElementById('int-amount-words')?.value?.trim()) missing.push('จำนวนเงินรวมเป็นตัวอักษร');
     if(!Array.from(document.querySelectorAll('.int-name')).some(i => i.value.trim())) missing.push('รายชื่อผู้เข้าร่วม (อย่างน้อย 1 คน)');
