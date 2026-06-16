@@ -525,7 +525,7 @@ function renderMemoPdf(data) {
             : `<div class="mp-appr-opt">&#9675; เห็นชอบ, เพื่อโปรดพิจารณาอนุมัติ</div>
                <div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>`;
           const sigDate = isFirst ? reviewerDate : approverDate;
-          return `<div class="mp-appr-cell">
+          return `<div class="mp-appr-cell" ${i > 0 ? 'style="border-left:1px solid #000"' : ""}>
             ${headText ? `<div class="mp-appr-head">${headText}</div>` : ''}
             ${optText}
             <div style="flex:1"></div>
