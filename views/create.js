@@ -136,6 +136,7 @@ function calcINT() {
   const pp = parseFloat(document.getElementById('int-pp')?.value)||0;
   const n  = document.querySelectorAll('.int-name').length;
   document.getElementById('int-total').textContent = '฿'+(pp*n).toLocaleString('th-TH');
+  checkIntHeadcount();
 }
 
 // ── Row helpers ──
@@ -408,13 +409,15 @@ function collectMemoData() {
     const pp        = Number(document.getElementById('int-pp')?.value) || 0;
     const activity  = document.getElementById('int-activity')?.value.trim() || '';
     const dateVal   = document.getElementById('int-date')?.value || '';
+    const headcount = parseInt(document.getElementById('int-headcount')?.value) || 0;
     const names     = Array.from(document.querySelectorAll('.int-name')).map((i,idx) => [idx+1, i.value.trim()||'-']);
     data.total       = pp * names.length;
     data.amountWords = document.getElementById('int-amount-words')?.value.trim() || '';
-    data.intActivity = activity;
-    data.intDate     = dateInput(dateVal);
-    data.intPP       = pp;
-    data.sections.push({ title:'รายละเอียดกิจกรรม', html:`<p>รายละเอียด / ชื่อกิจกรรม: ${esc(activity||'-')}<br>วันที่: ${esc(dateInput(dateVal))}<br>วงเงิน/คน: ${esc(money(pp))} บาท/คน</p>` });
+    data.intActivity  = activity;
+    data.intDate      = dateInput(dateVal);
+    data.intHeadcount = headcount;
+    data.intPP        = pp;
+    data.sections.push({ title:'รายละเอียดกิจกรรม', html:`<p>รายละเอียด / ชื่อกิจกรรม: ${esc(activity||'-')}<br>วันที่: ${esc(dateInput(dateVal))}<br>จำนวนผู้เข้าร่วม: ${headcount||names.length} คน<br>วงเงิน/คน: ${esc(money(pp))} บาท/คน</p>` });
     data.sections.push({ title:'รายชื่อผู้เข้าร่วม', html:table(['#','ชื่อ-นามสกุล / ตำแหน่ง'], names, []) });
   }
   if(data.type==='ent') {
@@ -522,9 +525,16 @@ function validateMemo(data) {
   if(data.type==='int') {
     if(!document.getElementById('int-activity')?.value?.trim()) missing.push('รายละเอียด / ชื่อกิจกรรม');
     if(!document.getElementById('int-date')?.value) missing.push('วันที่จัดกิจกรรม');
+    if(!(parseInt(document.getElementById('int-headcount')?.value) > 0)) missing.push('จำนวนผู้เข้าร่วม');
     if(!(parseFloat(document.getElementById('int-pp')?.value) > 0)) missing.push('วงเงินต่อคน');
     if(!document.getElementById('int-amount-words')?.value?.trim()) missing.push('จำนวนเงินรวมเป็นตัวอักษร');
     if(!Array.from(document.querySelectorAll('.int-name')).some(i => i.value.trim())) missing.push('รายชื่อผู้เข้าร่วม (อย่างน้อย 1 คน)');
+    // Warn if headcount mismatch but don't block
+    const hc = parseInt(document.getElementById('int-headcount')?.value)||0;
+    const ac = Array.from(document.querySelectorAll('.int-name')).filter(i=>i.value.trim()).length;
+    if (hc > 0 && ac !== hc && missing.length === 0) {
+      if (!confirm(`จำนวนผู้เข้าร่วมที่ระบุ ${hc} คน แต่กรอกรายชื่อแล้ว ${ac} คน\nต้องการดำเนินการต่อไหม?`)) return false;
+    }
   }
 
   // ── ENT ──
@@ -577,6 +587,84 @@ function toggleIntObjectiveOther() {
   const sel = document.getElementById('int-objective');
   const el  = document.getElementById('int-objective-other');
   if (el) el.style.display = sel?.value === 'other' ? '' : 'none';
+}
+
+function checkIntHeadcount() {
+  const headcount = parseInt(document.getElementById('int-headcount')?.value) || 0;
+  const actual    = Array.from(document.querySelectorAll('.int-name')).filter(i => i.value.trim()).length;
+  const countEl   = document.getElementById('int-name-count');
+  const warnEl    = document.getElementById('int-headcount-warning');
+  if (countEl) countEl.textContent = `${actual} คน`;
+  if (!warnEl) return;
+  if (headcount > 0 && actual !== headcount) {
+    warnEl.style.display = '';
+    warnEl.textContent = `⚠ กรอกรายชื่อแล้ว ${actual} คน แต่ระบุจำนวน ${headcount} คน — ยังขาดอีก ${headcount - actual > 0 ? headcount - actual : 0} คน`;
+  } else {
+    warnEl.style.display = 'none';
+  }
+}
+
+function downloadIntTemplate() {
+  // Build simple CSV template
+  const rows = [
+    ['ชื่อ-นามสกุล ตำแหน่ง'],
+    ['นาย ตัวอย่าง ใจดี  Project Manager'],
+    ['นางสาว ตัวอย่าง สองคน  Developer'],
+  ];
+  const csv = '\uFEFF' + rows.map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'INT_รายชื่อผู้เข้าร่วม_template.csv';
+  a.click();
+}
+
+function uploadIntExcel(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      let names = [];
+      if (file.name.endsWith('.csv')) {
+        // CSV
+        const text = e.target.result;
+        names = text.split('\n')
+          .map(l => l.replace(/^\uFEFF/, '').replace(/^"|"$/g, '').trim())
+          .filter((l, i) => l && i > 0 && !l.startsWith('ชื่อ-นามสกุล'));
+      } else {
+        // XLSX — use SheetJS if available
+        if (typeof XLSX === 'undefined') {
+          alert('กรุณาใช้ไฟล์ .csv หรือลองอีกครั้ง (XLSX library not loaded)');
+          return;
+        }
+        const data = new Uint8Array(e.target.result);
+        const wb   = XLSX.read(data, { type: 'array' });
+        const ws   = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+        names = rows.slice(1).map(r => String(r[0]||'').trim()).filter(Boolean);
+      }
+      if (!names.length) { alert('ไม่พบรายชื่อในไฟล์'); return; }
+      // Clear and repopulate
+      const container = document.getElementById('int-names');
+      container.innerHTML = '';
+      names.forEach((name, idx) => {
+        const d = document.createElement('div');
+        d.className = 'row-name';
+        d.innerHTML = `<span class="name-num">${idx+1}.</span><input class="ri int-name" type="text" value="${name.replace(/"/g,'&quot;')}" oninput="calcINT();checkIntHeadcount()"><button class="rm-btn" onclick="rmName(this,'int-names');calcINT();checkIntHeadcount()" title="ลบ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>`;
+        container.appendChild(d);
+      });
+      calcINT();
+      checkIntHeadcount();
+      alert(`✓ นำเข้ารายชื่อแล้ว ${names.length} คน`);
+    } catch(err) {
+      console.error(err);
+      alert('เกิดข้อผิดพลาด: ' + err.message);
+    }
+    input.value = '';
+  };
+  if (file.name.endsWith('.csv')) reader.readAsText(file, 'UTF-8');
+  else reader.readAsArrayBuffer(file);
 }
 function toggleToOther() {
   const sel = document.getElementById('f-to');
