@@ -205,12 +205,15 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
     } catch(e) { console.warn('Supabase patch failed', e.message); }
   }
 
-  // localStorage
+  // Update localStorage first, then render
   const allMemos = loadMemos();
   const idx = allMemos.findIndex(m => m.memoNo === memoNo);
   if (idx >= 0) { allMemos[idx] = updated; storeMemos(allMemos); }
-  renderPendingMemos();
-  renderHistoryMemos();
+
+  // Safe render — only if DOM is ready
+  try { if (typeof renderPendingMemos === 'function') renderPendingMemos(); } catch(e) {}
+  try { if (typeof renderHistoryMemos === 'function') renderHistoryMemos(); } catch(e) {}
+
   return updated;
 }
 
