@@ -932,10 +932,24 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <!-- INT fields -->
             <div class="fs" id="fs-int">
               <div class="form-grid" style="margin-bottom:12px">
-                <div class="fg"><label>ไตรมาส / ครั้งที่ *</label><input type="text" placeholder="เช่น Q2 / 2568"></div>
-                <div class="fg"><label>วันที่จัดกิจกรรม *</label><input type="date"></div>
+                <div class="fg" style="grid-column:1/-1">
+                  <label>รายละเอียด / ชื่อกิจกรรม *</label>
+                  <input type="text" id="int-activity" placeholder="เช่น งานเลี้ยงสังสรรค์ประจำปี Q2/2568">
+                </div>
+                <div class="fg"><label>วันที่จัดกิจกรรม *</label><input type="date" id="int-date"></div>
+                <div class="fg">
+                  <label>วัตถุประสงค์ *</label>
+                  <select id="int-objective" onchange="toggleIntObjectiveOther()">
+                    <option value="">— เลือก —</option>
+                    <option value="เพื่อเสริมสร้างกำลังใจในการปฏิบัติงาน">เพื่อเสริมสร้างกำลังใจในการปฏิบัติงาน</option>
+                    <option value="เพื่อเสริมสร้างความสัมพันธ์ในทีม">เพื่อเสริมสร้างความสัมพันธ์ในทีม</option>
+                    <option value="เพื่อส่งเสริมการทำงานเป็นทีม">เพื่อส่งเสริมการทำงานเป็นทีม</option>
+                    <option value="other">อื่นๆ (กรอกเอง)</option>
+                  </select>
+                  <input type="text" id="int-objective-other" placeholder="ระบุวัตถุประสงค์" style="display:none;margin-top:6px" oninput="">
+                </div>
                 <div class="fg"><label>วงเงินต่อคน (บาท) *</label><input type="number" id="int-pp" value="1500" oninput="calcINT()"></div>
-                <div class="fg"><label>จำนวนเงินต่อคนเป็นตัวอักษร *</label><input type="text" placeholder="หนึ่งพันห้าร้อยบาทถ้วน"></div>
+                <div class="fg"><label>จำนวนเงินรวมเป็นตัวอักษร *</label><input type="text" id="int-amount-words" placeholder="เช่น สี่หมื่นห้าพันบาทถ้วน"></div>
               </div>
               <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:7px">รายชื่อผู้เข้าร่วม *</div>
               <div id="int-names">
