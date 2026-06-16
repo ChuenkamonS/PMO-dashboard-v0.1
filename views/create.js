@@ -416,9 +416,14 @@ function collectMemoData() {
   }
   if(data.type==='ent') {
     const inp = document.querySelectorAll('#fs-ent input');
-    data.total = Number(inp[5]?.value)||0;
+    data.entClient   = inp[0]?.value.trim() || '';
+    data.entDate     = dateInput(inp[1]?.value) || '';
+    data.entTime     = inp[2]?.value || '';
+    data.entPlace    = inp[3]?.value.trim() || '';
+    data.entPeople   = inp[4]?.value || '';
+    data.total       = Number(inp[5]?.value)||0;
     data.amountWords = inp[6]?.value.trim()||'';
-    data.sections.push({ title:'รายละเอียดงานเลี้ยงรับรอง', html:`<p>ลูกค้า: ${esc(inp[0]?.value||'-')}<br>วันที่: ${esc(dateInput(inp[1]?.value))} ${esc(inp[2]?.value||'')}<br>สถานที่: ${esc(inp[3]?.value||'-')}<br>จำนวน: ${esc(inp[4]?.value||'-')} คน</p>` });
+    data.sections.push({ title:'รายละเอียดงานเลี้ยงรับรอง', html:`<p>ลูกค้า: ${esc(data.entClient||'-')}<br>วันที่: ${esc(data.entDate)} ${esc(data.entTime||'')}<br>สถานที่: ${esc(data.entPlace||'-')}<br>จำนวน: ${esc(data.entPeople||'-')} คน</p>` });
   }
   if(data.type==='dep') {
     const start    = document.getElementById('dep-start')?.value || '';
