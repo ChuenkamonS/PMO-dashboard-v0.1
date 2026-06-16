@@ -937,16 +937,31 @@ svg.icon { display: inline-block; vertical-align: middle; }
                   <input type="text" id="int-activity" placeholder="เช่น งานเลี้ยงสังสรรค์ประจำปี Q2/2568">
                 </div>
                 <div class="fg"><label>วันที่จัดกิจกรรม *</label><input type="date" id="int-date"></div>
+                <div class="fg">
+                  <label>จำนวนผู้เข้าร่วม (คน) *</label>
+                  <input type="number" id="int-headcount" min="1" placeholder="เช่น 30" oninput="checkIntHeadcount()">
+                </div>
                 <div class="fg"><label>วงเงินต่อคน (บาท) *</label><input type="number" id="int-pp" value="1500" oninput="calcINT()"></div>
                 <div class="fg"><label>จำนวนเงินรวมเป็นตัวอักษร *</label><input type="text" id="int-amount-words" placeholder="เช่น สี่หมื่นห้าพันบาทถ้วน"></div>
               </div>
-              <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:7px">รายชื่อผู้เข้าร่วม *</div>
-              <div id="int-names">
-                <div class="row-name"><span class="name-num">1.</span><input class="ri int-name" type="text" placeholder="ชื่อ-นามสกุล ตำแหน่ง" oninput="calcINT()"><button class="rm-btn" onclick="rmName(this,'int-names');calcINT()" title="ลบ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button></div>
+
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
+                <span style="font-size:11px;font-weight:600;color:var(--text-2)">รายชื่อผู้เข้าร่วม *</span>
+                <span id="int-name-count" style="font-size:11px;color:var(--text-3)">0 คน</span>
               </div>
-              <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-                <button class="add-btn" onclick="addName('int-names','int-name',true)" style="margin-top:0">+ เพิ่มรายชื่อ</button>
-                <button class="btn-sm" onclick="openBulkNameModal('int-names','int-name',true)" style="font-size:11px;padding:5px 10px">⬆ Bulk Upload</button>
+              <div id="int-headcount-warning" style="display:none;font-size:11px;color:var(--red);margin-bottom:6px;padding:6px 10px;background:var(--red-50,#FCEBEB);border-radius:var(--r-sm)"></div>
+
+              <div id="int-names">
+                <div class="row-name"><span class="name-num">1.</span><input class="ri int-name" type="text" placeholder="ชื่อ-นามสกุล ตำแหน่ง" oninput="calcINT();checkIntHeadcount()"><button class="rm-btn" onclick="rmName(this,'int-names');calcINT();checkIntHeadcount()" title="ลบ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button></div>
+              </div>
+
+              <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+                <button class="add-btn" onclick="addName('int-names','int-name',true);checkIntHeadcount()" style="margin-top:0">+ เพิ่มรายชื่อ</button>
+                <button class="btn-sm" onclick="downloadIntTemplate()" style="font-size:11px;padding:5px 10px">⬇ Download Template</button>
+                <label class="btn-sm" style="font-size:11px;padding:5px 10px;cursor:pointer">
+                  ⬆ Upload Excel
+                  <input type="file" id="int-excel-upload" accept=".xlsx,.xls" style="display:none" onchange="uploadIntExcel(this)">
+                </label>
               </div>
               <div class="total-box"><span class="total-label">Total Amount</span><span class="total-val" id="int-total">฿0</span></div>
             </div>
