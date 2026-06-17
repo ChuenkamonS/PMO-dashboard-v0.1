@@ -155,10 +155,13 @@ function getInfraProjects(infraEntries) {
 // ── License cost by project (from license monitor) ──
 function getLicenseCostByProject() {
   if(typeof getAllLicenses !== 'function') return {};
+  const fxRate = _getLicFxRate ? _getLicFxRate() : 35;
   const result = {};
   getAllLicenses().forEach(l => {
     const proj = l.project || '(ไม่ระบุ)';
-    result[proj] = (result[proj]||0) + (l.pricePerMonth||0) * (l.seats||1);
+    // Use memo-embedded fxRate if available, else global fxRate
+    const rate = Number(l.fxRate) || fxRate;
+    result[proj] = (result[proj]||0) + (l.pricePerMonth||0) * (l.seats||1) * rate;
   });
   return result;
 }
@@ -1870,37 +1873,43 @@ async function deletePoolAsync(id) {
 function matchMemoToPool(memo, pools) {
   const d = parseThaiDate(memo.date) || new Date(memo.updatedAt || memo.createdAt);
   const memoKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-  const proj    = memo.project || '(ไม่ระบุ)';
-  const type    = memo.type;
+  // budgetSource overrides project for pool matching (PMO tagging)
+  const proj = memo.budgetSource || memo.project || '(ไม่ระบุ)';
+  const type = memo.type;
 
-  const matches = pools.filter(p =>
-    p.project === proj &&
-    (p.memoTypes.length === 0 || p.memoTypes.includes(type)) &&
-    (!p.startMonth || memoKey >= p.startMonth) &&
-    (!p.endMonth   || memoKey <= p.endMonth)
-  );
+  const matches = pools.filter(p => {
+    if (p.project !== proj) return false;
+    // memoTypes=[] or undefined/null means accept all types
+    const types = Array.isArray(p.memoTypes) ? p.memoTypes : [];
+    if (types.length > 0 && !types.includes(type)) return false;
+    if (p.startMonth && memoKey < p.startMonth) return false;
+    if (p.endMonth   && memoKey > p.endMonth)   return false;
+    return true;
+  });
   if (!matches.length) return null;
-  // Pick most specific (narrowest period)
+  // Pick most specific (narrowest date range)
   return matches.sort((a, b) => {
-    const aLen = a.startMonth && a.endMonth ? (new Date(a.endMonth) - new Date(a.startMonth)) : Infinity;
-    const bLen = b.startMonth && b.endMonth ? (new Date(b.endMonth) - new Date(b.startMonth)) : Infinity;
+    const aLen = a.startMonth && a.endMonth
+      ? (new Date(a.endMonth+'-01') - new Date(a.startMonth+'-01')) : Infinity;
+    const bLen = b.startMonth && b.endMonth
+      ? (new Date(b.endMonth+'-01') - new Date(b.startMonth+'-01')) : Infinity;
     return aLen - bLen;
   })[0];
 }
 
 // Get actual spend for a pool (auto-match, no manual tag needed)
 function getPoolActual(pool, approvedMemos) {
-  return approvedMemos
-    .filter(m => {
-      const matched = matchMemoToPool(m, [pool]);
-      return matched?.id === pool.id;
-    })
+  return getPoolMemos(pool, approvedMemos)
     .reduce((s, m) => s + (Number(m.total) || 0), 0);
 }
 
 // Get memos that match a pool
 function getPoolMemos(pool, approvedMemos) {
-  return approvedMemos.filter(m => matchMemoToPool(m, [pool])?.id === pool.id);
+  if (!pool || !approvedMemos) return [];
+  return approvedMemos.filter(m => {
+    const match = matchMemoToPool(m, [pool]);
+    return match && match.id === pool.id;
+  });
 }
 
 // ══════════════════════════════════════════
