@@ -370,9 +370,15 @@ function updateSubjectPreview() {
 }
 
 function collectMemoData() {
-  // Read "เรียน" from dropdown or other input
-  const toSel = document.getElementById('f-to');
-  const toVal = toSel?.value === 'other' ? (val('#f-to-other') || '') : (toSel?.value || '');
+  // เรียน: auto-derive from title of last approver (A2 or A3)
+  // Read approvers first to determine last approver title
+  const _toApprRows = document.querySelectorAll('#approver-rows-form .appr-form-row');
+  const _toApprArr  = Array.from(_toApprRows).map(row => {
+    const titleSel = row.querySelector('.appr-title-sel');
+    const titleOth = row.querySelector('.appr-title-other');
+    return titleSel?.value === 'other' ? (titleOth?.value.trim()||'') : (titleSel?.value||'');
+  }).filter(Boolean);
+  const toVal = _toApprArr.length > 0 ? _toApprArr[_toApprArr.length - 1] : 'ประธานเจ้าหน้าที่บริหาร';
 
   // Read reviewer name/title from dropdowns
   const revNameSel = document.getElementById('f-reviewer-name');
@@ -520,7 +526,7 @@ function validateMemo(data) {
   if(!val('#f-date')) missing.push('วันที่ Memo');
   if(!val('#f-project')) missing.push('โครงการ');
   else if(val('#f-project')==='other' && !val('#f-project-other')) missing.push('ชื่อโครงการ');
-  if(!data.to) missing.push('เรียน');
+  // เรียน auto-derived from last approver — no validation needed
   if(!data.subject || !data.subject.trim()) missing.push('หัวข้อเรื่อง (ห้ามว่าง)');
   if(!data.reason) missing.push('เหตุผลในการขอ');
 
