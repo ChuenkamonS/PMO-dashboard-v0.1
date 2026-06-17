@@ -561,17 +561,22 @@ function getEffectiveBudgetSource(memo) {
 }
 
 function buildBudgetTagCell(memo) {
-  if(memo.type !== 'sl' || memo.status !== 'completed') {
+  // Only completed memos can be tagged
+  if(memo.status !== 'completed') {
     return '<span style="color:var(--text-3);font-size:11px">—</span>';
+  }
+  // Only PMO can tag
+  if(typeof isPMO === 'function' && !isPMO()) {
+    // Show read-only badge
+    const { source } = getEffectiveBudgetSource(memo);
+    return `<span style="font-size:10px;padding:2px 7px;background:var(--green-50);color:var(--green-800);border-radius:4px;white-space:nowrap">${esc(source)}</span>`;
   }
   const { source, isAuto } = getEffectiveBudgetSource(memo);
   const isCompany = source === 'Company-Wide';
 
   if(isAuto) {
-    // Auto-assigned — show with subtle style + override button
     return `<span style="font-size:10px;padding:2px 7px;background:var(--green-50);color:var(--green-800);border-radius:4px;cursor:pointer;white-space:nowrap" onclick="openBudgetTagModal('${esc(memo.memoNo)}')" title="Auto จาก project — คลิกเพื่อ override">${esc(source)} <span style="opacity:.6">auto</span></span>`;
   }
-  // Manually overridden
   return `<span style="font-size:10px;padding:2px 7px;background:${isCompany?'var(--blue-50)':'var(--green-50)'};color:${isCompany?'var(--blue-800)':'var(--green-800)'};border:0.5px solid ${isCompany?'#B5D4F4':'#C0DD97'};border-radius:4px;cursor:pointer;white-space:nowrap" onclick="openBudgetTagModal('${esc(memo.memoNo)}')" title="คลิกเพื่อเปลี่ยน">⚑ ${esc(source)}</span>`;
 }
 
