@@ -108,7 +108,7 @@ async function loadMemosAsync() {
 
 async function saveMemoAsync(data) {
   const now = new Date().toISOString();
-  const existing = (await loadMemosAsync()).find(m => m.memoNo === data.memoNo);
+  const existing = loadMemos().find(m => m.memoNo === data.memoNo);
   const saved = { ...data, id:data.memoNo, status:data.status||'pending',
     createdAt: existing ? existing.createdAt : now, updatedAt: now };
 
@@ -135,9 +135,12 @@ async function saveMemoAsync(data) {
 }
 
 async function updateMemoStatusAsync(memoNo, status, extra={}) {
-  // Read fresh from Supabase (source of truth)
-  const freshMemos = await loadMemosAsync();
-  let memo = freshMemos.find(m => m.memoNo === memoNo);
+  // Read from cache first (fastest), fall back to Supabase if not found
+  let memo = loadMemos().find(m => m.memoNo === memoNo);
+  if (!memo) {
+    const freshMemos = await loadMemosAsync();
+    memo = freshMemos.find(m => m.memoNo === memoNo);
+  }
   if (!memo) return null;
 
   // ── Terminal state guard ──
