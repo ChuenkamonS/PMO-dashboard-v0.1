@@ -213,85 +213,89 @@ function _renderLicTab(tab) {
 }
 
 // ── TAB 1: MEMO INDEX ─────────────────────────────────────
+function _populateLicenseFilters(allLicenses) {
+  const projSel = document.getElementById('lic-filter-project');
+  if (projSel) {
+    const cur = projSel.value;
+    const projects = [...new Set(allLicenses.map(l => l.project).filter(Boolean))].sort();
+    projSel.innerHTML = `<option value="all">ทุกโครงการ</option>` +
+      projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+    if ([...projSel.options].some(o => o.value === cur)) projSel.value = cur;
+  }
+  const modalProj = document.getElementById('lic-project');
+  if (modalProj) {
+    const s = typeof loadSettings === 'function' ? loadSettings() : null;
+    const projects = s?.projects || [...new Set(allLicenses.map(l => l.project).filter(Boolean))].sort();
+    const cur = modalProj.value;
+    modalProj.innerHTML = `<option value="">— ไม่ระบุ —</option>` +
+      projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+    if ([...modalProj.options].some(o => o.value === cur)) modalProj.value = cur;
+  }
+}
+
 function _renderLicMemoIndex() {
-  const memos = loadMemos().filter(m => m.type === 'sl' && m.status === 'completed');
-  const allLics = getAllLicenses();
-
-  // KPIs from licenses
-  let active = 0, expiring = 0, expired = 0, totalSeats = 0;
-  allLics.forEach(l => {
-    const s = getLicenseStatus(l);
-    if (s.key === 'expired') expired++;
-    else if (s.key.startsWith('expiring')) { expiring++; active++; }
-    else active++;
-    if (s.key !== 'expired' && s.key !== 'cancelled') totalSeats += (l.seats || 1);
-  });
-
-  // Expiry warnings from licenses ≤ 30 days
-  const warnLics = allLics.filter(l => {
-    const s = getLicenseStatus(l);
-    return s.key.startsWith('expiring') && s.days !== null && s.days <= 30;
-  }).sort((a,b) => new Date(a.expiry) - new Date(b.expiry));
-
-  const fxRate = _getLicFxRate();
-
   const el = document.getElementById('lic-content');
   if (!el) return;
 
   el.innerHTML = `
-    ${warnLics.length ? `
-    <div style="background:var(--amber-50,#FAEEDA);border:0.5px solid var(--amber);border-radius:var(--r-sm);padding:8px 14px;margin-bottom:12px;font-size:12px;color:var(--amber-dark,#633806);display:flex;align-items:flex-start;gap:8px">
-      <span style="flex-shrink:0;margin-top:1px">⚠</span>
-      <span><strong>${warnLics.length} license กำลังจะหมดอายุ:</strong> ${
-        warnLics.slice(0,3).map(l => `${esc(l.name)} (${esc(l.project||'')}) เหลือ ${getLicenseStatus(l).days} วัน`).join(' · ')
-      }${warnLics.length > 3 ? ` · และอีก ${warnLics.length-3} รายการ` : ''}</span>
-    </div>` : ''}
-
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
-      ${_kpi('Active', active, 'var(--blue)', 'license ที่ยังใช้งานอยู่')}
-      ${_kpi('Expiring ≤ 30 วัน', expiring, 'var(--amber)', 'ต้องต่ออายุเร็วๆ')}
-      ${_kpi('Expired', expired, 'var(--red)', 'หมดอายุแล้ว')}
-      ${_kpi('Total seats (active)', totalSeats, 'var(--text-1)', 'จากทุก license ที่ยังใช้')}
+    <div class="metric-row" style="grid-template-columns:repeat(5,1fr);margin-bottom:14px">
+      <div class="metric-card"><div class="metric-label">Active Licenses</div><div class="metric-val" id="lic-active" style="color:var(--blue)">0</div><div class="metric-sub" id="lic-active-cost"></div></div>
+      <div class="metric-card"><div class="metric-label">Expiring Soon (≤30d)</div><div class="metric-val" id="lic-expiring" style="color:var(--amber)">0</div><div class="metric-sub">ต้องต่ออายุเร็วๆ นี้</div></div>
+      <div class="metric-card"><div class="metric-label">Expired</div><div class="metric-val" id="lic-expired" style="color:var(--red)">0</div><div class="metric-sub">หมดอายุแล้ว</div></div>
+      <div class="metric-card"><div class="metric-label">ค่าใช้จ่าย/เดือน</div><div class="metric-val" id="lic-monthly" style="font-size:18px;margin-top:4px">฿0</div><div class="metric-sub">รวมทุก active</div></div>
+      <div class="metric-card"><div class="metric-label">ค่าใช้จ่าย/ปี</div><div class="metric-val" id="lic-annual" style="font-size:18px;margin-top:4px">฿0</div><div class="metric-sub" id="lic-renewal-3m"></div></div>
     </div>
 
     <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
-      <input id="lic-mi-search" type="text" placeholder="ค้นหาเลข memo, project, license..."
-        style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:220px"
-        oninput="_renderLicMemoIndex()">
-      <select id="lic-mi-proj" onchange="_renderLicMemoIndex()"
-        style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-        <option value="all">ทุก project</option>
-        ${[...new Set(memos.map(m=>m.project).filter(Boolean))].sort().map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
-      </select>
-      <select id="lic-mi-status" onchange="_renderLicMemoIndex()"
-        style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+      <input type="text" id="lic-search" placeholder="🔍 ค้นหา Software, Project, Owner..."
+        style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px;outline:none"
+        oninput="_renderLicMemoIndexRows()">
+      <select id="lic-filter-status" onchange="_renderLicMemoIndexRows()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
         <option value="all">ทุกสถานะ</option>
         <option value="active">Active</option>
-        <option value="expiring">Expiring</option>
+        <option value="expiring">Expiring (≤30d)</option>
+        <option value="expiring-7">≤ 7 วัน</option>
+        <option value="expiring-15">≤ 15 วัน</option>
+        <option value="expiring-30">≤ 30 วัน</option>
         <option value="expired">Expired</option>
+        <option value="cancelled">Cancelled</option>
       </select>
-      <div style="margin-left:auto;font-size:11px;color:var(--text-2);display:flex;align-items:center;gap:6px">
-        FX: <input id="lic-fx-rate" type="number" value="${fxRate}" min="1"
-          style="width:52px;font-size:11px;padding:3px 6px;border:1px solid var(--border-md);border-radius:4px;background:var(--surface)"
-          onchange="_saveLicFxRate(this.value);_renderLicTab(_licCurrentTab)">
-        THB/USD
-      </div>
+      <select id="lic-filter-project" onchange="_renderLicMemoIndexRows()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+        <option value="all">ทุกโครงการ</option>
+      </select>
+      <select id="lic-sort" onchange="_renderLicMemoIndexRows()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+        <option value="expiry-asc">หมดอายุใกล้สุด</option>
+        <option value="cost-desc">ราคา มาก→น้อย</option>
+        <option value="seats-desc">Seats มาก→น้อย</option>
+        <option value="purchase-desc">ซื้อล่าสุด</option>
+      </select>
+      <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="downloadTemplate('license')" title="Download Template">⬇ Template</button>
+      <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="importBulk('license')" title="Import from Excel">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Import Excel
+      </button>
+      <button class="btn-primary" style="font-size:12px;padding:6px 14px" onclick="openLicenseModal()">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add License
+      </button>
     </div>
 
     <div class="card" style="padding:0;overflow:hidden">
-      <table class="hist-table" id="lic-mi-table">
+      <table class="hist-table">
         <thead><tr>
-          <th style="padding-left:14px;width:12%">Memo No.</th>
-          <th>วันที่</th>
-          <th>Project</th>
-          <th>License / Program</th>
-          <th style="text-align:right">Seats</th>
-          <th style="text-align:right">Cost/mo (THB)</th>
-          <th>Start</th>
-          <th>End</th>
-          <th style="text-align:center">สถานะ</th>
+          <th style="width:15%;padding-left:16px">Software</th>
+          <th style="width:7%">Seats</th>
+          <th style="width:9%">฿/เดือน</th>
+          <th style="width:9%">Owner</th>
+          <th style="width:8%">Department</th>
+          <th style="width:8%">โครงการ</th>
+          <th style="width:8%">วันที่ซื้อ</th>
+          <th style="width:8%">หมดอายุ</th>
+          <th style="width:9%;text-align:center">สถานะ</th>
+          <th style="width:7%;text-align:center">Source</th>
+          <th style="width:8%;text-align:center">Actions</th>
         </tr></thead>
-        <tbody id="lic-mi-body"></tbody>
+        <tbody id="lic-table-body"></tbody>
       </table>
     </div>`;
 
@@ -299,70 +303,110 @@ function _renderLicMemoIndex() {
 }
 
 function _renderLicMemoIndexRows() {
-  const search = (document.getElementById('lic-mi-search')?.value || '').toLowerCase();
-  const projF  = document.getElementById('lic-mi-proj')?.value || 'all';
-  const statF  = document.getElementById('lic-mi-status')?.value || 'all';
-  const fxRate = _getLicFxRate();
+  const allLicenses = getAllLicenses();
+  _populateLicenseFilters(allLicenses);
+  const search     = (document.getElementById('lic-search')?.value || '').toLowerCase();
+  const filterSt   = document.getElementById('lic-filter-status')?.value || 'all';
+  const filterProj = document.getElementById('lic-filter-project')?.value || 'all';
+  const sort       = document.getElementById('lic-sort')?.value || 'expiry-asc';
 
-  const memos = loadMemos().filter(m => m.type === 'sl' && m.status === 'completed');
-  const tbody  = document.getElementById('lic-mi-body');
-  if (!tbody) return;
-
-  // Group licenses back by memo
-  const rows = memos.flatMap(memo => {
-    const lics = parseLicenseFromMemo(memo);
-    if (!lics.length) return [];
-    const totalSeats = lics.reduce((s,l) => s + (l.seats||1), 0);
-    const totalCostTHB = lics.reduce((s,l) => s + ((l.pricePerMonth||0) * (l.fxRate||fxRate) * (l.seats||1)), 0);
-    const expiryDates = lics.map(l => l.expiry).filter(Boolean).sort();
-    const startDates  = lics.map(l => l.purchaseDate).filter(Boolean).sort();
-    const worstStatus = _worstLicenseStatus(lics);
-    const licNames = [...new Set(lics.map(l=>l.name))].join(', ');
-    return [{ memo, lics, totalSeats, totalCostTHB, expiryDates, startDates, worstStatus, licNames }];
+  // Metrics
+  let activeCount = 0, renewSoonCount = 0, expiredCount = 0, monthlyCost = 0;
+  allLicenses.forEach(lic => {
+    const s = getLicenseStatus(lic);
+    const cost = (lic.pricePerMonthTHB ?? lic.pricePerMonth ?? 0) * (lic.seats || 1);
+    if (s.key === 'active') { activeCount++; monthlyCost += cost; }
+    if (s.key === 'expiring-7' || s.key === 'expiring-15' || s.key === 'expiring-30') { renewSoonCount++; monthlyCost += cost; }
+    if (s.key === 'expired') expiredCount++;
   });
+  const annualCost = monthlyCost * 12;
 
-  const filtered = rows.filter(r => {
-    if (projF !== 'all' && r.memo.project !== projF) return false;
-    if (statF !== 'all') {
-      const k = r.worstStatus.key;
-      if (statF === 'active'   && k !== 'active') return false;
-      if (statF === 'expiring' && !k.startsWith('expiring')) return false;
-      if (statF === 'expired'  && k !== 'expired') return false;
+  const in3m = new Date(); in3m.setMonth(in3m.getMonth() + 3);
+  const renewal3m = allLicenses
+    .filter(l => { if (!l.expiry) return false; const e = new Date(l.expiry); return e >= new Date() && e <= in3m; })
+    .reduce((s, l) => s + (l.pricePerMonthTHB ?? l.pricePerMonth ?? 0) * (l.seats || 1) * (l.months || 12), 0);
+
+  const setText = (id, txt) => { const e = document.getElementById(id); if (e) e.textContent = txt; };
+  setText('lic-active', activeCount);
+  setText('lic-active-cost', monthlyCost ? money(monthlyCost) + '/เดือน' : '');
+  setText('lic-expiring', renewSoonCount);
+  setText('lic-expired', expiredCount);
+  setText('lic-monthly', money(monthlyCost));
+  setText('lic-annual', money(annualCost));
+  setText('lic-renewal-3m', renewal3m ? `Renewal 3m: ${money(renewal3m)}` : 'ไม่มี renewal ใน 3 เดือน');
+
+  let filtered = allLicenses.filter(lic => {
+    const s = getLicenseStatus(lic);
+    if (filterSt !== 'all') {
+      if (filterSt === 'expiring' && !['expiring-7', 'expiring-15', 'expiring-30'].includes(s.key)) return false;
+      if (filterSt !== 'expiring' && s.key !== filterSt) return false;
     }
+    if (filterProj !== 'all' && lic.project !== filterProj) return false;
     if (search) {
-      const hay = `${r.memo.memoNo} ${r.memo.project} ${r.licNames}`.toLowerCase();
+      const hay = `${lic.name} ${lic.project} ${lic.owner} ${lic.vendor} ${lic.department}`.toLowerCase();
       if (!hay.includes(search)) return false;
     }
     return true;
   });
 
+  filtered.sort((a, b) => {
+    const costA = (a.pricePerMonthTHB ?? a.pricePerMonth ?? 0) * (a.seats || 1);
+    const costB = (b.pricePerMonthTHB ?? b.pricePerMonth ?? 0) * (b.seats || 1);
+    if (sort === 'cost-desc')     return costB - costA;
+    if (sort === 'seats-desc')    return (b.seats || 1) - (a.seats || 1);
+    if (sort === 'purchase-desc') return new Date(b.purchaseDate || 0) - new Date(a.purchaseDate || 0);
+    const sa = getLicenseStatus(a), sb = getLicenseStatus(b);
+    if (sa.key === 'expired' && sb.key !== 'expired') return 1;
+    if (sb.key === 'expired' && sa.key !== 'expired') return -1;
+    if (!a.expiry) return 1; if (!b.expiry) return -1;
+    return new Date(a.expiry) - new Date(b.expiry);
+  });
+
+  const tbody = document.getElementById('lic-table-body');
+  if (!tbody) return;
   if (!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-3)">ไม่พบข้อมูล — Approve SL Memo เพื่อให้ข้อมูลปรากฎที่นี่</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:34px 16px;color:var(--text-3)">ยังไม่มีข้อมูล${search ? ' ที่ตรงกับการค้นหา' : ''} — Approve SL Memo หรือกด Add License</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = filtered.map(r => {
-    const s = r.worstStatus;
-    const endCell = r.expiryDates.length
-      ? (s.key === 'expired'
-          ? `<span style="color:var(--red)">${shortDate(r.expiryDates[0])}</span>`
-          : s.key.startsWith('expiring')
-            ? `<span style="color:var(--amber);font-weight:500">⚠ ${s.days}d · ${shortDate(r.expiryDates[0])}</span>`
-            : shortDate(r.expiryDates[0]))
-      : '—';
+  window._licFiltered = filtered;
+  tbody.innerHTML = filtered.map((lic, _idx) => {
+    const s = getLicenseStatus(lic);
+    const monthlyCostLic = (lic.pricePerMonthTHB ?? lic.pricePerMonth ?? 0) * (lic.seats || 1);
+    const sourceBadge = lic.source === 'memo'
+      ? `<span style="font-size:10px;background:#E6F1FB;color:#0C447C;padding:1px 6px;border-radius:3px;white-space:nowrap">Memo</span>`
+      : `<span style="font-size:10px;background:#F1EFE8;color:#5F5E5A;padding:1px 6px;border-radius:3px;white-space:nowrap">Manual</span>`;
     return `<tr>
-      <td style="padding-left:14px;font-size:12px;color:var(--blue);cursor:pointer"
-          onclick="openMemoPdf && openMemoPdf('${esc(r.memo.memoNo)}')">${esc(r.memo.memoNo)}</td>
-      <td style="font-size:11px">${shortDate(r.memo.date||r.memo.createdAt)}</td>
-      <td style="font-weight:500">${esc(r.memo.project||'—')}</td>
-      <td style="font-size:12px">${esc(r.licNames)}</td>
-      <td style="text-align:right">${r.totalSeats}</td>
-      <td style="text-align:right;font-size:12px" class="mono">${r.totalCostTHB ? money(r.totalCostTHB)+'/mo' : '—'}</td>
-      <td style="font-size:11px">${r.startDates.length ? shortDate(r.startDates[0]) : '—'}</td>
-      <td style="font-size:11px">${endCell}</td>
-      <td style="text-align:center"><span class="badge ${s.badge}">${s.label}</span></td>
+      <td style="padding-left:16px;font-weight:600">
+        ${esc(lic.name)}
+        ${lic.vendor ? `<div style="font-size:10px;color:var(--text-3);font-weight:400">${esc(lic.vendor)}</div>` : ''}
+        ${lic.memoNo ? `<div style="font-size:10px;color:var(--blue);font-weight:400;cursor:pointer" onclick="openMemoPdf && openMemoPdf('${esc(lic.memoNo)}')">${esc(lic.memoNo)}</div>` : ''}
+      </td>
+      <td>${esc(lic.seats || 1)}</td>
+      <td class="mono">${esc(money(monthlyCostLic))}</td>
+      <td style="font-size:12px">${esc(lic.owner || '—')}</td>
+      <td style="font-size:12px">${esc(lic.department || '—')}</td>
+      <td style="font-size:12px">${esc(lic.project || '—')}</td>
+      <td style="font-size:11px">${esc(shortDate(lic.purchaseDate))}</td>
+      <td style="font-size:11px">${esc(shortDate(lic.expiry))}</td>
+      <td style="text-align:center"><span class="badge ${s.badge}">${esc(s.label)}</span></td>
+      <td style="text-align:center">${sourceBadge}</td>
+      <td style="text-align:center;white-space:nowrap">
+        <button class="btn-sm" data-action="edit" data-idx="${_idx}" style="padding:3px 7px;font-size:11px" title="${lic.source === 'memo' ? 'แก้ไข owner/dept/note' : 'Edit'}">✎</button>
+        ${lic.source !== 'memo' ? `<button class="btn-sm" data-action="delete" data-idx="${_idx}" style="padding:3px 7px;font-size:11px;color:var(--red)" title="Delete">✕</button>` : ''}
+      </td>
     </tr>`;
   }).join('');
+
+  tbody.onclick = function(e) {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const idx = Number(btn.dataset.idx);
+    const lic = window._licFiltered?.[idx];
+    if (!lic) return;
+    if (btn.dataset.action === 'edit')   openLicenseModal(String(lic.id));
+    if (btn.dataset.action === 'delete') deleteLicense(String(lic.id));
+  };
 }
 
 function _worstLicenseStatus(lics) {
@@ -805,6 +849,7 @@ function _kpi(label, val, color, sub) {
 function openLicenseModal(id) {
   const modal = document.getElementById('license-modal');
   modal.style.display = 'flex';
+  _populateLicenseFilters(getAllLicenses());
   if (id) {
     const lic = getAllLicenses().find(l => String(l.id) === String(id));
     if (!lic) { closeLicenseModal(); return; }
