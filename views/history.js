@@ -360,17 +360,42 @@ function openHistoryDetail(memoNo) {
   `;
 
   const acts = document.getElementById('detail-actions');
-  const isPending = !memo.status || (memo.status === 'pending' || memo.status === 'pending_a2' || memo.status === 'pending_a3');
-  const isOwn     = (memo.requesterName || '') === (typeof currentUser === 'function' ? currentUser() : '');
-  const canAct    = isPending && !isOwn;
-  const isCompleted = memo.status === 'completed';
+  const _no  = esc(memo.memoNo);
+  const _st  = memo.status || '';
+  const isPending   = _st === 'pending' || _st === 'pending_a2' || _st === 'pending_a3';
+  const isCompleted = _st === 'completed';
+  const isRejected  = _st === 'rejected';
+  const isCancelled = _st === 'cancelled';
+  const isDraft     = _st === 'draft';
+  const isOwn       = (memo.requesterName || '') === (typeof currentUser === 'function' ? currentUser() : '');
+  const canApprove  = isPending && !isOwn; // approver, not own memo
+  const canCancel   = isPending && isOwn;  // own pending memo
+
   acts.innerHTML = `
-    ${canAct ? `
-      <button class="btn-primary" type="button" onclick="closeDetailModal();openApproveModal('${esc(memo.memoNo)}')">✓ Approve</button>
-      <button class="btn-reject"  type="button" onclick="closeDetailModal();openRejectModal('${esc(memo.memoNo)}')">✕ Reject</button>
+    ${canApprove ? `
+      <button class="btn-primary" type="button" onclick="closeDetailModal();openApproveModal('${_no}')">✓ Approve</button>
+      <button class="btn-reject"  type="button" onclick="closeDetailModal();openRejectModal('${_no}')">✕ Reject</button>
     ` : ''}
-    ${isCompleted && memo.type === 'sl' ? `<button class="btn-sm" type="button" onclick="openBudgetTagModal('${esc(memo.memoNo)}')" style="background:${memo.budgetSource ? 'var(--green-50)' : 'var(--amber-50)'};color:${memo.budgetSource ? 'var(--green-800)' : 'var(--amber-800)'}">⚑ ${memo.budgetSource ? memo.budgetSource : 'Tag Budget'}</button>` : ''}
-    ${memo.status !== 'draft' ? `<button class="btn-sm" type="button" onclick="openHistoryDetail('${esc(memo.memoNo)}')" title="ดูรายละเอียด">View Detail</button>` : ''}
+    ${canCancel ? `
+      <button class="btn-sm" type="button" style="color:var(--red)" onclick="closeDetailModal();cancelMemo('${_no}')">✕ Cancel</button>
+    ` : ''}
+    ${!isDraft ? `
+      <button class="btn-sm" type="button" onclick="if(typeof downloadMemoPdf==='function'){downloadMemoPdf(loadMemos().find(m=>m.memoNo==='${_no}'))}" style="color:var(--blue)">⬇ Download PDF</button>
+    ` : ''}
+    ${(isCompleted||isRejected||isCancelled||isPending) && !isDraft ? `
+      <button class="btn-sm" type="button" onclick="closeDetailModal();duplicateMemo('${_no}')">⊕ Duplicate</button>
+    ` : ''}
+    ${isDraft ? `
+      <button class="btn-sm" type="button" style="color:var(--blue)" onclick="closeDetailModal();if(typeof editDraft==='function')editDraft('${_no}')">✎ Edit Draft</button>
+      <button class="btn-sm" type="button" style="color:var(--red)"  onclick="closeDetailModal();if(typeof deleteDraft==='function')deleteDraft('${_no}')">✕ Delete Draft</button>
+    ` : ''}
+    ${typeof isPMO === 'function' && isPMO() && !isDraft ? `
+      <button class="btn-sm" type="button"
+        onclick="openBudgetTagModal('${_no}')"
+        style="background:${memo.budgetSource ? 'var(--green-50,#F0FDF4)' : 'var(--amber-50,#FFFBEB)'};color:${memo.budgetSource ? 'var(--green-800,#166534)' : 'var(--amber-800,#92400E)'}">
+        ⚑ ${memo.budgetSource ? esc(memo.budgetSource) : 'Tag Budget'}
+      </button>
+    ` : ''}
     <button class="btn-ghost" type="button" onclick="closeDetailModal()">ปิด</button>
   `;
   const modalInner = document.querySelector('#detail-modal > div');
@@ -427,15 +452,25 @@ const HIST_ICON_VIEW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColo
 const HIST_ICON_PDF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
 
 function histActionButtons(memo) {
-  const no = esc(memo.memoNo);
-  const isDraft    = memo.status === 'draft';
-  const isRejected = memo.status === 'rejected';
-  return `<div class="hist-actions">
-    <button type="button" class="btn-sm hist-act-btn" data-hist-action="detail" data-memo="${no}" title="ดูรายละเอียด">${HIST_ICON_VIEW}</button>
-    ${isDraft ? `<button type="button" class="btn-sm hist-act-btn" data-hist-action="draft-edit" data-memo="${no}" title="แก้ไข Draft" style="color:var(--blue)">✎</button>
-    <button type="button" class="btn-sm hist-act-btn" data-hist-action="draft-delete" data-memo="${no}" title="ลบ Draft" style="color:var(--red)">✕</button>` : ''}
-    ${isRejected ? `<button type="button" class="btn-sm hist-act-btn" data-hist-action="duplicate" data-memo="${no}" title="Duplicate เป็น Memo ใหม่">⊕</button>` : ''}
-    ${!isDraft ? `<button type="button" class="btn-sm hist-act-btn" data-hist-action="detail" data-memo="${no}" title="ดูรายละเอียด / Download PDF">${HIST_ICON_VIEW}</button>` : ''}
+  const no     = esc(memo.memoNo);
+  const status = memo.status;
+  const isDraft     = status === 'draft';
+  const isPending   = status === 'pending' || status === 'pending_a2' || status === 'pending_a3';
+  const isCompleted = status === 'completed';
+  const isRejected  = status === 'rejected';
+  const isCancelled = status === 'cancelled';
+
+  return `<div class="hist-actions" style="display:flex;gap:4px;justify-content:center;align-items:center">
+    <button type="button" class="btn-sm hist-act-btn" data-hist-action="detail"
+      data-memo="${no}" title="ดูรายละเอียด" style="padding:3px 8px;font-size:11px">
+      View
+    </button>
+    ${isDraft ? `
+      <button type="button" class="btn-sm hist-act-btn" data-hist-action="draft-edit"
+        data-memo="${no}" title="แก้ไข Draft" style="color:var(--blue);padding:3px 7px;font-size:11px">✎</button>
+      <button type="button" class="btn-sm hist-act-btn" data-hist-action="draft-delete"
+        data-memo="${no}" title="ลบ Draft" style="color:var(--red);padding:3px 7px;font-size:11px">✕</button>
+    ` : ''}
   </div>`;
 }
 
@@ -541,12 +576,14 @@ function duplicateMemo(memoNo) {
     localStorage.setItem('orbit-pmo-edit-draft', JSON.stringify({
       ...memo,
       id: undefined, memoNo: undefined, // will be regenerated
+      date: undefined,                   // date must be re-selected
       status: 'draft',
       createdAt: undefined, updatedAt: undefined,
-      approvedAt: undefined, rejectedAt: undefined,
-      approvedBy: undefined, rejectedBy: undefined,
+      approvedAt: undefined, rejectedAt: undefined, cancelledAt: undefined,
+      approvedBy: undefined, rejectedBy: undefined, cancelledBy: undefined,
       approvalNote: undefined, rejectionReason: undefined,
       auditLog: [],
+      approvers: (memo.approvers||[]).map(a => ({...a, status:'pending', approvedAt:null, approvedBy:null, rejectedAt:null, rejectedBy:null})),
     }));
   } catch(e) {}
   swView('create', document.querySelector('.sb-sub-item[onclick*="create"]'), 'Create Memo');
