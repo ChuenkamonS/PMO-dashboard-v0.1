@@ -209,15 +209,14 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
       if (updated.rejectedAt)  patch.rejected_at  = updated.rejectedAt;
       if (updated.cancelledAt) patch.cancelled_at = updated.cancelledAt;
       await supaFetch('memos', 'PATCH', patch, '?memo_no=eq.' + encodeURIComponent(memoNo));
-      _memCache = null;
     } catch(e) { console.warn('Supabase patch failed', e.message); }
   }
 
-  // Update in-memory cache
-  if (_memCache) {
-    const idx = _memCache.findIndex(m => m.memoNo === memoNo);
-    if (idx >= 0) _memCache[idx] = updated;
-  }
+  // Update in-memory cache (always — whether Supabase succeeded or not)
+  if (!_memCache) _memCache = [];
+  const cacheIdx = _memCache.findIndex(m => m.memoNo === memoNo);
+  if (cacheIdx >= 0) _memCache[cacheIdx] = updated;
+  else _memCache.unshift(updated);
 
   // Side effects on completion
   if (updated.status === 'completed') {
@@ -372,7 +371,7 @@ function updateMemoStatus(memoNo, status, extra={}) {
   if(status==='completed') memos[idx].approvedAt = memos[idx].updatedAt;
   if(status==='rejected')  memos[idx].rejectedAt = memos[idx].updatedAt;
   storeMemos(memos);
-  _memCache = null;
+  // _memCache is already updated by storeMemos — do not null it here
   // Auto-create purchase orders for HW memos (sync only — avoid double-firing)
   if(status === 'completed' && memos[idx].type === 'hw') {
     if(typeof createPurchaseOrdersFromMemo === 'function') {
