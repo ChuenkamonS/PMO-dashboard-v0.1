@@ -1897,19 +1897,21 @@ function matchMemoToPool(memo, pools) {
   })[0];
 }
 
-// Get actual spend for a pool (auto-match, no manual tag needed)
-function getPoolActual(pool, approvedMemos) {
-  return getPoolMemos(pool, approvedMemos)
-    .reduce((s, m) => s + (Number(m.total) || 0), 0);
+// Get memos that belong to this pool
+// Pass allPools so narrower pool wins over wider — memo goes to the narrowest match
+function getPoolMemos(pool, approvedMemos, allPools) {
+  if (!pool || !approvedMemos) return [];
+  const pools = (Array.isArray(allPools) && allPools.length) ? allPools : [pool];
+  return approvedMemos.filter(m => {
+    const best = matchMemoToPool(m, pools);
+    return best && best.id === pool.id;
+  });
 }
 
-// Get memos that match a pool
-function getPoolMemos(pool, approvedMemos) {
-  if (!pool || !approvedMemos) return [];
-  return approvedMemos.filter(m => {
-    const match = matchMemoToPool(m, [pool]);
-    return match && match.id === pool.id;
-  });
+// Get actual spend for a pool
+function getPoolActual(pool, approvedMemos, allPools) {
+  return getPoolMemos(pool, approvedMemos, allPools)
+    .reduce((s, m) => s + (Number(m.total) || 0), 0);
 }
 
 // ══════════════════════════════════════════
@@ -1967,7 +1969,7 @@ function _renderBvaWith(pools) {
 
   container.innerHTML = Object.entries(byProj).map(([proj, projPools]) => {
     const projBudget = projPools.reduce((s, p) => s + (p.budget || 0), 0);
-    const projActual = projPools.reduce((s, p) => s + getPoolActual(p, approved), 0);
+    const projActual = projPools.reduce((s, p) => s + getPoolActual(p, approved, filteredPools), 0);
     const projPct    = projBudget > 0 ? Math.round(projActual / projBudget * 100) : null;
     const pctColor   = projPct === null ? 'var(--text-3)' : projPct > 100 ? 'var(--red)' : projPct >= 90 ? 'var(--amber)' : 'var(--green)';
 
