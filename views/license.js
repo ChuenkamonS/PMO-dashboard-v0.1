@@ -419,14 +419,8 @@ function _worstLicenseStatus(lics) {
     || { label:'Active', badge:'badge-green', key:'active', days:null };
 }
 
-// ── TAB 2: BY PROJECT ────────────────────────────────────
-// ── BY PROJECT — state ────────────────────────────────────
-let _bpGroupMode   = 'project';
-let _bpShowPlan    = true;
-let _bpShowExpiry  = true;
-let _bpShowMemo    = true;
-let _bpYear        = 'all';
-let _bpProject     = 'all';
+// ── TAB 2: LICENSE SUMMARY ───────────────────────────────
+let _bpYear = 'all';
 
 function _renderLicByProject() {
   const el = document.getElementById('lic-content');
@@ -434,169 +428,43 @@ function _renderLicByProject() {
 
   const allLics = getAllLicenses().filter(l => getLicenseStatus(l).key !== 'cancelled');
   const years   = [...new Set(allLics.map(l => l.memoYear).filter(Boolean))].sort((a,b)=>b-a);
-  const projs   = [...new Set(allLics.map(l => l.project).filter(Boolean))].sort();
 
   el.innerHTML = `
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
       <div>
-        <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Group by</div>
-        <div style="display:flex;border:0.5px solid var(--border-md);border-radius:var(--r-sm);overflow:hidden">
-          <button id="bp-btn-proj" onclick="_bpSetGroup('project')"
-            style="font-size:12px;padding:5px 13px;border:none;cursor:pointer;background:var(--blue-50,#E6F1FB);color:var(--blue)">Project</button>
-          <button id="bp-btn-lic" onclick="_bpSetGroup('license')"
-            style="font-size:12px;padding:5px 13px;border:none;border-left:0.5px solid var(--border-md);cursor:pointer;background:var(--surface);color:var(--text-2)">License</button>
-        </div>
-      </div>
-      <div>
         <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Year</div>
-        <select onchange="_bpYear=this.value;_bpRenderTable()" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1)">
+        <select onchange="_bpYear=this.value;_bpRenderMatrix()" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1)">
           <option value="all">All years</option>
           ${years.map(y=>`<option value="${y}" ${String(y)===_bpYear?'selected':''}>${y}</option>`).join('')}
         </select>
       </div>
-      <div id="bp-proj-filter">
-        <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Project</div>
-        <select onchange="_bpProject=this.value;_bpRenderTable()" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1)">
-          <option value="all">All projects</option>
-          ${projs.map(p=>`<option value="${p}" ${p===_bpProject?'selected':''}>${esc(p)}</option>`).join('')}
-        </select>
-      </div>
-      <div id="bp-col-toggles" style="margin-left:auto;display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap">
-        <div style="font-size:11px;color:var(--text-2);align-self:flex-end;margin-bottom:6px">Columns</div>
-        ${_bpColToggle('Expiry','_bpShowExpiry',_bpShowExpiry)}
-        ${_bpColToggle('Memo','_bpShowMemo',_bpShowMemo)}
-      </div>
     </div>
     <div id="bp-table-wrap"></div>`;
 
-  _bpRenderTable();
-}
-
-function _bpColToggle(label, varName, checked) {
-  return `<label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-2);cursor:pointer;padding:5px 9px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-    <input type="checkbox" ${checked?'checked':''} onchange="${varName}=this.checked;_bpRenderTable()" style="accent-color:var(--blue);margin:0"> ${label}
-  </label>`;
-}
-
-function _bpSetGroup(mode) {
-  _bpGroupMode = mode;
-  document.getElementById('bp-btn-proj').style.cssText = mode==='project'
-    ? 'font-size:12px;padding:5px 13px;border:none;cursor:pointer;background:var(--blue-50,#E6F1FB);color:var(--blue)'
-    : 'font-size:12px;padding:5px 13px;border:none;cursor:pointer;background:var(--surface);color:var(--text-2)';
-  document.getElementById('bp-btn-lic').style.cssText = mode==='license'
-    ? 'font-size:12px;padding:5px 13px;border:none;border-left:0.5px solid var(--border-md);cursor:pointer;background:var(--blue-50,#E6F1FB);color:var(--blue)'
-    : 'font-size:12px;padding:5px 13px;border:none;border-left:0.5px solid var(--border-md);cursor:pointer;background:var(--surface);color:var(--text-2)';
-  // hide/show column toggles — only relevant for project view
-  const colToggles = document.getElementById('bp-col-toggles');
-  if (colToggles) colToggles.style.display = mode === 'project' ? 'flex' : 'none';
-  // hide project filter — not useful in matrix view
-  const projFilter = document.getElementById('bp-proj-filter');
-  if (projFilter) projFilter.style.display = mode === 'project' ? 'block' : 'none';
-  _bpRenderTable();
+  _bpRenderMatrix();
 }
 
 function _bpGetFiltered() {
   return getAllLicenses().filter(l => {
     if (getLicenseStatus(l).key === 'cancelled') return false;
     if (_bpYear !== 'all' && String(l.memoYear) !== String(_bpYear)) return false;
-    if (_bpGroupMode === 'project' && _bpProject !== 'all' && l.project !== _bpProject) return false;
     return true;
   });
 }
 
-function _bpGroupKey(l) {
-  const expPart = _bpShowExpiry ? (l.expiry ? l.expiry.slice(0,7) : 'null') : '';
-  return `${l.name}||${l.plan||''}||${expPart}`;
-}
-
-function _bpRenderTable() {
+function _bpRenderMatrix() {
   const wrap = document.getElementById('bp-table-wrap');
   if (!wrap) return;
   const filtered = _bpGetFiltered();
-  if (_bpGroupMode === 'license') {
-    _bpRenderMatrix(wrap, filtered);
-  } else {
-    _bpRenderProjectView(wrap, filtered);
-  }
-}
-
-// ── By Project: flat expanded list ───────────────────────
-function _bpRenderProjectView(wrap, filtered) {
   const projects = [...new Set(filtered.map(l => l.project || '(ไม่ระบุ)'))].sort();
 
-  const head = `<thead><tr>
-    <th style="padding-left:14px">Project / License</th>
-    <th style="text-align:right">Seats</th>
-    <th>Plan</th>
-    ${_bpShowExpiry ? '<th style="text-align:right">Expiry</th>' : ''}
-    ${_bpShowMemo   ? '<th>Memo</th>' : ''}
-  </tr></thead>`;
-
-  let grandTotal = 0;
-  let bodyRows = '';
-
-  projects.forEach(proj => {
-    const rows = filtered.filter(l => (l.project || '(ไม่ระบุ)') === proj);
-    const totalSeats = rows.reduce((s,l) => s+(l.seats||1), 0);
-    grandTotal += totalSeats;
-
-    // project header row — no expand, just a separator/label
-    bodyRows += `<tr>
-      <td colspan="${2 + 1 + (_bpShowExpiry?1:0) + (_bpShowMemo?1:0)}"
-        style="padding:7px 14px;font-weight:600;background:var(--bg-2,#F8F8F6);font-size:12px;border-bottom:0.5px solid var(--border-md)">
-        ${esc(proj)} <span style="font-weight:400;color:var(--text-2);margin-left:6px">${totalSeats} seats total</span>
-      </td>
-    </tr>`;
-
-    // group child rows by license+plan+expiry key
-    const grouped = {};
-    rows.forEach(l => {
-      const k = _bpGroupKey(l);
-      if (!grouped[k]) grouped[k] = { ...l, seats: 0, memos: new Set() };
-      grouped[k].seats += (l.seats||1);
-      if (l.memoNo) grouped[k].memos.add(l.memoNo);
-    });
-
-    Object.values(grouped).forEach(g => {
-      const expiryStr = g.expiry ? new Date(g.expiry).toLocaleDateString('th-TH',{year:'numeric',month:'short'}) : '—';
-      bodyRows += `<tr onmouseover="this.style.background='var(--bg-2)'" onmouseout="this.style.background=''">
-        <td style="padding-left:28px;font-size:13px">${esc(g.name)}</td>
-        <td style="text-align:right">${g.seats}</td>
-        <td style="font-size:12px;color:var(--text-2)">${esc(g.plan) || '<span style="color:var(--text-3)">—</span>'}</td>
-        ${_bpShowExpiry ? `<td style="text-align:right;font-size:12px">${expiryStr}</td>` : ''}
-        ${_bpShowMemo   ? `<td style="font-size:11px;color:var(--text-2)">${[...g.memos].join(', ')||'manual'}</td>` : ''}
-      </tr>`;
-    });
-  });
-
-  bodyRows += `<tr style="font-weight:600;background:var(--bg-2,#F8F8F6);border-top:0.5px solid var(--border-md)">
-    <td style="padding-left:14px">Total</td>
-    <td style="text-align:right">${grandTotal}</td>
-    <td></td>
-    ${_bpShowExpiry ? '<td></td>' : ''}
-    ${_bpShowMemo   ? '<td></td>' : ''}
-  </tr>`;
-
-  wrap.innerHTML = `<div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
-    <table class="hist-table" style="min-width:500px">
-      ${head}<tbody>${bodyRows}</tbody>
-    </table>
-  </div>`;
-}
-
-// ── By License: matrix (license+plan rows × project columns) ─
-function _bpRenderMatrix(wrap, filtered) {
-  const projects = [...new Set(filtered.map(l => l.project || '(ไม่ระบุ)'))].sort();
-
-  // build rows: unique license + plan combos
   const rowMap = {};
   filtered.forEach(l => {
     const k = `${l.name}||${l.plan||''}`;
-    if (!rowMap[k]) rowMap[k] = { name: l.name, plan: l.plan||'', byProj: {}, memos: new Set(), total: 0 };
+    if (!rowMap[k]) rowMap[k] = { name: l.name, plan: l.plan||'', byProj: {}, total: 0 };
     const proj = l.project || '(ไม่ระบุ)';
     rowMap[k].byProj[proj] = (rowMap[k].byProj[proj]||0) + (l.seats||1);
     rowMap[k].total += (l.seats||1);
-    if (l.memoNo) rowMap[k].memos.add(l.memoNo);
   });
 
   const matrixRows = Object.values(rowMap).sort((a,b) => a.name.localeCompare(b.name) || a.plan.localeCompare(b.plan));
@@ -607,7 +475,6 @@ function _bpRenderMatrix(wrap, filtered) {
     <th>Plan</th>
     ${projects.map(p=>`<th style="text-align:right;white-space:nowrap">${esc(p)}</th>`).join('')}
     <th style="text-align:right">Total</th>
-    <th>Memo(s)</th>
   </tr></thead>`;
 
   const bodyRows = matrixRows.map(r => `<tr onmouseover="this.style.background='var(--bg-2)'" onmouseout="this.style.background=''">
@@ -618,7 +485,6 @@ function _bpRenderMatrix(wrap, filtered) {
       : `<td style="text-align:right;color:var(--text-3)">—</td>`
     ).join('')}
     <td style="text-align:right;font-weight:500">${r.total}</td>
-    <td style="font-size:11px;color:var(--text-2)">${[...r.memos].join(', ')||'manual'}</td>
   </tr>`).join('');
 
   const totalRow = `<tr style="font-weight:600;background:var(--bg-2,#F8F8F6);border-top:0.5px solid var(--border-md)">
@@ -629,7 +495,6 @@ function _bpRenderMatrix(wrap, filtered) {
       return `<td style="text-align:right">${t||'—'}</td>`;
     }).join('')}
     <td style="text-align:right">${grandTotal}</td>
-    <td></td>
   </tr>`;
 
   wrap.innerHTML = `<div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
