@@ -189,12 +189,19 @@ function switchBudgetTab(tab, btn) {
 
 // ── Main entry ──
 function renderBudget() {
-  if (_bgtCurrentTab === 'overview')     renderBudgetOverview();
-  if (_bgtCurrentTab === 'actual-spend') renderActualSpend();
-  if (_bgtCurrentTab === 'forecast')     renderBudgetSLInfra();
-  if (_bgtCurrentTab === 'bva')          renderBudgetVsActual();
-  if (_bgtCurrentTab === 'bgt-settings') renderBudgetSettings();
-  if (_bgtCurrentTab === 'others')       renderBudgetOthers();
+  // Sync SL budgets from Supabase on first load, then render
+  loadSLBudgetsAsync().then(d => {
+    if (d && Object.keys(d).length) {
+      try { localStorage.setItem(SLINF_BUDGET_KEY, JSON.stringify(d)); } catch(e) {}
+    }
+  }).catch(() => {}).finally(() => {
+    if (_bgtCurrentTab === 'overview')     renderBudgetOverview();
+    if (_bgtCurrentTab === 'actual-spend') renderActualSpend();
+    if (_bgtCurrentTab === 'forecast')     renderBudgetSLInfra();
+    if (_bgtCurrentTab === 'bva')          renderBudgetVsActual();
+    if (_bgtCurrentTab === 'bgt-settings') renderBudgetSettings();
+    if (_bgtCurrentTab === 'others')       renderBudgetOthers();
+  });
 }
 
 // ══════════════════════════════════════════
@@ -1492,12 +1499,38 @@ function _renderOthersTable(memos) {
 
 const SLINF_BUDGET_KEY = 'orbit-pmo-sl-budgets-v1';
 
+// ── SL Budget targets — Supabase + localStorage fallback ──
+async function loadSLBudgetsAsync() {
+  if (await checkSupa()) {
+    try {
+      const rows = await supaFetch('settings', 'GET', null, '?id=eq.sl-budgets');
+      if (rows && rows[0]?.data) {
+        const d = rows[0].data;
+        try { localStorage.setItem(SLINF_BUDGET_KEY, JSON.stringify(d)); } catch(e) {}
+        return d;
+      }
+    } catch(e) { console.warn('loadSLBudgetsAsync failed', e.message); }
+  }
+  return loadSLBudgets();
+}
+
+async function saveSLBudgetsAsync(d) {
+  try { localStorage.setItem(SLINF_BUDGET_KEY, JSON.stringify(d)); } catch(e) {}
+  if (await checkSupa()) {
+    try {
+      await supaFetch('settings', 'POST', { id: 'sl-budgets', data: d }, '?on_conflict=id');
+    } catch(e) { console.warn('saveSLBudgetsAsync failed', e.message); }
+  }
+}
+
 function loadSLBudgets() {
   try { return JSON.parse(localStorage.getItem(SLINF_BUDGET_KEY)||'{}'); }
   catch(e) { return {}; }
 }
 function storeSLBudgets(d) {
   try { localStorage.setItem(SLINF_BUDGET_KEY, JSON.stringify(d)); } catch(e) {}
+  // Async sync to Supabase in background
+  saveSLBudgetsAsync(d).catch(e => console.warn('SL budget Supabase sync failed', e));
 }
 function getSLBudgetForProject(proj, year) {
   const d = loadSLBudgets();
