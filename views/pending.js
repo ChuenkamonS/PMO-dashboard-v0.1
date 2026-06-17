@@ -135,16 +135,15 @@ function renderPendingContent() {
 
   const thead = `<table class="hist-table hist-table--dense" style="table-layout:fixed;width:100%">
     <colgroup>
-      <col style="width:14%"><col style="width:5%"><col style="width:8%">
-      <col style="width:10%"><col style="width:8%"><col style="width:9%">
-      <col style="width:13%"><col style="width:13%"><col style="width:6%">
-      <col style="width:10%">
+      <col style="width:14%"><col style="width:5%"><col style="width:10%">
+      <col style="width:12%"><col style="width:10%"><col style="width:9%">
+      <col style="width:12%"><col style="width:12%"><col style="width:16%">
     </colgroup>
     <thead><tr>
       <th>เลข Memo</th><th>Type</th><th>โครงการ</th><th>ผู้ขอ</th>
       <th style="text-align:right">วงเงิน</th><th>สถานะ</th>
-      <th>Reviewer (A1)</th><th>Approver (A2)</th>
-      <th>รอ</th><th style="text-align:center">จัดการ</th>
+      <th>วันที่ขอ</th><th>รอ (วัน)</th>
+      <th style="text-align:center">จัดการ</th>
     </tr></thead><tbody>`;
 
   const rows = memos.map(m => buildPendingRow(m)).join('');
@@ -195,10 +194,12 @@ function buildPendingRow(memo) {
     : `<button class="btn-sm" data-action="detail" data-memo="${esc(memo.memoNo)}" style="font-size:11px;padding:3px 8px">Details</button>
        ${isOwn && isPending ? `<button class="btn-sm" data-action="cancel" data-memo="${esc(memo.memoNo)}" style="font-size:11px;padding:3px 8px;margin-left:4px;color:var(--red)" title="ยกเลิก Memo นี้">✕ Cancel</button>` : ''}`;
 
+  const reqDate = memo.createdAt ? shortDate(memo.createdAt) : '—';
+  const reqTime = memo.createdAt ? new Date(memo.createdAt).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'}) : '';
+
   return `<tr style="cursor:pointer" onclick="if(!event.target.closest('[data-action]'))openDetailModal('${esc(memo.memoNo)}')">
     <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
       <span style="font-size:12px;font-weight:600;color:var(--blue)">${esc(memo.memoNo)}</span>
-      <div style="font-size:10px;color:var(--text-3)">${esc(formatDateTime(memo.createdAt))}</div>
     </td>
     <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
       <span style="font-size:10px;font-weight:600;background:${typeBg};color:${typeTxt};padding:2px 7px;border-radius:4px">${typeLbl}</span>
@@ -209,11 +210,8 @@ function buildPendingRow(memo) {
     <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
       <span style="font-size:10px;font-weight:500;padding:2px 7px;border-radius:4px;${statusCls}">${esc(statusLbl)}</span>
     </td>
-    <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text)">
-      ${esc(memo.reviewerName||'—')}<div style="font-size:10px;color:var(--text-3)">${esc(memo.reviewerTitle||'')}</div>
-    </td>
-    <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text)">
-      ${esc(memo.approverName||'—')}<div style="font-size:10px;color:var(--text-3)">${esc(memo.approverTitle||'')}</div>
+    <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text)">
+      ${reqDate}<div style="font-size:10px;color:var(--text-3)">${reqTime}</div>
     </td>
     <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
       <span style="font-size:10px;font-weight:500;padding:2px 7px;border-radius:10px;${waitCls}">${days} วัน</span>
