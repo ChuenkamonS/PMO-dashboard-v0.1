@@ -849,17 +849,17 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 <label>ชื่อโครงการ *</label>
                 <input type="text" id="f-project-other" placeholder="กรอกชื่อโครงการ">
               </div>
-              <div class="fg">
-                <label>เรียน *</label>
-                <select id="f-to" onchange="toggleToOther()">
+              <!-- เรียน: hidden — auto-populated from last approver title -->
+              <div class="fg" style="display:none">
+                <select id="f-to">
                   <option value="">— เลือก —</option>
                   <option>ผู้อำนวยการโครงการ</option>
                   <option>ประธานเจ้าหน้าที่บริหาร</option>
                   <option>ผู้อำนวยการ</option>
                   <option value="other">อื่นๆ (กรอกเอง)</option>
                 </select>
-                <div id="to-other-wrap" style="display:none;margin-top:6px">
-                  <input type="text" id="f-to-other" placeholder="ระบุ ชื่อผู้ที่เรียนถึง">
+                <div id="to-other-wrap" style="display:none">
+                  <input type="text" id="f-to-other">
                 </div>
               </div>
             </div>
