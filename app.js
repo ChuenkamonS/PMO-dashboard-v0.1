@@ -223,6 +223,13 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   const idx = allMemos.findIndex(m => m.memoNo === memoNo);
   if (idx >= 0) { allMemos[idx] = updated; storeMemos(allMemos); }
 
+  // Side effects on completion
+  if (updated.status === 'completed') {
+    if (typeof createPurchaseOrdersFromMemo === 'function') {
+      createPurchaseOrdersFromMemo(updated);
+    }
+  }
+
   // Safe render — only if DOM is ready
   try { if (typeof renderPendingMemos === 'function') renderPendingMemos(); } catch(e) {}
   try { if (typeof renderHistoryMemos === 'function') renderHistoryMemos(); } catch(e) {}
