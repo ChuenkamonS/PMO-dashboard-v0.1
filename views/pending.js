@@ -198,13 +198,8 @@ function buildPendingRow(memo) {
   const statusCls = memo.status==='completed'?'background:#EAF3DE;color:#27500A':memo.status==='rejected'?'background:#FCEBEB;color:#791F1F':'background:#EEEDFE;color:#3C3489';
   const statusLbl = memo.status==='completed'?'Completed':memo.status==='rejected'?'Rejected':stage;
 
-  const isPending = memo.status === 'pending' || memo.status === 'pending_a2';
-  const actionBtns = canAct
-    ? `<button class="btn-approve" data-action="approve" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 7px">✓</button>
-       <button class="btn-reject"  data-action="reject"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 7px;margin-left:2px">✕</button>
-       <button class="btn-sm"      data-action="detail"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 6px;margin-left:2px">View</button>`
-    : `<button class="btn-sm" data-action="detail" data-memo="${esc(memo.memoNo)}" style="font-size:11px;padding:3px 8px">Details</button>
-       ${isOwn && isPending ? `<button class="btn-sm" data-action="cancel" data-memo="${esc(memo.memoNo)}" style="font-size:11px;padding:3px 8px;margin-left:4px;color:var(--red)" title="ยกเลิก Memo นี้">✕ Cancel</button>` : ''}`;
+  // All rows: single View button — Approve/Reject/Cancel inside detail modal
+  const actionBtns = `<button class="btn-sm" data-action="detail" data-memo="${esc(memo.memoNo)}" style="font-size:11px;padding:3px 10px">View</button>`;
 
   const reqDate = memo.createdAt ? shortDate(memo.createdAt) : '—';
   const reqTime = memo.createdAt ? new Date(memo.createdAt).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'}) : '';
@@ -426,17 +421,29 @@ function openDetailModal(memoNo) {
       <div style="border:1px solid var(--border);border-radius:var(--r-sm);padding:0 12px">${auditLog}</div>
     </div>`;
 
+  const _no  = esc(memo.memoNo);
+  const canCancel = (memo.status==='pending'||memo.status==='pending_a2'||memo.status==='pending_a3') && isOwn;
+
   const acts = document.getElementById('detail-actions');
-  acts.innerHTML = canAct
-    ? `<button class="btn-primary" onclick="closeDetailModal();openApproveModal('${esc(memo.memoNo)}')">✓ Approve</button>
-       <button class="btn-reject" onclick="closeDetailModal();openRejectModal('${esc(memo.memoNo)}')">✕ Reject</button>`
-    : '';
-  acts.innerHTML += `<button class="btn-sm" onclick="openMemoPdf('${esc(memo.memoNo)}')">📄 PDF</button>`;
-  if (isPMO && memo.status !== 'draft') {
-    acts.innerHTML += `
-      <button class="btn-sm" style="color:var(--blue);margin-left:4px" onclick="closeDetailModal();openPmoEditApproversModal('${esc(memo.memoNo)}')">✎ Approvers</button>
-      <button class="btn-sm" style="color:var(--red);margin-left:4px" onclick="closeDetailModal();openPmoOverrideModal('${esc(memo.memoNo)}')">⚠ Override</button>`;
-  }
+  acts.innerHTML = `
+    ${canAct ? `
+      <button class="btn-primary" onclick="closeDetailModal();openApproveModal('${_no}')">✓ Approve</button>
+      <button class="btn-reject"  onclick="closeDetailModal();openRejectModal('${_no}')">✕ Reject</button>
+    ` : ''}
+    ${canCancel ? `
+      <button class="btn-sm" style="color:var(--red)" onclick="closeDetailModal();cancelMemo('${_no}')">✕ Cancel</button>
+    ` : ''}
+    <button class="btn-sm" style="color:var(--blue)" onclick="if(typeof downloadMemoPdf==='function'){downloadMemoPdf(loadMemos().find(m=>m.memoNo==='${_no}'))}">⬇ Download PDF</button>
+    ${isPMO() ? `
+      <button class="btn-sm" onclick="if(typeof openBudgetTagModal==='function')openBudgetTagModal('${_no}')"
+        style="background:${memo.budgetSource?'var(--green-50,#F0FDF4)':'var(--amber-50,#FFFBEB)'};color:${memo.budgetSource?'var(--green-800,#166534)':'var(--amber-800,#92400E)'}">
+        ⚑ ${memo.budgetSource ? esc(memo.budgetSource) : 'Tag Budget'}
+      </button>
+      <button class="btn-sm" style="color:var(--blue);margin-left:4px" onclick="closeDetailModal();openPmoEditApproversModal('${_no}')">✎ Approvers</button>
+      <button class="btn-sm" style="color:var(--red);margin-left:4px"  onclick="closeDetailModal();openPmoOverrideModal('${_no}')">⚠ Override</button>
+    ` : ''}
+    <button class="btn-ghost" onclick="closeDetailModal()">ปิด</button>
+  `;
   document.getElementById('detail-modal').style.display = 'flex';
 }
 function closeDetailModal() { document.getElementById('detail-modal').style.display='none'; }
