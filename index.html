@@ -677,6 +677,23 @@ svg.icon { display: inline-block; vertical-align: middle; }
 .cost-stab.active::after { content:""; position:absolute; left:-1px; right:-1px; bottom:-2px; height:2px; background:#FFFFFF; }
 .cost-tab-panel { border:1px solid rgba(0,0,0,0.12); border-top:none; border-radius:0 6px 6px 6px; padding:14px; background:#FFFFFF; margin-bottom:14px; }
 .lic-tab-btn{transition:color .15s}.lic-tab-btn.lic-tab-active{color:var(--blue)!important;border-bottom-color:var(--blue)!important}.lic-expand{display:inline-block;transition:transform .15s;margin-right:4px;font-size:10px;color:var(--text-3)}
+
+  .load-more-bar {
+    padding: 12px 16px;
+    text-align: center;
+    border-top: 1px solid var(--border);
+  }
+  .load-more-bar button {
+    font-size: 12px;
+    padding: 6px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border-md);
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    color: var(--blue);
+    font-weight: 500;
+  }
+  .load-more-bar button:hover { background: var(--bg); }
 </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous"></script>
 </head>
@@ -1112,6 +1129,9 @@ svg.icon { display: inline-block; vertical-align: middle; }
         </div>
 
         <div id="pending-list"></div>
+        <div id="pending-load-more" class="load-more-bar" style="display:none">
+          <button onclick="loadMorePending()">Load more</button>
+        </div>
       </div>
 
       <!-- ════ ALL MEMOS (History) ════ -->
@@ -1209,6 +1229,9 @@ svg.icon { display: inline-block; vertical-align: middle; }
               </tr></thead>
               <tbody id="history-body"></tbody>
             </table>
+          </div>
+          <div id="history-load-more" class="load-more-bar" style="display:none">
+            <button onclick="loadMoreHistory()">Load more</button>
           </div>
         </div>
         <div id="hist-reject-popover" class="hist-reject-popover" role="tooltip"></div>
