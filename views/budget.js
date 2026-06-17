@@ -736,9 +736,11 @@ function parseThaiDate(str) {
   // Try ISO first
   const d = new Date(str);
   if(!isNaN(d)) return d;
-  // Thai format: "27 พฤษภาคม 2569" or "26/05/69"
+  // Thai format: "27 พฤษภาคม 2569" or "27 พฤษภาคม พ.ศ. 2569" or "26/05/69"
   const THAI_MONTHS = {'มกราคม':0,'กุมภาพันธ์':1,'มีนาคม':2,'เมษายน':3,'พฤษภาคม':4,'มิถุนายน':5,'กรกฎาคม':6,'สิงหาคม':7,'กันยายน':8,'ตุลาคม':9,'พฤศจิกายน':10,'ธันวาคม':11};
-  const m1 = str.match(/^(\d{1,2})\s+(\S+)\s+(\d{4})$/);
+  // Strip "พ.ศ." prefix before year so both formats parse the same way
+  const cleaned = str.replace(/\s*พ\.ศ\.\s*/g, ' ').trim();
+  const m1 = cleaned.match(/^(\d{1,2})\s+(\S+)\s+(\d{4})$/);
   if(m1) {
     const mo = THAI_MONTHS[m1[2]];
     const yr = parseInt(m1[3]) - 543; // Buddhist Era to CE
