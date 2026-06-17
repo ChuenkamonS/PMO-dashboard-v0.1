@@ -1,11 +1,17 @@
-// ─────────────────────────────────────────
-// views/license.js — License Monitor Enhanced
-// ─────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// views/license.js  —  License Management  (4-tab redesign)
+// Tabs: Memo Index | By Project | Users | Other
+// Data sources:
+//   1. SL memos (completed) → slItems JSON → memo-derived licenses
+//   2. SL memos sections['ตาราง Account'] → user × license matrix
+//   3. licenses Supabase table (source='manual') → manual / other
+// ─────────────────────────────────────────────────────────────
 
 const LICENSE_KEY = 'orbit-pmo-licenses-v1';
-let licTrendChart = null;
+let _licCache = null;
+let _licCurrentTab = 'memo-index';
 
-// ── Field mapping: JS camelCase ↔ DB snake_case ──
+// ── Supabase field mapping ──────────────────────────────────
 function licenseToDb(l) {
   return {
     id:              String(l.id),
@@ -29,29 +35,26 @@ function licenseToDb(l) {
 }
 function dbToLicense(r) {
   return {
-    id:             r.id,
-    name:           r.name,
-    vendor:         r.vendor || '',
-    seats:          Number(r.seats) || 1,
-    pricePerMonth:  Number(r.price_per_month) || 0,
-    owner:          r.owner || '',
-    department:     r.department || '',
-    project:        r.project || '',
-    licenseType:    r.license_type || 'subscription',
-    purchaseDate:   r.purchase_date || '',
-    expiry:         r.expiry || null,
-    billingFreq:    r.billing_freq || 'monthly',
-    statusOverride: r.status_override || null,
-    memoNo:         r.memo_no || '',
-    note:           r.note || '',
-    source:         r.source || 'manual',
-    createdAt:      r.created_at,
-    updatedAt:      r.updated_at,
+    id: r.id, name: r.name, vendor: r.vendor || '',
+    seats: Number(r.seats) || 1, pricePerMonth: Number(r.price_per_month) || 0,
+    owner: r.owner || '', department: r.department || '', project: r.project || '',
+    licenseType: r.license_type || 'subscription', purchaseDate: r.purchase_date || '',
+    expiry: r.expiry || null, billingFreq: r.billing_freq || 'monthly',
+    statusOverride: r.status_override || null, memoNo: r.memo_no || '',
+    note: r.note || '', source: r.source || 'manual',
+    createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
 
-// ── Async storage (Supabase + localStorage fallback) ──
-let _licCache = null;
+// ── localStorage / Supabase CRUD ───────────────────────────
+function loadManualLicenses() {
+  try { const d = JSON.parse(localStorage.getItem(LICENSE_KEY) || '[]'); return Array.isArray(d) ? d : []; }
+  catch(e) { return []; }
+}
+function storeManualLicenses(ls) {
+  try { localStorage.setItem(LICENSE_KEY, JSON.stringify(ls)); } catch(e) {}
+}
+function nextLicenseId() { return `lic_${Date.now()}`; }
 
 async function loadManualLicensesAsync() {
   if (await checkSupa()) {
@@ -60,309 +63,748 @@ async function loadManualLicensesAsync() {
       _licCache = (rows || []).map(dbToLicense);
       try { localStorage.setItem(LICENSE_KEY, JSON.stringify(_licCache)); } catch(e) {}
       return _licCache;
-    } catch(e) {
-      console.warn('Supabase licenses read failed, fallback', e.message);
-    }
+    } catch(e) { console.warn('Supabase licenses read failed', e.message); }
   }
   return loadManualLicenses();
 }
-
 async function saveLicenseAsync(data) {
-  const now = new Date().toISOString();
-  const saved = { ...data, updatedAt: now };
+  const saved = { ...data, updatedAt: new Date().toISOString() };
   if (await checkSupa()) {
-    try {
-      await supaFetch('licenses', 'POST', licenseToDb(saved), '?on_conflict=id');
-      _licCache = null;
-      return saved;
-    } catch(e) {
-      console.warn('Supabase license save failed', e.message);
-    }
+    try { await supaFetch('licenses', 'POST', licenseToDb(saved), '?on_conflict=id'); _licCache = null; return saved; }
+    catch(e) { console.warn('Supabase license save failed', e.message); }
   }
-  // localStorage fallback
-  const licenses = loadManualLicenses();
-  const idx = licenses.findIndex(l => String(l.id) === String(data.id));
-  if (idx >= 0) licenses[idx] = saved; else licenses.push(saved);
-  storeManualLicenses(licenses);
-  return saved;
+  const ls = loadManualLicenses(); const idx = ls.findIndex(l => String(l.id) === String(data.id));
+  if (idx >= 0) ls[idx] = saved; else ls.push(saved);
+  storeManualLicenses(ls); return saved;
 }
-
 async function deleteLicenseAsync(id) {
   if (await checkSupa()) {
-    try {
-      await supaFetch('licenses', 'DELETE', null, '?id=eq.' + encodeURIComponent(id));
-      _licCache = null;
-    } catch(e) {
-      console.warn('Supabase license delete failed', e.message);
-    }
+    try { await supaFetch('licenses', 'DELETE', null, '?id=eq.' + encodeURIComponent(id)); _licCache = null; }
+    catch(e) { console.warn('Supabase license delete failed', e.message); }
   }
   storeManualLicenses(loadManualLicenses().filter(l => String(l.id) !== String(id)));
 }
 
-// ── Sync localStorage → Supabase (one-time migration) ──
-async function syncLicensesToSupabase() {
-  if (!(await checkSupa())) return { ok: false };
-  const local = loadManualLicenses();
-  if (!local.length) return { ok: true, pushed: 0 };
-  let pushed = 0;
-  for (const l of local) {
-    try {
-      await supaFetch('licenses', 'POST', licenseToDb(l), '?on_conflict=id');
-      pushed++;
-    } catch(e) { console.warn('Sync failed for license', l.id, e.message); }
-  }
-  _licCache = null;
-  return { ok: true, pushed };
-}
-
-// ── Sync localStorage fallback ──
-function loadManualLicenses() {
-  try { const d = JSON.parse(localStorage.getItem(LICENSE_KEY) || '[]'); return Array.isArray(d) ? d : []; }
-  catch(e) { return []; }
-}
-function storeManualLicenses(licenses) {
-  try { localStorage.setItem(LICENSE_KEY, JSON.stringify(licenses)); } catch(e) {}
-}
-function nextLicenseId() {
-  // Use timestamp-based id to avoid collision with existing Supabase records
-  // when localStorage is empty (e.g. fresh browser session)
-  return `lic_${Date.now()}`;
-}
-
-// ── Parse from SL memo ──
+// ── Parse SL memo → licenses (use slItems JSON not HTML) ───
 function parseLicenseFromMemo(memo) {
-  const licenses = [];
-  if (memo.type !== 'sl' || memo.status !== 'completed') return licenses;
+  if (memo.type !== 'sl' || memo.status !== 'completed') return [];
   const purchaseDate = memo.approvedAt || memo.updatedAt || memo.createdAt;
+  const fxRate = Number(memo.fxRate) || 1;
+
+  // Prefer slItems (structured JSON) over parsing HTML
+  const items = (memo.slItems && memo.slItems.length)
+    ? memo.slItems
+    : _parseSlItemsFromHtml(memo);
+
+  return items
+    .filter(it => it.name && it.name !== '-')
+    .map(it => {
+      const price  = Number(it.price) || 0;
+      const months = Number(it.months) || 12;
+      const seats  = Number(it.qty) || 1;
+      const start  = (it.startMonth && it.startMonth.match(/^\d{4}-\d{2}$/))
+        ? new Date(it.startMonth + '-01')
+        : new Date(purchaseDate);
+      const expiry = new Date(start);
+      expiry.setMonth(expiry.getMonth() + months);
+      return {
+        id: `memo-${memo.memoNo}-${it.name}`.replace(/\s/g, '_'),
+        name: it.name, seats, pricePerMonth: price, months,
+        fxRate, pricePerMonthTHB: price * fxRate,
+        purchaseDate: start.toISOString(),
+        expiry: expiry.toISOString(),
+        project: memo.project, memoNo: memo.memoNo,
+        source: 'memo', owner: '', department: '',
+        vendor: '', billingFreq: 'monthly', licenseType: 'subscription',
+        statusOverride: null, note: '',
+        startMonth: it.startMonth || '', endMonth: it.endMonth || '',
+      };
+    });
+}
+
+// Fallback: parse slItems from HTML if slItems JSON is empty
+function _parseSlItemsFromHtml(memo) {
   const section = memo.sections?.find(s => s.title === 'รายการ Software');
-  if (!section) return licenses;
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(section.html, 'text/html');
+  if (!section) return [];
+  const doc = new DOMParser().parseFromString(section.html, 'text/html');
+  const items = [];
   doc.querySelectorAll('tbody tr').forEach(row => {
     const cells = row.querySelectorAll('td');
     if (cells.length < 6) return;
-    const name       = cells[1]?.textContent?.trim();
-    const priceStr   = cells[2]?.textContent?.replace(/[฿,]/g, '').trim();
-    const months     = parseInt(cells[3]?.textContent) || 12;
-    const seats      = parseInt(cells[4]?.textContent) || 1;
-    // cells[5] = startMonth (YYYY-MM or '-'), cells[6] = endMonth, cells[7] = subtotal
-    const startMonth = cells[5]?.textContent?.trim();
-    const price      = parseFloat(priceStr) || 0;
-    if (!name || name === '-') return;
-    // Use item startMonth if present, else fall back to approvedAt
-    const start = (startMonth && startMonth !== '-' && startMonth.match(/^\d{4}-\d{2}$/))
-      ? new Date(startMonth + '-01')
-      : new Date(purchaseDate);
-    const expiry = new Date(start);
-    expiry.setMonth(expiry.getMonth() + months);
-    licenses.push({
-      id: `memo-${memo.memoNo}-${name}`.replace(/\s/g, '_'),
-      name, seats, pricePerMonth: price, months,
-      purchaseDate: start.toISOString(),
-      expiry: expiry.toISOString(),
-      project: memo.project, memoNo: memo.memoNo,
-      source: 'memo', owner: '', department: '',
-      vendor: '', billingFreq: 'monthly', licenseType: 'subscription',
-      statusOverride: null, note: ''
+    items.push({
+      name:       cells[1]?.textContent?.trim(),
+      price:      parseFloat((cells[2]?.textContent || '').replace(/[฿,]/g, '')) || 0,
+      months:     parseInt(cells[3]?.textContent) || 12,
+      qty:        parseInt(cells[4]?.textContent) || 1,
+      startMonth: cells[5]?.textContent?.trim(),
+      endMonth:   cells[6]?.textContent?.trim(),
     });
   });
-  return licenses;
+  return items;
 }
 
-// ── Status logic ──
-function getLicenseStatus(lic) {
-  if (lic.statusOverride === 'cancelled') return { label: 'Cancelled', badge: 'badge-gray', days: null, key: 'cancelled' };
-  if (!lic.expiry) return { label: 'Active', badge: 'badge-green', days: null, key: 'active' };
-  const now = new Date();
-  const expiry = new Date(lic.expiry);
-  const days = Math.floor((expiry - now) / 86400000);
-  if (days < 0)   return { label: 'Expired',   badge: 'badge-red',    days, key: 'expired' };
-  if (days <= 7)  return { label: `${days}d`,  badge: 'badge-red',    days, key: 'expiring-7' };
-  if (days <= 15) return { label: `${days}d`,  badge: 'badge-orange', days, key: 'expiring-15' };
-  if (days <= 30) return { label: `${days}d`,  badge: 'badge-amber',  days, key: 'expiring-30' };
-  return                  { label: 'Active',   badge: 'badge-green',  days, key: 'active' };
+// ── Parse account table from SL memo ──────────────────────
+// Returns { cols: ['GitHub','Figma Dev',...], rows: [{email, licenses:{GitHub:true,...}}] }
+function parseAccountTableFromMemo(memo) {
+  const section = memo.sections?.find(s => s.title === 'ตาราง Account');
+  if (!section) return null;
+  const doc = new DOMParser().parseFromString(section.html, 'text/html');
+  const headerCells = [...doc.querySelectorAll('thead th')];
+  // First col is Email, rest are license names
+  const cols = headerCells.slice(1).map(th => th.textContent.trim()).filter(Boolean);
+  if (!cols.length) return null;
+  const rows = [];
+  doc.querySelectorAll('tbody tr').forEach(tr => {
+    const cells = [...tr.querySelectorAll('td')];
+    const email = cells[0]?.textContent?.trim();
+    if (!email) return;
+    const licenses = {};
+    cols.forEach((col, i) => {
+      const val = cells[i + 1]?.textContent?.trim();
+      licenses[col] = val === '✓';
+    });
+    rows.push({ email, licenses });
+  });
+  return { cols, rows };
 }
 
-// ── All licenses: memo-derived + manual (from Supabase cache or localStorage) ──
+// ── getAllLicenses: memo-derived + manual merged ─────────
 function getAllLicenses() {
   const memoLicenses = loadMemos()
     .filter(m => m.type === 'sl' && m.status === 'completed')
     .flatMap(parseLicenseFromMemo);
   const manual = _licCache !== null ? _licCache : loadManualLicenses();
   const manualIds = new Set(manual.map(l => l.id));
-  const filteredMemo = memoLicenses.filter(l => !manualIds.has(l.id));
-  return [...filteredMemo, ...manual];
+  return [...memoLicenses.filter(l => !manualIds.has(l.id)), ...manual];
 }
 
-// ── Trend chart ──
-function renderLicenseTrend(licenses) {
-  const canvas = document.getElementById('lic-trend-chart');
-  if (!canvas || typeof Chart === 'undefined') return;
-  if (licTrendChart) licTrendChart.destroy();
-  const now = new Date();
-  const labels = [], data = [];
-  for (let i = 11; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const next = new Date(d.getFullYear(), d.getMonth() + 1, 1);
-    labels.push(d.toLocaleDateString('th-TH', { month: 'short', year: '2-digit' }));
-    const cost = licenses
-      .filter(l => {
-        const purchased = new Date(l.purchaseDate || 0);
-        const expiry = l.expiry ? new Date(l.expiry) : new Date(9999, 0);
-        return purchased <= next && expiry >= d;
-      })
-      .reduce((s, l) => s + (l.pricePerMonth || 0) * (l.seats || 1), 0);
-    data.push(cost);
-  }
-  licTrendChart = new Chart(canvas, {
-    type: 'line',
-    data: { labels, datasets: [{ label: 'Monthly Cost', data, borderColor: '#185FA5', backgroundColor: 'rgba(24,95,165,.1)', tension: .28, fill: true, pointRadius: 3 }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: v => money(v) }, beginAtZero: true } } }
-  });
+// ── Status logic ─────────────────────────────────────────
+function getLicenseStatus(lic) {
+  if (lic.statusOverride === 'cancelled') return { label: 'Cancelled', badge: 'badge-gray', days: null, key: 'cancelled' };
+  if (!lic.expiry) return { label: 'Active', badge: 'badge-green', days: null, key: 'active' };
+  const days = Math.floor((new Date(lic.expiry) - new Date()) / 86400000);
+  if (days < 0)   return { label: 'Expired',     badge: 'badge-red',    days, key: 'expired' };
+  if (days <= 7)  return { label: `${days}d`,    badge: 'badge-red',    days, key: 'expiring-7' };
+  if (days <= 15) return { label: `${days}d`,    badge: 'badge-orange', days, key: 'expiring-15' };
+  if (days <= 30) return { label: `${days}d`,    badge: 'badge-amber',  days, key: 'expiring-30' };
+  return                  { label: 'Active',     badge: 'badge-green',  days, key: 'active' };
 }
 
-// ── Main render ──
+// ── Main render entry point ───────────────────────────────
 function renderLicense() {
-  // Always load fresh from Supabase then re-render
-  loadManualLicensesAsync().then(() => _renderLicenseTable()).catch(() => _renderLicenseTable());
+  loadManualLicensesAsync()
+    .then(() => _renderLicTab(_licCurrentTab))
+    .catch(() => _renderLicTab(_licCurrentTab));
 }
 
-function _populateLicenseFilters(allLicenses) {
-  const projSel = document.getElementById('lic-filter-project');
-  if (projSel) {
-    const cur = projSel.value;
-    const projects = [...new Set(allLicenses.map(l => l.project).filter(Boolean))].sort();
-    projSel.innerHTML = `<option value="all">ทุกโครงการ</option>` +
-      projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
-    if ([...projSel.options].some(o => o.value === cur)) projSel.value = cur;
-  }
-  // Also populate lic-project in modal
-  const modalProj = document.getElementById('lic-project');
-  if (modalProj) {
-    const s = typeof loadSettings === 'function' ? loadSettings() : null;
-    const projects = s?.projects || [...new Set(allLicenses.map(l => l.project).filter(Boolean))].sort();
-    const cur = modalProj.value;
-    modalProj.innerHTML = `<option value="">— ไม่ระบุ —</option>` +
-      projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
-    if ([...modalProj.options].some(o => o.value === cur)) modalProj.value = cur;
-  }
-}
-
-function _renderLicenseTable() {
-  const allLicenses = getAllLicenses();
-  _populateLicenseFilters(allLicenses);
-  const search     = (document.getElementById('lic-search')?.value || '').toLowerCase();
-  const filterSt   = document.getElementById('lic-filter-status')?.value || 'all';
-  const filterProj = document.getElementById('lic-filter-project')?.value || 'all';
-  const sort       = document.getElementById('lic-sort')?.value || 'expiry-asc';
-
-  // Metrics
-  let activeCount = 0, renewSoonCount = 0, expiredCount = 0, monthlyCost = 0, annualCost = 0;
-  allLicenses.forEach(lic => {
-    const s = getLicenseStatus(lic);
-    if (s.key === 'active') { activeCount++; monthlyCost += (lic.pricePerMonth || 0) * (lic.seats || 1); }
-    if (s.key === 'expiring-7' || s.key === 'expiring-15' || s.key === 'expiring-30') { renewSoonCount++; monthlyCost += (lic.pricePerMonth || 0) * (lic.seats || 1); }
-    if (s.key === 'expired') expiredCount++;
+function switchLicTab(tab) {
+  _licCurrentTab = tab;
+  document.querySelectorAll('.lic-tab-btn').forEach(b => {
+    b.classList.toggle('lic-tab-active', b.dataset.tab === tab);
   });
-  annualCost = monthlyCost * 12;
+  _renderLicTab(tab);
+}
 
-  const in3m = new Date(); in3m.setMonth(in3m.getMonth() + 3);
-  const renewal3m = allLicenses
-    .filter(l => { if (!l.expiry) return false; const e = new Date(l.expiry); return e >= new Date() && e <= in3m; })
-    .reduce((s, l) => s + (l.pricePerMonth || 0) * (l.seats || 1) * ((l.months) || 12), 0);
+function _renderLicTab(tab) {
+  if (tab === 'memo-index')  _renderLicMemoIndex();
+  if (tab === 'by-project')  _renderLicByProject();
+  if (tab === 'users')       _renderLicUsers();
+  if (tab === 'other')       _renderLicOther();
+}
 
-  document.getElementById('lic-active').textContent    = activeCount;
-  document.getElementById('lic-active-cost').textContent = monthlyCost ? money(monthlyCost) + '/เดือน' : '';
-  document.getElementById('lic-expiring').textContent  = renewSoonCount;
-  document.getElementById('lic-expired').textContent   = expiredCount;
-  document.getElementById('lic-monthly').textContent   = money(monthlyCost);
-  document.getElementById('lic-annual').textContent    = money(annualCost);
-  document.getElementById('lic-renewal-3m').textContent = renewal3m ? `Renewal 3m: ${money(renewal3m)}` : 'ไม่มี renewal ใน 3 เดือน';
+// ── TAB 1: MEMO INDEX ─────────────────────────────────────
+function _renderLicMemoIndex() {
+  const memos = loadMemos().filter(m => m.type === 'sl' && m.status === 'completed');
+  const allLics = getAllLicenses();
 
-  const badge = document.getElementById('lic-renewal-badge');
-  if (badge) {
-    badge.textContent = renewSoonCount > 0 ? renewSoonCount : '';
-    badge.style.display = renewSoonCount > 0 ? '' : 'none';
-  }
+  // KPIs from licenses
+  let active = 0, expiring = 0, expired = 0, totalSeats = 0;
+  allLics.forEach(l => {
+    const s = getLicenseStatus(l);
+    if (s.key === 'expired') expired++;
+    else if (s.key.startsWith('expiring')) { expiring++; active++; }
+    else active++;
+    if (s.key !== 'expired' && s.key !== 'cancelled') totalSeats += (l.seats || 1);
+  });
 
-  renderLicenseTrend(allLicenses);
+  // Expiry warnings from licenses ≤ 30 days
+  const warnLics = allLics.filter(l => {
+    const s = getLicenseStatus(l);
+    return s.key.startsWith('expiring') && s.days !== null && s.days <= 30;
+  }).sort((a,b) => new Date(a.expiry) - new Date(b.expiry));
 
-  let filtered = allLicenses.filter(lic => {
-    const s = getLicenseStatus(lic);
-    if (filterSt !== 'all') {
-      if (filterSt === 'expiring' && !['expiring-7', 'expiring-15', 'expiring-30'].includes(s.key)) return false;
-      if (filterSt !== 'expiring' && s.key !== filterSt) return false;
+  const fxRate = _getLicFxRate();
+
+  const el = document.getElementById('lic-content');
+  if (!el) return;
+
+  el.innerHTML = `
+    ${warnLics.length ? `
+    <div style="background:var(--amber-50,#FAEEDA);border:0.5px solid var(--amber);border-radius:var(--r-sm);padding:8px 14px;margin-bottom:12px;font-size:12px;color:var(--amber-dark,#633806);display:flex;align-items:flex-start;gap:8px">
+      <span style="flex-shrink:0;margin-top:1px">⚠</span>
+      <span><strong>${warnLics.length} license กำลังจะหมดอายุ:</strong> ${
+        warnLics.slice(0,3).map(l => `${esc(l.name)} (${esc(l.project||'')}) เหลือ ${getLicenseStatus(l).days} วัน`).join(' · ')
+      }${warnLics.length > 3 ? ` · และอีก ${warnLics.length-3} รายการ` : ''}</span>
+    </div>` : ''}
+
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+      ${_kpi('Active', active, 'var(--blue)', 'license ที่ยังใช้งานอยู่')}
+      ${_kpi('Expiring ≤ 30 วัน', expiring, 'var(--amber)', 'ต้องต่ออายุเร็วๆ')}
+      ${_kpi('Expired', expired, 'var(--red)', 'หมดอายุแล้ว')}
+      ${_kpi('Total seats (active)', totalSeats, 'var(--text-1)', 'จากทุก license ที่ยังใช้')}
+    </div>
+
+    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+      <input id="lic-mi-search" type="text" placeholder="ค้นหาเลข memo, project, license..."
+        style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:220px"
+        oninput="_renderLicMemoIndex()">
+      <select id="lic-mi-proj" onchange="_renderLicMemoIndex()"
+        style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+        <option value="all">ทุก project</option>
+        ${[...new Set(memos.map(m=>m.project).filter(Boolean))].sort().map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
+      </select>
+      <select id="lic-mi-status" onchange="_renderLicMemoIndex()"
+        style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+        <option value="all">ทุกสถานะ</option>
+        <option value="active">Active</option>
+        <option value="expiring">Expiring</option>
+        <option value="expired">Expired</option>
+      </select>
+      <div style="margin-left:auto;font-size:11px;color:var(--text-2);display:flex;align-items:center;gap:6px">
+        FX: <input id="lic-fx-rate" type="number" value="${fxRate}" min="1"
+          style="width:52px;font-size:11px;padding:3px 6px;border:1px solid var(--border-md);border-radius:4px;background:var(--surface)"
+          onchange="_saveLicFxRate(this.value);_renderLicTab(_licCurrentTab)">
+        THB/USD
+      </div>
+    </div>
+
+    <div class="card" style="padding:0;overflow:hidden">
+      <table class="hist-table" id="lic-mi-table">
+        <thead><tr>
+          <th style="padding-left:14px;width:12%">Memo No.</th>
+          <th>วันที่</th>
+          <th>Project</th>
+          <th>License / Program</th>
+          <th style="text-align:right">Seats</th>
+          <th style="text-align:right">Cost/mo (THB)</th>
+          <th>Start</th>
+          <th>End</th>
+          <th style="text-align:center">สถานะ</th>
+        </tr></thead>
+        <tbody id="lic-mi-body"></tbody>
+      </table>
+    </div>`;
+
+  _renderLicMemoIndexRows();
+}
+
+function _renderLicMemoIndexRows() {
+  const search = (document.getElementById('lic-mi-search')?.value || '').toLowerCase();
+  const projF  = document.getElementById('lic-mi-proj')?.value || 'all';
+  const statF  = document.getElementById('lic-mi-status')?.value || 'all';
+  const fxRate = _getLicFxRate();
+
+  const memos = loadMemos().filter(m => m.type === 'sl' && m.status === 'completed');
+  const tbody  = document.getElementById('lic-mi-body');
+  if (!tbody) return;
+
+  // Group licenses back by memo
+  const rows = memos.flatMap(memo => {
+    const lics = parseLicenseFromMemo(memo);
+    if (!lics.length) return [];
+    const totalSeats = lics.reduce((s,l) => s + (l.seats||1), 0);
+    const totalCostTHB = lics.reduce((s,l) => s + ((l.pricePerMonth||0) * (l.fxRate||fxRate) * (l.seats||1)), 0);
+    const expiryDates = lics.map(l => l.expiry).filter(Boolean).sort();
+    const startDates  = lics.map(l => l.purchaseDate).filter(Boolean).sort();
+    const worstStatus = _worstLicenseStatus(lics);
+    const licNames = [...new Set(lics.map(l=>l.name))].join(', ');
+    return [{ memo, lics, totalSeats, totalCostTHB, expiryDates, startDates, worstStatus, licNames }];
+  });
+
+  const filtered = rows.filter(r => {
+    if (projF !== 'all' && r.memo.project !== projF) return false;
+    if (statF !== 'all') {
+      const k = r.worstStatus.key;
+      if (statF === 'active'   && k !== 'active') return false;
+      if (statF === 'expiring' && !k.startsWith('expiring')) return false;
+      if (statF === 'expired'  && k !== 'expired') return false;
     }
-    if (filterProj !== 'all' && lic.project !== filterProj) return false;
     if (search) {
-      const hay = `${lic.name} ${lic.project} ${lic.owner} ${lic.vendor} ${lic.department}`.toLowerCase();
+      const hay = `${r.memo.memoNo} ${r.memo.project} ${r.licNames}`.toLowerCase();
       if (!hay.includes(search)) return false;
     }
     return true;
   });
 
-  filtered.sort((a, b) => {
-    if (sort === 'cost-desc')     return ((b.pricePerMonth || 0) * (b.seats || 1)) - ((a.pricePerMonth || 0) * (a.seats || 1));
-    if (sort === 'seats-desc')    return (b.seats || 1) - (a.seats || 1);
-    if (sort === 'purchase-desc') return new Date(b.purchaseDate || 0) - new Date(a.purchaseDate || 0);
-    const sa = getLicenseStatus(a), sb = getLicenseStatus(b);
-    if (sa.key === 'expired' && sb.key !== 'expired') return 1;
-    if (sb.key === 'expired' && sa.key !== 'expired') return -1;
-    if (!a.expiry) return 1; if (!b.expiry) return -1;
-    return new Date(a.expiry) - new Date(b.expiry);
-  });
-
-  const tbody = document.getElementById('lic-table-body');
   if (!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:34px 16px;color:var(--text-3)">ยังไม่มีข้อมูล${search ? ' ที่ตรงกับการค้นหา' : ''} — Approve SL Memo หรือกด Add License</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-3)">ไม่พบข้อมูล — Approve SL Memo เพื่อให้ข้อมูลปรากฎที่นี่</td></tr>`;
     return;
   }
 
-  window._licFiltered = filtered;
-  tbody.innerHTML = filtered.map((lic, _idx) => {
-    const s = getLicenseStatus(lic);
-    const monthlyCostLic = (lic.pricePerMonth || 0) * (lic.seats || 1);
-    const sourceBadge = lic.source === 'memo'
-      ? `<span style="font-size:10px;background:#E6F1FB;color:#0C447C;padding:1px 6px;border-radius:3px;white-space:nowrap">Memo</span>`
-      : `<span style="font-size:10px;background:#F1EFE8;color:#5F5E5A;padding:1px 6px;border-radius:3px;white-space:nowrap">Manual</span>`;
+  tbody.innerHTML = filtered.map(r => {
+    const s = r.worstStatus;
+    const endCell = r.expiryDates.length
+      ? (s.key === 'expired'
+          ? `<span style="color:var(--red)">${shortDate(r.expiryDates[0])}</span>`
+          : s.key.startsWith('expiring')
+            ? `<span style="color:var(--amber);font-weight:500">⚠ ${s.days}d · ${shortDate(r.expiryDates[0])}</span>`
+            : shortDate(r.expiryDates[0]))
+      : '—';
     return `<tr>
-      <td style="padding-left:16px;font-weight:600">
-        ${esc(lic.name)}
-        ${lic.vendor ? `<div style="font-size:10px;color:var(--text-3);font-weight:400">${esc(lic.vendor)}</div>` : ''}
-        ${lic.memoNo ? `<div style="font-size:10px;color:var(--blue);font-weight:400;cursor:pointer" onclick="openHistoryDetail && openHistoryDetail('${esc(lic.memoNo)}') || openMemoPdf('${esc(lic.memoNo)}')">${esc(lic.memoNo)}</div>` : ''}
+      <td style="padding-left:14px;font-size:12px;color:var(--blue);cursor:pointer"
+          onclick="openMemoPdf && openMemoPdf('${esc(r.memo.memoNo)}')">${esc(r.memo.memoNo)}</td>
+      <td style="font-size:11px">${shortDate(r.memo.date||r.memo.createdAt)}</td>
+      <td style="font-weight:500">${esc(r.memo.project||'—')}</td>
+      <td style="font-size:12px">${esc(r.licNames)}</td>
+      <td style="text-align:right">${r.totalSeats}</td>
+      <td style="text-align:right;font-size:12px" class="mono">${r.totalCostTHB ? money(r.totalCostTHB)+'/mo' : '—'}</td>
+      <td style="font-size:11px">${r.startDates.length ? shortDate(r.startDates[0]) : '—'}</td>
+      <td style="font-size:11px">${endCell}</td>
+      <td style="text-align:center"><span class="badge ${s.badge}">${s.label}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+function _worstLicenseStatus(lics) {
+  const order = ['expired','expiring-7','expiring-15','expiring-30','active','cancelled'];
+  const statuses = lics.map(l => getLicenseStatus(l));
+  return statuses.sort((a,b) => order.indexOf(a.key) - order.indexOf(b.key))[0]
+    || { label:'Active', badge:'badge-green', key:'active', days:null };
+}
+
+// ── TAB 2: BY PROJECT ────────────────────────────────────
+function _renderLicByProject() {
+  const allLics   = getAllLicenses().filter(l => getLicenseStatus(l).key !== 'cancelled');
+  const fxRate    = _getLicFxRate();
+  const projects  = [...new Set(allLics.map(l=>l.project).filter(Boolean))].sort();
+  const licNames  = [...new Set(allLics.map(l=>l.name).filter(Boolean))].sort();
+
+  const el = document.getElementById('lic-content');
+  if (!el) return;
+
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div style="display:flex;gap:0;border:0.5px solid var(--border-md);border-radius:var(--r-sm);overflow:hidden">
+        <button id="lic-bp-btn-proj" onclick="_licBpToggle('project')"
+          style="font-size:12px;padding:5px 14px;border:none;cursor:pointer;background:var(--blue-50,#E6F1FB);color:var(--blue)">
+          📁 By Project
+        </button>
+        <button id="lic-bp-btn-lic" onclick="_licBpToggle('license')"
+          style="font-size:12px;padding:5px 14px;border:none;border-left:0.5px solid var(--border-md);cursor:pointer;background:var(--surface);color:var(--text-2)">
+          📋 By License
+        </button>
+      </div>
+      <div style="font-size:11px;color:var(--text-2);display:flex;align-items:center;gap:6px">
+        FX: <input id="lic-fx-rate2" type="number" value="${fxRate}" min="1"
+          style="width:52px;font-size:11px;padding:3px 6px;border:1px solid var(--border-md);border-radius:4px;background:var(--surface)"
+          onchange="_saveLicFxRate(this.value);_renderLicByProject()">
+        THB/USD
+      </div>
+    </div>
+
+    <div id="lic-bp-project-view">
+      ${_buildByProjectTable(projects, licNames, allLics, fxRate)}
+    </div>
+    <div id="lic-bp-license-view" style="display:none">
+      ${_buildByLicenseTable(allLics, fxRate)}
+    </div>`;
+}
+
+function _licBpToggle(view) {
+  const isProjView = view === 'project';
+  document.getElementById('lic-bp-project-view').style.display = isProjView ? '' : 'none';
+  document.getElementById('lic-bp-license-view').style.display = isProjView ? 'none' : '';
+  const pBtn = document.getElementById('lic-bp-btn-proj');
+  const lBtn = document.getElementById('lic-bp-btn-lic');
+  if (pBtn) { pBtn.style.background = isProjView ? 'var(--blue-50,#E6F1FB)' : 'var(--surface)'; pBtn.style.color = isProjView ? 'var(--blue)' : 'var(--text-2)'; }
+  if (lBtn) { lBtn.style.background = isProjView ? 'var(--surface)' : 'var(--blue-50,#E6F1FB)'; lBtn.style.color = isProjView ? 'var(--text-2)' : 'var(--blue)'; }
+}
+
+function _buildByProjectTable(projects, licNames, allLics, fxRate) {
+  // Group allLics by project → by licName → seats+cost
+  const projMap = {};
+  allLics.forEach(l => {
+    const p = l.project || '(ไม่ระบุ)';
+    if (!projMap[p]) projMap[p] = {};
+    if (!projMap[p][l.name]) projMap[p][l.name] = { seats: 0, cost: 0, memos: new Set() };
+    projMap[p][l.name].seats += (l.seats || 1);
+    projMap[p][l.name].cost  += (l.pricePerMonth || 0) * (l.fxRate || fxRate) * (l.seats || 1);
+    if (l.memoNo) projMap[p][l.name].memos.add(l.memoNo);
+  });
+
+  // Get top licenses by total seats for column headers (max 6)
+  const licTotals = {};
+  allLics.forEach(l => { licTotals[l.name] = (licTotals[l.name]||0) + (l.seats||1); });
+  const topLics = Object.entries(licTotals).sort((a,b)=>b[1]-a[1]).slice(0,6).map(e=>e[0]);
+
+  const rows = Object.entries(projMap).sort((a,b) => a[0].localeCompare(b[0]));
+
+  // Memo lookup per project
+  const memosByProj = {};
+  loadMemos().filter(m => m.type === 'sl' && m.status === 'completed').forEach(m => {
+    if (!memosByProj[m.project]) memosByProj[m.project] = [];
+    memosByProj[m.project].push(m);
+  });
+
+  return `<div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
+    <table class="hist-table" style="min-width:600px">
+      <thead><tr>
+        <th style="padding-left:14px">Project</th>
+        ${topLics.map(n=>`<th style="text-align:right;white-space:nowrap">${esc(n)}</th>`).join('')}
+        <th style="text-align:right">Total seats</th>
+        <th style="text-align:right">Monthly (THB)</th>
+      </tr></thead>
+      <tbody>
+        ${rows.map(([proj, licMap]) => {
+          const totalSeats = Object.values(licMap).reduce((s,v)=>s+v.seats,0);
+          const totalCost  = Object.values(licMap).reduce((s,v)=>s+v.cost,0);
+          const projMemos  = memosByProj[proj] || [];
+          const memoRows   = projMemos.map(m => {
+            const mLics = parseLicenseFromMemo(m);
+            const mNames = [...new Set(mLics.map(l=>l.name))].join(', ');
+            const mSeats = mLics.reduce((s,l)=>s+(l.seats||1),0);
+            const ms = _worstLicenseStatus(mLics);
+            return `<tr class="lic-sub-row" data-proj="${esc(proj)}" style="display:none">
+              <td colspan="${topLics.length+3}" style="padding:5px 14px 5px 30px;background:var(--bg-2,#F8F8F6);font-size:11px;color:var(--text-2)">
+                📄 ${esc(m.memoNo)} · ${shortDate(m.date||m.createdAt)} · ${esc(mNames)} · ${mSeats} seats
+                <span class="badge ${ms.badge}" style="margin-left:6px">${ms.label}</span>
+              </td>
+            </tr>`;
+          }).join('');
+          return `<tr class="lic-proj-row" onclick="_toggleLicSubRows('${esc(proj)}',this)"
+            style="cursor:pointer" onmouseover="this.style.background='var(--bg-2)'" onmouseout="this.style.background=''">
+            <td style="padding-left:14px;font-weight:600"><span class="lic-expand">▶</span> ${esc(proj)}</td>
+            ${topLics.map(n => {
+              const v = licMap[n];
+              return v ? `<td style="text-align:right">${v.seats}</td>` : `<td style="text-align:right;color:var(--text-3)">—</td>`;
+            }).join('')}
+            <td style="text-align:right;font-weight:500">${totalSeats}</td>
+            <td style="text-align:right;font-weight:500" class="mono">${money(totalCost)}</td>
+          </tr>${memoRows}`;
+        }).join('')}
+        <tr style="font-weight:600;background:var(--bg-2,#F8F8F6)">
+          <td style="padding-left:14px">Total</td>
+          ${topLics.map(n => {
+            const t = Object.values(projMap).reduce((s,m)=>s+(m[n]?.seats||0),0);
+            return `<td style="text-align:right">${t||'—'}</td>`;
+          }).join('')}
+          <td style="text-align:right">${allLics.reduce((s,l)=>s+(l.seats||1),0)}</td>
+          <td style="text-align:right" class="mono">${money(allLics.reduce((s,l)=>s+((l.pricePerMonth||0)*(l.fxRate||fxRate)*(l.seats||1)),0))}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function _buildByLicenseTable(allLics, fxRate) {
+  // Group by name → aggregate seats, cost, plans
+  const licMap = {};
+  allLics.forEach(l => {
+    if (!licMap[l.name]) licMap[l.name] = { name: l.name, vendor: l.vendor||'', seats: 0, pricePerMonth: l.pricePerMonth||0, fxRate: l.fxRate||fxRate, memos: new Set() };
+    licMap[l.name].seats += (l.seats||1);
+    if (l.memoNo) licMap[l.name].memos.add(l.memoNo);
+  });
+  const rows = Object.values(licMap).sort((a,b) => b.seats - a.seats);
+
+  return `<div class="card" style="padding:0;overflow:hidden">
+    <table class="hist-table">
+      <thead><tr>
+        <th style="padding-left:14px">License / Program</th>
+        <th style="text-align:right">Seats</th>
+        <th style="text-align:right">$/seat/mo</th>
+        <th style="text-align:right">Monthly (THB)</th>
+        <th style="text-align:right">Yearly (THB)</th>
+        <th>Memo(s)</th>
+      </tr></thead>
+      <tbody>
+        ${rows.map(r => {
+          const monthly = r.pricePerMonth * (r.fxRate||fxRate) * r.seats;
+          return `<tr>
+            <td style="padding-left:14px;font-weight:600">${esc(r.name)}<br>
+              ${r.vendor ? `<span style="font-size:10px;color:var(--text-3);font-weight:400">${esc(r.vendor)}</span>` : ''}
+            </td>
+            <td style="text-align:right">${r.seats}</td>
+            <td style="text-align:right;font-size:11px">$${r.pricePerMonth}</td>
+            <td style="text-align:right" class="mono">${money(monthly)}</td>
+            <td style="text-align:right" class="mono">${money(monthly*12)}</td>
+            <td style="font-size:11px;color:var(--text-2)">${[...r.memos].join(', ')||'manual'}</td>
+          </tr>`;
+        }).join('')}
+        <tr style="font-weight:600;background:var(--bg-2,#F8F8F6)">
+          <td style="padding-left:14px">Total</td>
+          <td style="text-align:right">${rows.reduce((s,r)=>s+r.seats,0)}</td>
+          <td></td>
+          <td style="text-align:right" class="mono">${money(rows.reduce((s,r)=>s+(r.pricePerMonth*(r.fxRate||fxRate)*r.seats),0))}</td>
+          <td style="text-align:right" class="mono">${money(rows.reduce((s,r)=>s+(r.pricePerMonth*(r.fxRate||fxRate)*r.seats*12),0))}</td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function _toggleLicSubRows(proj, row) {
+  const expanded = row.classList.toggle('lic-proj-expanded');
+  const arrow = row.querySelector('.lic-expand');
+  if (arrow) arrow.style.transform = expanded ? 'rotate(90deg)' : '';
+  document.querySelectorAll(`.lic-sub-row[data-proj="${proj}"]`).forEach(r => {
+    r.style.display = expanded ? 'table-row' : 'none';
+  });
+}
+
+// ── TAB 3: USERS ─────────────────────────────────────────
+function _renderLicUsers() {
+  const memos = loadMemos().filter(m => m.type === 'sl' && m.status === 'completed');
+
+  // Parse all account tables
+  const allUserRows = []; // { email, project, memoNo, licenses:{name:bool} }
+  const allLicColsSet = new Set();
+  memos.forEach(memo => {
+    const acct = parseAccountTableFromMemo(memo);
+    if (!acct || !acct.rows.length) return;
+    acct.cols.forEach(c => allLicColsSet.add(c));
+    acct.rows.forEach(r => allUserRows.push({
+      email: r.email,
+      project: memo.project || '',
+      memoNo: memo.memoNo,
+      licenses: r.licenses,
+    }));
+  });
+
+  const allLicCols = [...allLicColsSet].sort();
+  const projects   = [...new Set(allUserRows.map(r=>r.project).filter(Boolean))].sort();
+
+  const el = document.getElementById('lic-content');
+  if (!el) return;
+
+  if (!allUserRows.length) {
+    el.innerHTML = `<div style="text-align:center;padding:48px;color:var(--text-3)">
+      ยังไม่มีข้อมูลผู้ใช้ — กรอก "ตาราง Account" ใน SL Memo เพื่อให้ข้อมูลปรากฎที่นี่
+    </div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="background:var(--bg-2,#F8F8F6);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:12px;font-size:11px;color:var(--text-2)">
+      ℹ ข้อมูลมาจาก "ตาราง Account" ใน SL Memo — email + ✓/- ต่อโปรแกรม
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+      <input id="lic-usr-search" type="text" placeholder="ค้นหา email..."
+        style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px"
+        oninput="_renderLicUsersRows(${JSON.stringify(allUserRows)}, ${JSON.stringify(allLicCols)})">
+      <select id="lic-usr-proj" onchange="_renderLicUsersRows(${JSON.stringify(allUserRows)}, ${JSON.stringify(allLicCols)})"
+        style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+        <option value="all">ทุก project</option>
+        ${projects.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
+      </select>
+      <select id="lic-usr-lic" onchange="_renderLicUsersRows(${JSON.stringify(allUserRows)}, ${JSON.stringify(allLicCols)})"
+        style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+        <option value="all">ทุก license</option>
+        ${allLicCols.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
+      <table class="hist-table" style="min-width:500px" id="lic-usr-table">
+        <thead><tr>
+          <th style="padding-left:14px">Email</th>
+          <th>Project</th>
+          ${allLicCols.map(c=>`<th style="text-align:center;white-space:nowrap">${esc(c)}</th>`).join('')}
+          <th>Memo</th>
+        </tr></thead>
+        <tbody id="lic-usr-body"></tbody>
+      </table>
+    </div>
+    <div style="font-size:11px;color:var(--text-2);margin-top:6px">
+      ✅ = ได้รับ license นี้ · — = ไม่ได้รับ (ตามที่กรอกใน memo)
+    </div>`;
+
+  _renderLicUsersRows(allUserRows, allLicCols);
+}
+
+function _renderLicUsersRows(allUserRows, allLicCols) {
+  const search  = (document.getElementById('lic-usr-search')?.value || '').toLowerCase();
+  const projF   = document.getElementById('lic-usr-proj')?.value || 'all';
+  const licF    = document.getElementById('lic-usr-lic')?.value || 'all';
+  const tbody   = document.getElementById('lic-usr-body');
+  if (!tbody) return;
+
+  let rows = allUserRows;
+  if (projF !== 'all') rows = rows.filter(r => r.project === projF);
+  if (licF  !== 'all') rows = rows.filter(r => r.licenses[licF] === true);
+  if (search) rows = rows.filter(r => r.email.toLowerCase().includes(search));
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="${allLicCols.length+3}" style="text-align:center;padding:24px;color:var(--text-3)">ไม่พบข้อมูล</td></tr>`;
+    return;
+  }
+
+  // Deduplicate: if same email appears in multiple memos for same license, merge
+  const emailMap = {};
+  rows.forEach(r => {
+    const key = `${r.email}|${r.project}`;
+    if (!emailMap[key]) emailMap[key] = { email: r.email, project: r.project, memos: new Set(), licenses: {} };
+    emailMap[key].memos.add(r.memoNo);
+    Object.entries(r.licenses).forEach(([lic, val]) => {
+      if (val) emailMap[key].licenses[lic] = true;
+    });
+  });
+
+  tbody.innerHTML = Object.values(emailMap).map(r => {
+    const initials = r.email.substring(0, 2).toUpperCase();
+    return `<tr>
+      <td style="padding-left:14px">
+        <span style="width:26px;height:26px;border-radius:50%;background:var(--blue-50,#E6F1FB);display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:var(--blue);margin-right:6px;vertical-align:middle">${initials}</span>
+        ${esc(r.email)}
       </td>
-      <td>${esc(lic.seats || 1)}</td>
-      <td class="mono">${esc(money(monthlyCostLic))}</td>
-      <td style="font-size:12px">${esc(lic.owner || '—')}</td>
-      <td style="font-size:12px">${esc(lic.department || '—')}</td>
-      <td style="font-size:12px">${esc(lic.project || '—')}</td>
-      <td style="font-size:11px">${esc(shortDate(lic.purchaseDate))}</td>
-      <td style="font-size:11px">${esc(shortDate(lic.expiry))}</td>
-      <td style="text-align:center"><span class="badge ${s.badge}">${esc(s.label)}</span></td>
-      <td style="text-align:center">${sourceBadge}</td>
+      <td style="font-size:12px">${esc(r.project)}</td>
+      ${allLicCols.map(c => `<td style="text-align:center;font-size:13px">${r.licenses[c] ? '✅' : '<span style="color:var(--text-3)">—</span>'}</td>`).join('')}
+      <td style="font-size:11px;color:var(--text-2)">${[...r.memos].join(', ')}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── TAB 4: OTHER LICENSE ─────────────────────────────────
+function _renderLicOther() {
+  // "Other" = manual licenses (not memo-derived) OR memo licenses with no seat-based plan
+  const allLics = getAllLicenses();
+  const manual  = allLics.filter(l => l.source === 'manual');
+  const fxRate  = _getLicFxRate();
+
+  const licTypes = [...new Set(manual.map(l => l.licenseType || 'subscription'))].sort();
+  const projects  = [...new Set(manual.map(l => l.project).filter(Boolean))].sort();
+
+  const el = document.getElementById('lic-content');
+  if (!el) return;
+
+  el.innerHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;justify-content:space-between">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <select id="lic-ot-type" onchange="_renderLicOtherRows()"
+          style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+          <option value="all">ทุกประเภท</option>
+          ${licTypes.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}
+        </select>
+        <select id="lic-ot-proj" onchange="_renderLicOtherRows()"
+          style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+          <option value="all">ทุก project</option>
+          ${projects.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
+        </select>
+        <select id="lic-ot-status" onchange="_renderLicOtherRows()"
+          style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+          <option value="all">ทุกสถานะ</option>
+          <option value="active">Active</option>
+          <option value="expiring">Expiring</option>
+          <option value="expired">Expired</option>
+        </select>
+      </div>
+      <button class="btn-primary" style="font-size:12px;padding:6px 14px" onclick="openLicenseModal()">
+        + Add License
+      </button>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <table class="hist-table"><thead><tr>
+        <th style="padding-left:14px">License</th>
+        <th>ประเภท</th>
+        <th>Project</th>
+        <th style="text-align:right">Seats</th>
+        <th style="text-align:right">Monthly (THB)</th>
+        <th>Memo</th>
+        <th>หมดอายุ</th>
+        <th style="text-align:center">สถานะ</th>
+        <th style="text-align:center">Actions</th>
+      </tr></thead>
+      <tbody id="lic-ot-body"></tbody>
+      </table>
+    </div>`;
+
+  window._licOtherManual = manual;
+  window._licOtherFxRate = fxRate;
+  _renderLicOtherRows();
+}
+
+function _renderLicOtherRows() {
+  const typeF   = document.getElementById('lic-ot-type')?.value || 'all';
+  const projF   = document.getElementById('lic-ot-proj')?.value || 'all';
+  const statF   = document.getElementById('lic-ot-status')?.value || 'all';
+  const fxRate  = window._licOtherFxRate || _getLicFxRate();
+  const tbody   = document.getElementById('lic-ot-body');
+  if (!tbody) return;
+
+  let rows = window._licOtherManual || [];
+  if (typeF !== 'all') rows = rows.filter(r => (r.licenseType||'subscription') === typeF);
+  if (projF !== 'all') rows = rows.filter(r => r.project === projF);
+  if (statF !== 'all') rows = rows.filter(r => {
+    const k = getLicenseStatus(r).key;
+    if (statF === 'active')   return k === 'active';
+    if (statF === 'expiring') return k.startsWith('expiring');
+    if (statF === 'expired')  return k === 'expired';
+    return true;
+  });
+
+  window._licOtherFiltered = rows;
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-3)">ไม่มี manual license — กด Add License เพื่อเพิ่ม</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = rows.map((l, idx) => {
+    const s = getLicenseStatus(l);
+    const cost = (l.pricePerMonth||0) * fxRate * (l.seats||1);
+    const typeBadge = {
+      subscription: 'background:#E6F1FB;color:#0C447C',
+      perpetual:    'background:#EAF3DE;color:#27500A',
+      free:         'background:#F1EFE8;color:#444441',
+    }[l.licenseType] || 'background:#EEEDFE;color:#3C3489';
+    return `<tr>
+      <td style="padding-left:14px;font-weight:600">${esc(l.name)}
+        ${l.vendor ? `<div style="font-size:10px;color:var(--text-3);font-weight:400">${esc(l.vendor)}</div>` : ''}
+      </td>
+      <td><span style="font-size:10px;padding:2px 7px;border-radius:4px;font-weight:500;${typeBadge}">${esc(l.licenseType||'subscription')}</span></td>
+      <td style="font-size:12px">${esc(l.project||'—')}</td>
+      <td style="text-align:right">${l.seats||1}</td>
+      <td style="text-align:right" class="mono">${cost ? money(cost) : '฿0'}</td>
+      <td style="font-size:11px;color:var(--blue)">${esc(l.memoNo||'—')}</td>
+      <td style="font-size:11px">${shortDate(l.expiry)||'—'}</td>
+      <td style="text-align:center"><span class="badge ${s.badge}">${s.label}</span></td>
       <td style="text-align:center;white-space:nowrap">
-        <button class="btn-sm" data-action="edit" data-idx="${_idx}" style="padding:3px 7px;font-size:11px" title="${lic.source === 'memo' ? 'แก้ไข owner/dept/note' : 'Edit'}">✎</button>
-        ${lic.source !== 'memo' ? `<button class="btn-sm" data-action="delete" data-idx="${_idx}" style="padding:3px 7px;font-size:11px;color:var(--red)" title="Delete">✕</button>` : ''}
+        <button class="btn-sm" data-action="edit" data-idx="${idx}" style="padding:3px 7px;font-size:11px">✎</button>
+        <button class="btn-sm" data-action="delete" data-idx="${idx}" style="padding:3px 7px;font-size:11px;color:var(--red)">✕</button>
       </td>
     </tr>`;
   }).join('');
 
-  tbody.onclick = function(e) {
+  tbody.onclick = e => {
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
-    const idx = Number(btn.dataset.idx);
-    const lic = window._licFiltered?.[idx];
-    if (!lic) return;
-    if (btn.dataset.action === 'edit')   openLicenseModal(String(lic.id));
-    if (btn.dataset.action === 'delete') deleteLicense(String(lic.id));
+    const l = (window._licOtherFiltered||[])[Number(btn.dataset.idx)];
+    if (!l) return;
+    if (btn.dataset.action === 'edit')   openLicenseModal(String(l.id));
+    if (btn.dataset.action === 'delete') deleteLicense(String(l.id));
   };
 }
 
-// ── Modal ──
+// ── FX rate persistence ──────────────────────────────────
+function _getLicFxRate() {
+  try { return Number(localStorage.getItem('orbit-lic-fx-rate')) || 35; } catch(e) { return 35; }
+}
+function _saveLicFxRate(val) {
+  try { localStorage.setItem('orbit-lic-fx-rate', String(Number(val)||35)); } catch(e) {}
+}
+
+// ── KPI helper ───────────────────────────────────────────
+function _kpi(label, val, color, sub) {
+  return `<div style="background:var(--bg-2,#F8F8F6);border-radius:var(--r-sm);padding:10px 14px">
+    <div style="font-size:11px;color:var(--text-2);margin-bottom:2px">${label}</div>
+    <div style="font-size:18px;font-weight:600;color:${color}">${val}</div>
+    <div style="font-size:10px;color:var(--text-3)">${sub}</div>
+  </div>`;
+}
+
+// ── Modal CRUD (unchanged from original) ─────────────────
 function openLicenseModal(id) {
   const modal = document.getElementById('license-modal');
   modal.style.display = 'flex';
-  _populateLicenseFilters(getAllLicenses()); // ensure modal project dropdown is populated
   if (id) {
     const lic = getAllLicenses().find(l => String(l.id) === String(id));
     if (!lic) { closeLicenseModal(); return; }
@@ -377,35 +819,30 @@ function openLicenseModal(id) {
     document.getElementById('lic-dept').value        = lic.department || '';
     document.getElementById('lic-project').value     = lic.project || '';
     document.getElementById('lic-type-field').value  = lic.licenseType || 'subscription';
-    document.getElementById('lic-purchase-date').value = lic.purchaseDate?.slice(0, 10) || '';
-    document.getElementById('lic-expiry-date').value   = lic.expiry?.slice(0, 10) || '';
+    document.getElementById('lic-purchase-date').value = lic.purchaseDate?.slice(0,10) || '';
+    document.getElementById('lic-expiry-date').value   = lic.expiry?.slice(0,10) || '';
     document.getElementById('lic-billing').value     = lic.billingFreq || 'monthly';
     document.getElementById('lic-status-field').value = lic.statusOverride || 'active';
     document.getElementById('lic-memo-ref').value    = lic.memoNo || '';
     document.getElementById('lic-note').value        = lic.note || '';
-    // Lock fields that come from the memo — only allow editing owner/dept/note/status
-    const lock = fromMemo;
     ['lic-name','lic-vendor','lic-seats','lic-price','lic-purchase-date','lic-expiry-date','lic-billing','lic-memo-ref'].forEach(fid => {
       const el = document.getElementById(fid);
-      if (el) { el.disabled = lock; el.style.opacity = lock ? '0.5' : '1'; }
+      if (el) { el.disabled = fromMemo; el.style.opacity = fromMemo ? '0.5' : '1'; }
     });
-    if (lock) {
-      const hint = document.getElementById('lic-memo-hint');
-      if (hint) hint.style.display = '';
-    }
+    const hint = document.getElementById('lic-memo-hint');
+    if (hint) hint.style.display = fromMemo ? '' : 'none';
   } else {
     document.getElementById('lic-modal-title').textContent = 'Add License';
     document.getElementById('lic-edit-id').value = '';
-    ['lic-name', 'lic-vendor', 'lic-owner', 'lic-dept', 'lic-note', 'lic-memo-ref'].forEach(fid => { const el = document.getElementById(fid); if (el) el.value = ''; });
+    ['lic-name','lic-vendor','lic-owner','lic-dept','lic-note','lic-memo-ref'].forEach(fid => { const el = document.getElementById(fid); if (el) el.value = ''; });
     document.getElementById('lic-seats').value = 1;
     document.getElementById('lic-price').value = 0;
-    document.getElementById('lic-purchase-date').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('lic-purchase-date').value = new Date().toISOString().slice(0,10);
     document.getElementById('lic-expiry-date').value = '';
     document.getElementById('lic-project').value = '';
     document.getElementById('lic-type-field').value = 'subscription';
     document.getElementById('lic-billing').value = 'monthly';
     document.getElementById('lic-status-field').value = 'active';
-    // Ensure all fields are unlocked for new manual license
     ['lic-name','lic-vendor','lic-seats','lic-price','lic-purchase-date','lic-expiry-date','lic-billing','lic-memo-ref'].forEach(fid => {
       const el = document.getElementById(fid);
       if (el) { el.disabled = false; el.style.opacity = '1'; }
@@ -422,50 +859,38 @@ function saveLicenseManual() {
   const editId = document.getElementById('lic-edit-id').value;
   const now = new Date().toISOString();
   const data = {
-    name,
-    vendor:         document.getElementById('lic-vendor').value.trim(),
-    seats:          Number(document.getElementById('lic-seats').value) || 1,
-    pricePerMonth:  Number(document.getElementById('lic-price').value) || 0,
-    owner:          document.getElementById('lic-owner').value.trim(),
-    department:     document.getElementById('lic-dept').value.trim(),
-    project:        document.getElementById('lic-project').value,
-    licenseType:    document.getElementById('lic-type-field').value,
-    purchaseDate:   document.getElementById('lic-purchase-date').value || now.slice(0, 10),
-    expiry:         document.getElementById('lic-expiry-date').value
-                      ? new Date(document.getElementById('lic-expiry-date').value + 'T00:00:00').toISOString()
-                      : null,
-    billingFreq:    document.getElementById('lic-billing').value,
+    name, vendor: document.getElementById('lic-vendor').value.trim(),
+    seats: Number(document.getElementById('lic-seats').value)||1,
+    pricePerMonth: Number(document.getElementById('lic-price').value)||0,
+    owner: document.getElementById('lic-owner').value.trim(),
+    department: document.getElementById('lic-dept').value.trim(),
+    project: document.getElementById('lic-project').value,
+    licenseType: document.getElementById('lic-type-field').value,
+    purchaseDate: document.getElementById('lic-purchase-date').value || now.slice(0,10),
+    expiry: document.getElementById('lic-expiry-date').value
+      ? new Date(document.getElementById('lic-expiry-date').value+'T00:00:00').toISOString() : null,
+    billingFreq: document.getElementById('lic-billing').value,
     statusOverride: document.getElementById('lic-status-field').value === 'active' ? null : document.getElementById('lic-status-field').value,
-    memoNo:         document.getElementById('lic-memo-ref').value.trim(),
-    note:           document.getElementById('lic-note').value.trim(),
-    source:         'manual',
-    updatedAt:      now,
+    memoNo: document.getElementById('lic-memo-ref').value.trim(),
+    note: document.getElementById('lic-note').value.trim(),
+    source: 'manual', updatedAt: now,
   };
-
+  const allLics = getAllLicenses();
   let finalData;
   if (editId) {
-    const allLics = getAllLicenses();
     const orig = allLics.find(l => String(l.id) === String(editId));
-    finalData = { ...(orig || {}), ...data, id: editId, createdAt: orig?.createdAt || now };
+    finalData = { ...(orig||{}), ...data, id: editId, createdAt: orig?.createdAt || now };
   } else {
     finalData = { id: nextLicenseId(), ...data, createdAt: now };
   }
-
-  // Optimistic local update
-  const licenses = loadManualLicenses();
-  const idx = licenses.findIndex(l => String(l.id) === String(finalData.id));
-  if (idx >= 0) licenses[idx] = finalData; else licenses.push(finalData);
-  storeManualLicenses(licenses);
+  const ls = loadManualLicenses();
+  const idx = ls.findIndex(l => String(l.id) === String(finalData.id));
+  if (idx >= 0) ls[idx] = finalData; else ls.push(finalData);
+  storeManualLicenses(ls);
   _licCache = null;
-
   closeLicenseModal();
-  _renderLicenseTable();
-
-  // Async push to Supabase
-  saveLicenseAsync(finalData).then(() => {
-    _licCache = null;
-    _renderLicenseTable();
-  }).catch(e => console.warn('Supabase license save failed', e));
+  _renderLicTab(_licCurrentTab);
+  saveLicenseAsync(finalData).then(() => { _licCache = null; _renderLicTab(_licCurrentTab); }).catch(e => console.warn(e));
 }
 
 function deleteLicense(id) {
@@ -473,17 +898,12 @@ function deleteLicense(id) {
   if (!lic) return;
   if (lic.source === 'memo') { alert('ไม่สามารถลบ License ที่มาจาก Memo ได้'); return; }
   if (!confirm(`ลบ "${lic.name}" ออกจากระบบ?`)) return;
-
-  // Optimistic local update
   storeManualLicenses(loadManualLicenses().filter(l => String(l.id) !== String(id)));
   _licCache = null;
-  _renderLicenseTable();
-
-  // Async delete from Supabase
-  deleteLicenseAsync(id).catch(e => console.warn('Supabase license delete failed', e));
+  _renderLicTab(_licCurrentTab);
+  deleteLicenseAsync(id).catch(e => console.warn(e));
 }
 
-// Close modal on backdrop
 document.addEventListener('click', function(e) {
   if (e.target === document.getElementById('license-modal')) closeLicenseModal();
 });
