@@ -389,7 +389,7 @@ function openHistoryDetail(memoNo) {
       <button class="btn-sm" type="button" style="color:var(--blue)" onclick="closeDetailModal();if(typeof editDraft==='function')editDraft('${_no}')">✎ Edit Draft</button>
       <button class="btn-sm" type="button" style="color:var(--red)"  onclick="closeDetailModal();if(typeof deleteDraft==='function')deleteDraft('${_no}')">✕ Delete Draft</button>
     ` : ''}
-    ${typeof isPMO === 'function' && isPMO() && !isDraft ? `
+    ${typeof isPMO === 'function' && isPMO() && isCompleted ? `
       <button class="btn-sm" type="button"
         onclick="openBudgetTagModal('${_no}')"
         style="background:${memo.budgetSource ? 'var(--green-50,#F0FDF4)' : 'var(--amber-50,#FFFBEB)'};color:${memo.budgetSource ? 'var(--green-800,#166534)' : 'var(--amber-800,#92400E)'}">
@@ -637,6 +637,10 @@ function buildBudgetSourceBadge(memo) {
 function openBudgetTagModal(memoNo) {
   const memo = getHistoryMemos().find(m => m.memoNo === memoNo);
   if(!memo) return;
+  if(memo.status !== 'completed') {
+    alert('Tag Budget ได้เฉพาะ Memo ที่อนุมัติแล้วเท่านั้น');
+    return;
+  }
   const s = typeof loadSettings === 'function' ? loadSettings() : null;
   const projects = s?.projects || ['AOA-MP','TTB','Geo9','Release 2.1','Axistant'];
 
@@ -682,11 +686,17 @@ function closeBudgetTagModal() {
 function saveBudgetTag(memoNo) {
   const memo = getHistoryMemos().find(m => m.memoNo === memoNo);
   if(!memo) return;
+  // Only completed memos can be tagged
+  if(memo.status !== 'completed') {
+    alert('Tag Budget ได้เฉพาะ Memo ที่อนุมัติแล้วเท่านั้น');
+    closeBudgetTagModal();
+    return;
+  }
   const selected = document.querySelector('input[name="bsrc-opt"]:checked')?.value;
   if(!selected) { alert('กรุณาเลือก Budget Source'); return; }
-  // If selected == project (auto default), clear override → revert to auto
-  const isRevertToAuto = selected === (memo.project || '(ไม่ระบุ)') && memo.budgetSource;
-  updateMemoStatus(memoNo, 'completed', { budgetSource: selected === (memo.project||'(ไม่ระบุ)') ? null : selected });
+  // patch budgetSource only — do NOT change status
+  const newSource = selected === (memo.project||'(ไม่ระบุ)') ? null : selected;
+  updateMemoStatus(memoNo, memo.status, { budgetSource: newSource });
   closeBudgetTagModal();
   renderHistoryMemos();
 }
