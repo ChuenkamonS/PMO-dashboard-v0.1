@@ -2094,34 +2094,24 @@ function showPoolMemos(poolId) {
 // ══════════════════════════════════════════════════════════════════
 function isPMO() {
   // TODO: connect to user role system when ready
-  // e.g. return currentUserRole() === 'pmo';
-  return true; // everyone can tag for now
+  return true;
 }
 
 // ══════════════════════════════════════════════════════════════════
 // BUDGET POOL — EXCEL TEMPLATE DOWNLOAD
 // ══════════════════════════════════════════════════════════════════
 function downloadBudgetPoolTemplate() {
-  // Build CSV template (download as .csv for simplicity, user can open in Excel)
   const headers = ['Project','Pool Name','Budget (THB)','Year (BE)','Start Month (YYYY-MM)','End Month (YYYY-MM)','Memo Types (SL,HW,INT,ENT,DEP or blank=all)'];
   const s = typeof loadSettings === 'function' ? loadSettings() : null;
   const projects = s?.projects || ['AOA-MP','TTB','Geo9','Release 2.1','Release 3'];
   const year = document.getElementById('bset-year')?.value || '2569';
 
-  const examples = projects.map(proj => [
-    proj,
-    'SL ' + year,
-    '',
-    year,
-    '',
-    '',
-    'SL'
-  ]);
+  const examples = projects.map(proj => [proj, 'SL ' + year, '', year, '', '', 'SL']);
+  const allRows  = [headers, ...examples];
 
-  const rows = [headers, ...examples];
-  const csv  = rows.map(r => r.map(v => '"'+String(v).replace(/"/g,'""')+'"').join(',')).join('
-');
-  const blob = new Blob(['﻿'+csv], { type: 'text/csv;charset=utf-8' });
+  const esc2 = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const csv  = allRows.map(r => r.map(esc2).join(',')).join('\r\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
   a.href     = url;
@@ -2140,14 +2130,12 @@ async function handlePoolBulkUpload(input) {
 
   let rows = [];
   try {
-    // Use SheetJS if available
-    const buf  = await file.arrayBuffer();
-    const wb   = XLSX.read(buf, { type: 'array' });
-    const ws   = wb.Sheets[wb.SheetNames[0]];
-    rows       = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    const buf = await file.arrayBuffer();
+    const wb  = XLSX.read(buf, { type: 'array' });
+    const ws  = wb.Sheets[wb.SheetNames[0]];
+    rows      = XLSX.utils.sheet_to_json(ws, { defval: '' });
   } catch(e) {
-    alert('ไม่สามารถอ่านไฟล์ได้ — กรุณาใช้ไฟล์ .xlsx หรือ .xls
-' + e.message);
+    alert('ไม่สามารถอ่านไฟล์ได้ — กรุณาใช้ไฟล์ .xlsx หรือ .xls\n' + e.message);
     return;
   }
 
@@ -2157,37 +2145,37 @@ async function handlePoolBulkUpload(input) {
   const valid = [], errors = [];
 
   rows.forEach((row, i) => {
-    const lc  = k => (row[k] !== undefined ? row[k] : row[Object.keys(row).find(r => r.toLowerCase().replace(/[\s(]/g,'').startsWith(k.toLowerCase().replace(/[\s(]/g,''))) || ''] || '');
-    const proj    = String(lc('Project') || '').trim();
-    const name    = String(lc('Pool Name') || lc('PoolName') || '').trim();
-    const budget  = parseFloat(String(lc('Budget') || lc('Budget (THB)') || '0').replace(/[^0-9.]/g,'')) || 0;
-    const yr      = String(lc('Year') || lc('Year (BE)') || year).trim() || year;
-    const start   = String(lc('Start Month') || lc('Start Month (YYYY-MM)') || '').trim() || null;
-    const end     = String(lc('End Month') || lc('End Month (YYYY-MM)') || '').trim() || null;
-    const typesRaw= String(lc('Memo Types') || lc('Memo Types (SL,HW,INT,ENT,DEP or blank=all)') || '').trim();
+    const keys = Object.keys(row);
+    const get  = prefix => {
+      const key = keys.find(k => k.toLowerCase().replace(/[\s(]/g,'').startsWith(prefix.toLowerCase().replace(/[\s(]/g,'')));
+      return key ? String(row[key] || '').trim() : '';
+    };
+    const proj   = get('project');
+    const name   = get('poolname') || get('pool');
+    const budget = parseFloat(String(get('budget')).replace(/[^0-9.]/g,'')) || 0;
+    const yr     = get('year') || year;
+    const start  = get('startmonth') || get('start') || null;
+    const end    = get('endmonth')   || get('end')   || null;
+    const typesRaw = get('memotypes') || get('memo') || '';
     const memoTypes = typesRaw
       ? typesRaw.split(/[,;|\s]+/).map(t => t.trim().toLowerCase()).filter(t => ['sl','hw','int','ent','dep'].includes(t))
       : [];
 
-    if (!proj) { errors.push(`Row ${i+2}: Missing Project`); return; }
-    if (!name) { errors.push(`Row ${i+2}: Missing Pool Name`); return; }
-    if (!budget) { errors.push(`Row ${i+2}: Missing or invalid Budget`); return; }
+    if (!proj)   { errors.push('Row ' + (i+2) + ': Missing Project');   return; }
+    if (!name)   { errors.push('Row ' + (i+2) + ': Missing Pool Name'); return; }
+    if (!budget) { errors.push('Row ' + (i+2) + ': Missing Budget');    return; }
 
-    valid.push({ proj, name, budget, yr, start, end, memoTypes });
+    valid.push({ proj, name, budget, yr, start: start||null, end: end||null, memoTypes });
   });
 
   if (errors.length) {
-    alert('พบข้อผิดพลาด ' + errors.length + ' รายการ:
-' + errors.slice(0,5).join('
-') + (errors.length > 5 ? '
-...' : ''));
+    alert('พบข้อผิดพลาด ' + errors.length + ' รายการ:\n' + errors.slice(0,5).join('\n') + (errors.length > 5 ? '\n...' : ''));
     if (!valid.length) return;
     if (!confirm('มีข้อมูลที่ถูกต้อง ' + valid.length + ' รายการ — ต้องการ import ต่อไหม?')) return;
   } else {
     if (!confirm('พบข้อมูล ' + valid.length + ' pool — ยืนยัน import?')) return;
   }
 
-  // Preview modal
   _showPoolImportPreview(valid, year);
 }
 
@@ -2195,49 +2183,47 @@ function _showPoolImportPreview(items, year) {
   document.getElementById('pool-import-preview')?.remove();
 
   const modal = document.createElement('div');
-  modal.id = 'pool-import-preview';
+  modal.id    = 'pool-import-preview';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:400;display:flex;align-items:center;justify-content:center';
 
-  const tdS = 'padding:7px 12px;border-bottom:1px solid var(--border);font-size:11px';
-  const rows = items.map(it => `<tr>
-    <td style="${tdS}">${esc(it.proj)}</td>
-    <td style="${tdS}">${esc(it.name)}</td>
-    <td style="${tdS};text-align:right">${money(it.budget)}</td>
-    <td style="${tdS}">${esc(it.yr)}</td>
-    <td style="${tdS}">${esc(it.start||'—')} → ${esc(it.end||'—')}</td>
-    <td style="${tdS}">${it.memoTypes.length ? it.memoTypes.map(t=>t.toUpperCase()).join(', ') : 'ทุกประเภท'}</td>
-  </tr>`).join('');
+  const tdS  = 'padding:7px 12px;border-bottom:1px solid var(--border);font-size:11px';
+  const rows = items.map(it =>
+    '<tr>' +
+      '<td style="' + tdS + '">' + esc(it.proj) + '</td>' +
+      '<td style="' + tdS + '">' + esc(it.name) + '</td>' +
+      '<td style="' + tdS + ';text-align:right">' + money(it.budget) + '</td>' +
+      '<td style="' + tdS + '">' + esc(it.yr) + '</td>' +
+      '<td style="' + tdS + '">' + esc(it.start || '—') + ' → ' + esc(it.end || '—') + '</td>' +
+      '<td style="' + tdS + '">' + (it.memoTypes.length ? it.memoTypes.map(t => t.toUpperCase()).join(', ') : 'ทุกประเภท') + '</td>' +
+    '</tr>'
+  ).join('');
 
-  modal.innerHTML = `
-    <div class="card" style="width:700px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
-      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-        <span style="font-size:15px;font-weight:700">Preview — Budget Pool Import (${items.length} รายการ)</span>
-        <button class="btn-sm" onclick="document.getElementById('pool-import-preview').remove()" style="padding:4px 10px">✕</button>
-      </div>
-      <div style="overflow:auto;flex:1">
-        <table class="hist-table" style="min-width:600px">
-          <thead><tr>
-            <th style="${tdS}">Project</th>
-            <th style="${tdS}">Pool Name</th>
-            <th style="${tdS};text-align:right">Budget</th>
-            <th style="${tdS}">ปี</th>
-            <th style="${tdS}">ช่วงเวลา</th>
-            <th style="${tdS}">Memo Types</th>
-          </tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-      <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px">
-        <button class="btn-ghost" onclick="document.getElementById('pool-import-preview').remove()">ยกเลิก</button>
-        <button class="btn-primary" onclick="_confirmPoolImport()">✓ Confirm Import</button>
-      </div>
-    </div>`;
+  modal.innerHTML =
+    '<div class="card" style="width:700px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;padding:0;overflow:hidden">' +
+      '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">' +
+        '<span style="font-size:15px;font-weight:700">Preview — Budget Pool Import (' + items.length + ' รายการ)</span>' +
+        '<button class="btn-sm" onclick="document.getElementById(\'pool-import-preview\').remove()" style="padding:4px 10px">✕</button>' +
+      '</div>' +
+      '<div style="overflow:auto;flex:1">' +
+        '<table class="hist-table" style="min-width:600px">' +
+          '<thead><tr>' +
+            '<th style="' + tdS + '">Project</th>' +
+            '<th style="' + tdS + '">Pool Name</th>' +
+            '<th style="' + tdS + ';text-align:right">Budget</th>' +
+            '<th style="' + tdS + '">ปี</th>' +
+            '<th style="' + tdS + '">ช่วงเวลา</th>' +
+            '<th style="' + tdS + '">Memo Types</th>' +
+          '</tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table>' +
+      '</div>' +
+      '<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px">' +
+        '<button class="btn-ghost" onclick="document.getElementById(\'pool-import-preview\').remove()">ยกเลิก</button>' +
+        '<button class="btn-primary" onclick="_confirmPoolImport()">✓ Confirm Import</button>' +
+      '</div>' +
+    '</div>';
 
-  modal._importData = items;
-  modal._importYear = year;
   document.body.appendChild(modal);
-
-  // Store data for confirm
   window._poolImportPending = { items, year };
 }
 
@@ -2249,19 +2235,9 @@ async function _confirmPoolImport() {
   let created = 0, updated = 0;
 
   for (const it of items) {
-    // Upsert: match by project + name + year
     const match = existing.find(p => p.project === it.proj && p.name === it.name && p.year === it.yr);
-    const id    = match?.id || 'pool-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2,5).toUpperCase();
-    const entry = {
-      id,
-      project:    it.proj,
-      name:       it.name,
-      budget:     it.budget,
-      year:       it.yr,
-      startMonth: it.start,
-      endMonth:   it.end,
-      memoTypes:  it.memoTypes,
-    };
+    const id    = match?.id || ('pool-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2,5).toUpperCase());
+    const entry = { id, project: it.proj, name: it.name, budget: it.budget, year: it.yr, startMonth: it.start, endMonth: it.end, memoTypes: it.memoTypes };
     await savePoolAsync(entry);
     if (match) updated++; else created++;
   }
