@@ -834,7 +834,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <span class="card-title">ข้อมูลทั่วไป</span>
             </div>
             <div class="form-grid" style="margin-bottom:10px">
-              <div class="fg"><label>เลข Memo</label><input type="text" id="f-memo-no" placeholder=""></div>
+              <div class="fg"><label>เลข Memo *</label><input type="text" id="f-memo-no" placeholder="เช่น ORB-2601-001"></div>
               <div class="fg"><label>ลงวันที่ *</label><input type="date" id="f-date"></div>
               <div class="fg">
                 <label>โครงการ *</label>
@@ -888,7 +888,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <!-- SL fields -->
             <div class="fs" id="fs-sl">
               <div class="items-hdr" style="grid-template-columns:2.5fr 1.2fr 0.8fr 0.8fr 1fr 1fr 30px">
-                <span>ชื่อ Software *</span><span>฿/เดือน *</span><span>เดือน *</span><span>จำนวน *</span><span>เริ่ม (เดือน)</span><span>สิ้นสุด (เดือน)</span><span></span>
+                <span>ชื่อ Software *</span><span>฿/เดือน *</span><span>เดือน *</span><span>จำนวน *</span><span>เริ่ม (เดือน) *</span><span>สิ้นสุด (เดือน) *</span><span></span>
               </div>
               <div id="sl-rows">
                 <div class="item-row" style="grid-template-columns:2.5fr 1.2fr 0.8fr 0.8fr 1fr 1fr 30px">
@@ -972,11 +972,10 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <div class="form-grid">
                 <div class="fg" style="grid-column:1/-1"><label>ชื่อลูกค้า / บริษัทที่เลี้ยง *</label><input type="text" placeholder="เช่น บริษัท ปตท. น้ำมันและการค้าปลีก จำกัด (มหาชน)"></div>
                 <div class="fg"><label>วันที่จัดงาน *</label><input type="date"></div>
-                <div class="fg"><label>เวลา *</label><input type="time" value="12:00"></div>
                 <div class="fg"><label>สถานที่ *</label><input type="text" placeholder="เช่น ร้านอาหาร The River Café"></div>
                 <div class="fg"><label>จำนวนผู้เข้าร่วม (คน) *</label><input type="number" placeholder="10"></div>
                 <div class="fg"><label>วงเงินรวม (บาท) *</label><input type="number" placeholder="50000"></div>
-                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร</label><input type="text" placeholder="เช่น ห้าหมื่นบาทถ้วน"></div>
+                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร *</label><input type="text" placeholder="เช่น ห้าหมื่นบาทถ้วน"></div>
               </div>
             </div>
 
@@ -1007,7 +1006,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
               </div>
 
               <div class="form-grid" style="grid-template-columns:1fr 1fr">
-                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร</label><input type="text" id="dep-amount-words" class="ri" placeholder="เช่น เจ็ดพันเจ็ดร้อยห้าสิบบาทถ้วน"></div>
+                <div class="fg"><label>จำนวนเงินเป็นตัวอักษร *</label><input type="text" id="dep-amount-words" class="ri" placeholder="เช่น เจ็ดพันเจ็ดร้อยห้าสิบบาทถ้วน"></div>
                 <div class="fg"><label>ยอดรวมทั้งสิ้น (฿)</label><input type="number" id="dep-total" class="ri" readonly style="background:var(--bg);font-weight:600" placeholder="0"></div>
               </div>
             </div>
