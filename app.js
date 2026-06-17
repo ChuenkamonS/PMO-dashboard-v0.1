@@ -673,21 +673,21 @@ function renderMemoPdf(data) {
             : '';
           // Options: A1=เห็นชอบ (multi) or อนุมัติ (single), Last=อนุมัติ, Middle=เห็นชอบ
           const optText = isFirst && arr.length === 1
-            ? '<div class="mp-appr-opt">&#9675; อนุมัติ, เพื่อโปรดพิจารณาดำเนินการ</div><div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>'
+            ? '<div class="mp-appr-opt" style="font-size:10pt">&#9675; อนุมัติ, เพื่อโปรดพิจารณาดำเนินการ</div><div class="mp-appr-opt" style="font-size:10pt">&#9675; อื่นๆ ..............................………</div>'
             : isFirst && arr.length > 1
-            ? '<div class="mp-appr-opt">&#9675; เห็นชอบ, เพื่อโปรดพิจารณาอนุมัติ</div><div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>'
+            ? '<div class="mp-appr-opt" style="font-size:10pt">&#9675; เห็นชอบ, เพื่อโปรดพิจารณาอนุมัติ</div><div class="mp-appr-opt" style="font-size:10pt">&#9675; อื่นๆ ..............................………</div>'
             : isLast
-            ? '<div class="mp-appr-opt">&#9675; อนุมัติ, เพื่อโปรดพิจารณาดำเนินการ</div><div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>'
-            : '<div class="mp-appr-opt">&#9675; เห็นชอบ, เพื่อโปรดพิจารณาอนุมัติ</div><div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>';
+            ? '<div class="mp-appr-opt" style="font-size:10pt">&#9675; อนุมัติ, เพื่อโปรดพิจารณาดำเนินการ</div><div class="mp-appr-opt" style="font-size:10pt">&#9675; อื่นๆ ..............................………</div>'
+            : '<div class="mp-appr-opt" style="font-size:10pt">&#9675; เห็นชอบ, เพื่อโปรดพิจารณาอนุมัติ</div><div class="mp-appr-opt" style="font-size:10pt">&#9675; อื่นๆ ..............................………</div>';
           const sigDate = isFirst ? reviewerDate : approverDate;
-          return '<div class="mp-appr-cell" style="padding:10px 12px;min-height:160px;display:flex;flex-direction:column;border:1px solid #000;'+(i>0?'margin-left:-1px;':'')+'">'
-            + (headText ? '<div class="mp-appr-head">'+headText+'</div>' : '')
+          return '<div class="mp-appr-cell" style="font-size:10pt;padding:10px 12px;min-height:160px;display:flex;flex-direction:column;border:1px solid #000;'+(i>0?'margin-left:-1px;':'')+'">'
+            + (headText ? '<div class="mp-appr-head" style="font-size:10pt">'+headText+'</div>' : '')
             + optText
             + '<div style="flex:1"></div>'
             + '<div class="mp-sig-space"></div>'
-            + '<div class="mp-sig-name" style="font-size:12pt;font-weight:600;text-align:center">( '+esc(a.name||'-')+' )</div>'
-            + '<div class="mp-sig-role" style="font-size:12pt;text-align:center">'+esc(a.title||'-')+'</div>'
-            + '<div class="mp-sig-date" style="font-size:12pt;text-align:center">'+sigDate+'</div>'
+            + '<div class="mp-sig-name" style="font-size:10pt;font-weight:600;text-align:center">( '+esc(a.name||'-')+' )</div>'
+            + '<div class="mp-sig-role" style="font-size:10pt;text-align:center">'+esc(a.title||'-')+'</div>'
+            + '<div class="mp-sig-date" style="font-size:10pt;text-align:center">'+sigDate+'</div>'
             + '</div>';
         }).join('')
         + '</div>';
