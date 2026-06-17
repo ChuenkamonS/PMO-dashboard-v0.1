@@ -254,7 +254,7 @@ async function syncLocalToSupabase() {
 
 // ── Date helpers ──
 const MONTHS_TH = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
-function thaiDate(d) { return `${d.getDate()} ${MONTHS_TH[d.getMonth()]} ${d.getFullYear()+543}`; }
+function thaiDate(d) { return `${d.getDate()} ${MONTHS_TH[d.getMonth()]} พ.ศ. ${d.getFullYear()+543}`; }
 const TODAY = thaiDate(new Date());
 const todayISO = new Date().toISOString().slice(0,10);
 
@@ -414,27 +414,34 @@ function renderMemoPdf(data) {
   // Use server CSS classes (.mp-*) — injected by PDF server with THSarabun font
   function fmtDate(v) {
     if(!v || v === '-') return '';
-    // Already a Thai date string (e.g. "20 พฤษภาคม 2569") — return as-is
+    // Already a Thai full date string e.g. "17 มิถุนายน 2569" — return as-is
     if(/[ก-๙]/.test(v)) return v;
-    // ISO date YYYY-MM-DD → convert to Thai Buddhist era DD/MM/YYYY
+    // ISO YYYY-MM-DD or any parseable → full Thai date
     const d = new Date(v.length===10 ? v+'T00:00:00' : v);
     if(isNaN(d.getTime())) return v;
-    return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()+543}`;
+    return thaiDate(d); // "17 มิถุนายน พ.ศ. 2569"
+  }
+  // YYYY-MM → "มิถุนายน 2569"
+  function fmtMonth(v) {
+    if(!v || v==='-') return v;
+    const m = v.match(/^(\d{4})-(\d{2})$/);
+    if(!m) return v;
+    return `${MONTHS_TH[parseInt(m[2],10)-1]} ${parseInt(m[1])+543}`;
   }
 
   const typeBody = {
     sl: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} - บริษัท ออร์บิท ดิจิทัล จำกัด มีความจำเป็นต้องใช้งานโปรแกรม เพื่อพัฒนาโครงการและช่วยทีมพัฒนาสามารถทำงานได้อย่างมีประสิทธิภาพ จึงขออนุมัติงบประมาณเพื่อต่ออายุการใช้งานโปรแกรม ตามรายละเอียดดังต่อไปนี้`,
     hw: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} - บริษัท ออร์บิท ดิจิทัล จำกัด มีความจำเป็นต้องจัดซื้ออุปกรณ์ Hardware เพื่อสนับสนุนการดำเนินงานของโครงการ จึงขออนุมัติงบประมาณตามรายละเอียดดังต่อไปนี้`,
     int: `เนื่องด้วยโครงการ ${esc(data.project||'-')} มีความประสงค์จัดกิจกรรม Team Activity ${esc(data.reason||'')} ของพนักงานโครงการ ${esc(data.project||'-')} จึงขออนุมัติงบประมาณตามรายละเอียดดังต่อไปนี้`,
-    ent: `สืบเนื่องจากพนักงานโครงการ ${esc(data.project||'-')} บริษัท ออร์บิท ดิจิทัล จำกัด ได้วางแผนจัดงานบริษัทเลี้ยงรับรองลูกค้าเพื่อขอบคุณ ซึ่งจะจัดวันที่ ${esc(data.entDate||'-')}${data.entTime ? ` เวลา ${esc(data.entTime)} น.` : ''} สถานที่จัดคือ ${esc(data.entPlace||'-')} จำนวนผู้เข้าร่วมโดยประมาณ ${esc(data.entPeople||'-')} คน โดยกำหนดงบประมาณสำหรับค่าใช้จ่ายเลี้ยงรับรองลูกค้าเป็นจำนวนเงินไม่เกิน ${data.total ? money(data.total) : '-'} บาท`,
-    dep: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} - บริษัท ออร์บิท ดิจิทัล จำกัด วางแผนดำเนินการปฏิบัติงานที่ ${esc(data.depLocation||'-')} ในช่วงวันที่ ${esc(data.depStart||'-')}${data.depEnd && data.depEnd !== data.depStart ? ` – ${esc(data.depEnd)}` : ''} โดยมีจำนวนทั้งสิ้น ${data.depEmpCount||'-'} คน โดยมีรายละเอียดดังต่อไปนี้`,
+    ent: `สืบเนื่องจากพนักงานโครงการ ${esc(data.project||'-')} บริษัท ออร์บิท ดิจิทัล จำกัด ได้วางแผนจัดงานบริษัทเลี้ยงรับรองลูกค้าเพื่อขอบคุณ ซึ่งจะจัดวันที่ ${esc(fmtDate(data.entDate)||'-')} สถานที่จัดคือ ${esc(data.entPlace||'-')} จำนวนผู้เข้าร่วมโดยประมาณ ${esc(data.entPeople||'-')} คน โดยกำหนดงบประมาณสำหรับค่าใช้จ่ายเลี้ยงรับรองลูกค้าเป็นจำนวนเงินไม่เกิน ${data.total ? money(data.total) : '-'} บาท`,
+    dep: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} - บริษัท ออร์บิท ดิจิทัล จำกัด วางแผนดำเนินการปฏิบัติงานที่ ${esc(data.depLocation||'-')} ในช่วงวันที่ ${esc(fmtDate(data.depStart)||'-')}${data.depEnd && data.depEnd !== data.depStart ? ` – ${esc(fmtDate(data.depEnd))}` : ''} โดยมีจำนวนทั้งสิ้น ${data.depEmpCount||'-'} คน โดยมีรายละเอียดดังต่อไปนี้`,
   };
   const bodyText = typeBody[data.type] || `ด้วยฝ่าย PMO มีความประสงค์ขออนุมัติรายการตามรายละเอียดด้านล่าง เพื่อสนับสนุนการดำเนินงานของโครงการ ${esc(data.project||'-')} ให้เป็นไปตามแผนงาน`;
 
   // Per-type closing paragraphs with authority reference
   const authorityRef = 'อ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงิน (ที่มีการตั้งงบประมาณไว้) หมวดการชำระค่าบริการ ซึ่งให้อำนาจแก่ประธานเจ้าหน้าที่บริหารในวงเงินไม่เกิน 2,000,000 บาท';
   const authorityRef500k = 'อ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงิน (ที่มีการตั้งงบประมาณไว้) หมวดการชำระค่าบริการสำหรับพนักงาน ซึ่งให้อำนาจแก่ผู้บริหารในวงเงินไม่เกิน 500,000 บาท';
-  const amtStr = data.total ? `<strong>${esc(money(data.total||0))}</strong> (${esc(data.amountWords||'-')})` : '';
+  const amtStr = data.total ? `<strong>${(Number(data.total)||0).toLocaleString('th-TH', {maximumFractionDigits:0})} บาท</strong> (${esc(data.amountWords||'-')})` : '';
 
   const closingMap = {
     sl:  data.total ? (function(){
@@ -456,7 +463,7 @@ function renderMemoPdf(data) {
       const monthsStr = `ระยะเวลา ${months} เดือน `;
       return `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณสำหรับค่าใช้จ่ายดังกล่าว รวมเป็นจำนวนเงินไม่เกิน ${amtStr} ${seatsStr}${monthsStr}${authorityRef}`;
     })() : '',
-    hw:  data.total ? `จึงขอความกรุณาโปรดพิจารณาอนุมัติค่าใช้จ่ายสำหรับรายการจัดซื้อจ้างอ้างต้น ในวงเงิน ${amtStr} ถ้าอ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงิน (ที่มีการตั้งงบประมาณไว้) หมวดการชำระค่าบริการ ซึ่งให้อำนาจแก่ประธานเจ้าหน้าที่บริหารในวงเงินไม่เกิน 500,000 บาท` : '',
+    hw:  data.total ? `จึงขอความกรุณาโปรดพิจารณาอนุมัติค่าใช้จ่ายสำหรับรายการจัดซื้อข้างต้น ในวงเงิน ${amtStr} ถ้าอ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงิน (ที่มีการตั้งงบประมาณไว้) หมวดการชำระค่าบริการ ซึ่งให้อำนาจแก่ประธานเจ้าหน้าที่บริหารในวงเงินไม่เกิน 500,000 บาท` : '',
     int: data.total ? `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณสำหรับค่ากิจกรรมทีม ${esc(data.project||'-')} เพื่อใช้จัดกิจกรรมดังกล่าว เป็นวงเงินจำนวนไม่เกิน ${esc(money(data.total))} บาท ( ${esc(data.amountWords||'-')} )` : '',
     ent: data.total ? `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณค่ารับรองลูกค้าจาก ${esc(data.entClient||data.project||'-')} ในช่วงเวลาดังกล่าว อ้างอิงอำนาจอนุมัติตามคู่มืออำนาจอนุมัติ พ.ศ. 2564 ข้อ 3.2 การชำระเงิน (ที่มีการตั้งงบประมาณไว้) หมวดค่าเลี้ยงรับรอง วงเงินไม่เกิน 150,000 บาท ซึ่งให้อำนาจแก่ประธานเจ้าหน้าที่บริหารในการอนุมัติงบประมาณ` : '',
     dep: data.total ? `จึงขอความอนุเคราะห์อนุมัติค่าใช้จ่ายสำหรับรายการ Deployment ข้างต้น ในวงเงิน ${amtStr} (${esc(data.amountWords||'')}) ถ้าอ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงิน (ที่มีการตั้งงบประมาณไว้) หมวดการชำระค่าสวัสดิการพนักงาน ซึ่งให้อำนาจแก่ประธานเจ้าหน้าที่บริหารในการอนุมัติการชำระเงินในวงเงินไม่เกิน 500,000 บาท` : '',
@@ -466,7 +473,7 @@ function renderMemoPdf(data) {
   // sectionsHtml rendered inline below with fxNote injection
 
   const fxNote = data.type === 'sl'
-    ? `<p class="mp-note">* <u>หมายเหตุ</u> : เรทราคาโปรแกรมดังกล่าวแปลงเรทเงินตราจากหน่วย USD เป็น THB ณ วันที่ ${esc(data.date||TODAY)}${data.fxRate ? ` (1 USD = ฿${data.fxRate})` : ''}</p>`
+    ? `<p class="mp-note">* <u>หมายเหตุ</u> : เรทราคาโปรแกรมดังกล่าวแปลงเรทเงินตราจากหน่วย USD เป็น THB ณ วันที่ ${esc(fmtDate(data.date)||TODAY)}${data.fxRate ? ` (1 USD = ฿${data.fxRate})` : ''}</p>`
     : '';
 
   // Dates stored as Thai strings from dateInput() — display directly
@@ -479,7 +486,7 @@ function renderMemoPdf(data) {
     <div class="mp-hdr">
       <div class="mp-hdr-right">
         <div><strong>เลขที่</strong>&nbsp;&nbsp;${esc(data.memoNo)}</div>
-        <div><strong>ลงวันที่</strong>&nbsp;&nbsp;${esc(data.date||TODAY)}</div>
+        <div><strong>ลงวันที่</strong>&nbsp;&nbsp;${esc(fmtDate(data.date)||TODAY)}</div>
       </div>
     </div>
 
@@ -491,7 +498,7 @@ function renderMemoPdf(data) {
     <div class="mp-field"><span class="mp-field-label">เรียน</span><span class="mp-field-value">${esc(data.to||'-')}</span></div>
 
     <!-- Body -->
-    <div class="mp-body"><p>${bodyText}</p></div>
+    <div class="mp-body"><p style="font-size:14pt;line-height:1.8;text-indent:2.5em">${bodyText}</p></div>
 
     <!-- Sections with fxNote after SL table -->
     ${(data.sections||[]).map(function(s){
@@ -508,6 +515,14 @@ function renderMemoPdf(data) {
         renameHeader('จำนวน', 'QTY (License)');
         renameHeader('รวม', 'Amount (THB)');
         renameHeader('เดือน', 'Month');
+        renameHeader('เริ่ม', 'Start');
+        renameHeader('สิ้นสุด', 'End');
+        // Convert YYYY-MM values in start/end columns to Thai month names
+        html = html.replace(/>(\d{4}-\d{2})</g, (m, v) => {
+          const parts = v.match(/^(\d{4})-(\d{2})$/);
+          if (!parts) return m;
+          return `>${MONTHS_TH[parseInt(parts[2],10)-1]} ${parseInt(parts[1])+543}<`;
+        });
         // Center everything, then fix item name column (index 1) back to left
         H('<td class="tdl" style="text-align:left">', '<td style="text-align:left">');
         H('<td class="" style="text-align:left">', '<td style="text-align:center">');
@@ -560,7 +575,7 @@ function renderMemoPdf(data) {
 
 
     <!-- Closing -->
-    ${closingText ? `<div class="mp-closing"><p>${closingText}</p></div>` : ''}
+    ${closingText ? `<div class="mp-closing"><p style="font-size:14pt;line-height:1.8;text-indent:2.5em">${closingText}</p></div>` : ''}
 
     <!-- Signature boxes -->
     <div class="mp-approval" style="display:grid;grid-template-columns:repeat(${Math.max(1, (data.approvers||[]).length)}, 1fr);gap:0;width:100%;margin-top:8px;border-collapse:collapse">
@@ -586,9 +601,9 @@ function renderMemoPdf(data) {
             ${optText}
             <div style="flex:1"></div>
             <div class="mp-sig-space"></div>
-            <div class="mp-sig-name">( ${esc(a.name || '-')} )</div>
-            <div class="mp-sig-role">${esc(a.title || '-')}</div>
-            <div class="mp-sig-date">${sigDate}</div>
+            <div class="mp-sig-name" style="font-size:12pt;font-weight:600;text-align:center">( ${esc(a.name || '-')} )</div>
+            <div class="mp-sig-role" style="font-size:12pt;text-align:center">${esc(a.title || '-')}</div>
+            <div class="mp-sig-date" style="font-size:12pt;text-align:center">${sigDate}</div>
           </div>`;
         }).join('')}
     </div>
