@@ -454,16 +454,15 @@ function _renderLicByProject() {
           ${years.map(y=>`<option value="${y}" ${String(y)===_bpYear?'selected':''}>${y}</option>`).join('')}
         </select>
       </div>
-      <div>
+      <div id="bp-proj-filter">
         <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Project</div>
         <select onchange="_bpProject=this.value;_bpRenderTable()" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1)">
           <option value="all">All projects</option>
           ${projs.map(p=>`<option value="${p}" ${p===_bpProject?'selected':''}>${esc(p)}</option>`).join('')}
         </select>
       </div>
-      <div style="margin-left:auto;display:flex;gap:6px;align-items:flex-end">
-        <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Columns</div>
-        ${_bpColToggle('Plan','_bpShowPlan',_bpShowPlan)}
+      <div id="bp-col-toggles" style="margin-left:auto;display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap">
+        <div style="font-size:11px;color:var(--text-2);align-self:flex-end;margin-bottom:6px">Columns</div>
         ${_bpColToggle('Expiry','_bpShowExpiry',_bpShowExpiry)}
         ${_bpColToggle('Memo','_bpShowMemo',_bpShowMemo)}
       </div>
@@ -487,6 +486,12 @@ function _bpSetGroup(mode) {
   document.getElementById('bp-btn-lic').style.cssText = mode==='license'
     ? 'font-size:12px;padding:5px 13px;border:none;border-left:0.5px solid var(--border-md);cursor:pointer;background:var(--blue-50,#E6F1FB);color:var(--blue)'
     : 'font-size:12px;padding:5px 13px;border:none;border-left:0.5px solid var(--border-md);cursor:pointer;background:var(--surface);color:var(--text-2)';
+  // hide/show column toggles — only relevant for project view
+  const colToggles = document.getElementById('bp-col-toggles');
+  if (colToggles) colToggles.style.display = mode === 'project' ? 'flex' : 'none';
+  // hide project filter — not useful in matrix view
+  const projFilter = document.getElementById('bp-proj-filter');
+  if (projFilter) projFilter.style.display = mode === 'project' ? 'block' : 'none';
   _bpRenderTable();
 }
 
@@ -494,7 +499,7 @@ function _bpGetFiltered() {
   return getAllLicenses().filter(l => {
     if (getLicenseStatus(l).key === 'cancelled') return false;
     if (_bpYear !== 'all' && String(l.memoYear) !== String(_bpYear)) return false;
-    if (_bpProject !== 'all' && l.project !== _bpProject) return false;
+    if (_bpGroupMode === 'project' && _bpProject !== 'all' && l.project !== _bpProject) return false;
     return true;
   });
 }
@@ -508,14 +513,21 @@ function _bpRenderTable() {
   const wrap = document.getElementById('bp-table-wrap');
   if (!wrap) return;
   const filtered = _bpGetFiltered();
-  const primaryKey = _bpGroupMode === 'project' ? 'project' : 'name';
-  const primaryVals = [...new Set(filtered.map(l => l[primaryKey] || '(ไม่ระบุ)'))].sort();
+  if (_bpGroupMode === 'license') {
+    _bpRenderMatrix(wrap, filtered);
+  } else {
+    _bpRenderProjectView(wrap, filtered);
+  }
+}
 
-  const colCount = 2 + (_bpShowPlan?1:0) + (_bpShowExpiry?1:0) + (_bpShowMemo?1:0);
+// ── By Project: flat expanded list ───────────────────────
+function _bpRenderProjectView(wrap, filtered) {
+  const projects = [...new Set(filtered.map(l => l.project || '(ไม่ระบุ)'))].sort();
+
   const head = `<thead><tr>
-    <th style="padding-left:14px">${_bpGroupMode==='project' ? 'Project / License' : 'License / Project'}</th>
+    <th style="padding-left:14px">Project / License</th>
     <th style="text-align:right">Seats</th>
-    ${_bpShowPlan   ? '<th>Plan</th>' : ''}
+    <th>Plan</th>
     ${_bpShowExpiry ? '<th style="text-align:right">Expiry</th>' : ''}
     ${_bpShowMemo   ? '<th>Memo</th>' : ''}
   </tr></thead>`;
@@ -523,22 +535,20 @@ function _bpRenderTable() {
   let grandTotal = 0;
   let bodyRows = '';
 
-  primaryVals.forEach(pVal => {
-    const rows = filtered.filter(l => (l[primaryKey]||'(ไม่ระบุ)') === pVal);
+  projects.forEach(proj => {
+    const rows = filtered.filter(l => (l.project || '(ไม่ระบุ)') === proj);
     const totalSeats = rows.reduce((s,l) => s+(l.seats||1), 0);
     grandTotal += totalSeats;
-    const safeKey = pVal.replace(/'/g,"\\'");
 
-    bodyRows += `<tr class="lic-proj-row" onclick="_bpToggle(this,'${safeKey}')" style="cursor:pointer"
-      onmouseover="this.style.background='var(--bg-2)'" onmouseout="this.style.background=''">
-      <td style="padding-left:14px;font-weight:600"><span class="lic-expand" style="font-size:9px;margin-right:6px;display:inline-block;transition:transform 0.15s">▶</span>${esc(pVal)}</td>
-      <td style="text-align:right;font-weight:600">${totalSeats}</td>
-      ${_bpShowPlan   ? '<td style="color:var(--text-3)">—</td>' : ''}
-      ${_bpShowExpiry ? '<td style="text-align:right;color:var(--text-3)">—</td>' : ''}
-      ${_bpShowMemo   ? '<td style="color:var(--text-3)">—</td>' : ''}
+    // project header row — no expand, just a separator/label
+    bodyRows += `<tr>
+      <td colspan="${2 + 1 + (_bpShowExpiry?1:0) + (_bpShowMemo?1:0)}"
+        style="padding:7px 14px;font-weight:600;background:var(--bg-2,#F8F8F6);font-size:12px;border-bottom:0.5px solid var(--border-md)">
+        ${esc(proj)} <span style="font-weight:400;color:var(--text-2);margin-left:6px">${totalSeats} seats total</span>
+      </td>
     </tr>`;
 
-    // Group child rows by key
+    // group child rows by license+plan+expiry key
     const grouped = {};
     rows.forEach(l => {
       const k = _bpGroupKey(l);
@@ -548,14 +558,13 @@ function _bpRenderTable() {
     });
 
     Object.values(grouped).forEach(g => {
-      const secLabel = _bpGroupMode === 'project' ? g.name : (g.project || '(ไม่ระบุ)');
       const expiryStr = g.expiry ? new Date(g.expiry).toLocaleDateString('th-TH',{year:'numeric',month:'short'}) : '—';
-      bodyRows += `<tr class="lic-sub-row" data-bp-parent="${safeKey}" style="display:none">
-        <td style="padding-left:28px;font-size:12px;color:var(--text-2);background:var(--bg-2,#F8F8F6)">${esc(secLabel)}</td>
-        <td style="text-align:right;font-size:12px;background:var(--bg-2,#F8F8F6)">${g.seats}</td>
-        ${_bpShowPlan   ? `<td style="font-size:12px;background:var(--bg-2,#F8F8F6)">${esc(g.plan)||'<span style="color:var(--text-3)">—</span>'}</td>` : ''}
-        ${_bpShowExpiry ? `<td style="text-align:right;font-size:12px;background:var(--bg-2,#F8F8F6)">${expiryStr}</td>` : ''}
-        ${_bpShowMemo   ? `<td style="font-size:11px;color:var(--text-2);background:var(--bg-2,#F8F8F6)">${[...g.memos].join(', ')||'manual'}</td>` : ''}
+      bodyRows += `<tr onmouseover="this.style.background='var(--bg-2)'" onmouseout="this.style.background=''">
+        <td style="padding-left:28px;font-size:13px">${esc(g.name)}</td>
+        <td style="text-align:right">${g.seats}</td>
+        <td style="font-size:12px;color:var(--text-2)">${esc(g.plan) || '<span style="color:var(--text-3)">—</span>'}</td>
+        ${_bpShowExpiry ? `<td style="text-align:right;font-size:12px">${expiryStr}</td>` : ''}
+        ${_bpShowMemo   ? `<td style="font-size:11px;color:var(--text-2)">${[...g.memos].join(', ')||'manual'}</td>` : ''}
       </tr>`;
     });
   });
@@ -563,7 +572,7 @@ function _bpRenderTable() {
   bodyRows += `<tr style="font-weight:600;background:var(--bg-2,#F8F8F6);border-top:0.5px solid var(--border-md)">
     <td style="padding-left:14px">Total</td>
     <td style="text-align:right">${grandTotal}</td>
-    ${_bpShowPlan   ? '<td></td>' : ''}
+    <td></td>
     ${_bpShowExpiry ? '<td></td>' : ''}
     ${_bpShowMemo   ? '<td></td>' : ''}
   </tr>`;
@@ -575,13 +584,59 @@ function _bpRenderTable() {
   </div>`;
 }
 
-function _bpToggle(row, key) {
-  const expanded = row.classList.toggle('lic-proj-expanded');
-  const arrow = row.querySelector('.lic-expand');
-  if (arrow) arrow.style.transform = expanded ? 'rotate(90deg)' : '';
-  document.querySelectorAll(`.lic-sub-row[data-bp-parent="${key}"]`).forEach(r => {
-    r.style.display = expanded ? 'table-row' : 'none';
+// ── By License: matrix (license+plan rows × project columns) ─
+function _bpRenderMatrix(wrap, filtered) {
+  const projects = [...new Set(filtered.map(l => l.project || '(ไม่ระบุ)'))].sort();
+
+  // build rows: unique license + plan combos
+  const rowMap = {};
+  filtered.forEach(l => {
+    const k = `${l.name}||${l.plan||''}`;
+    if (!rowMap[k]) rowMap[k] = { name: l.name, plan: l.plan||'', byProj: {}, memos: new Set(), total: 0 };
+    const proj = l.project || '(ไม่ระบุ)';
+    rowMap[k].byProj[proj] = (rowMap[k].byProj[proj]||0) + (l.seats||1);
+    rowMap[k].total += (l.seats||1);
+    if (l.memoNo) rowMap[k].memos.add(l.memoNo);
   });
+
+  const matrixRows = Object.values(rowMap).sort((a,b) => a.name.localeCompare(b.name) || a.plan.localeCompare(b.plan));
+  const grandTotal = matrixRows.reduce((s,r) => s+r.total, 0);
+
+  const head = `<thead><tr>
+    <th style="padding-left:14px">License</th>
+    <th>Plan</th>
+    ${projects.map(p=>`<th style="text-align:right;white-space:nowrap">${esc(p)}</th>`).join('')}
+    <th style="text-align:right">Total</th>
+    <th>Memo(s)</th>
+  </tr></thead>`;
+
+  const bodyRows = matrixRows.map(r => `<tr onmouseover="this.style.background='var(--bg-2)'" onmouseout="this.style.background=''">
+    <td style="padding-left:14px;font-weight:500">${esc(r.name)}</td>
+    <td style="font-size:12px;color:var(--text-2)">${esc(r.plan)||'<span style="color:var(--text-3)">—</span>'}</td>
+    ${projects.map(p => r.byProj[p]
+      ? `<td style="text-align:right">${r.byProj[p]}</td>`
+      : `<td style="text-align:right;color:var(--text-3)">—</td>`
+    ).join('')}
+    <td style="text-align:right;font-weight:500">${r.total}</td>
+    <td style="font-size:11px;color:var(--text-2)">${[...r.memos].join(', ')||'manual'}</td>
+  </tr>`).join('');
+
+  const totalRow = `<tr style="font-weight:600;background:var(--bg-2,#F8F8F6);border-top:0.5px solid var(--border-md)">
+    <td style="padding-left:14px">Total</td>
+    <td></td>
+    ${projects.map(p => {
+      const t = matrixRows.reduce((s,r) => s+(r.byProj[p]||0), 0);
+      return `<td style="text-align:right">${t||'—'}</td>`;
+    }).join('')}
+    <td style="text-align:right">${grandTotal}</td>
+    <td></td>
+  </tr>`;
+
+  wrap.innerHTML = `<div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
+    <table class="hist-table" style="min-width:500px">
+      ${head}<tbody>${bodyRows}${totalRow}</tbody>
+    </table>
+  </div>`;
 }
 
 // ── TAB 3: USERS ─────────────────────────────────────────
