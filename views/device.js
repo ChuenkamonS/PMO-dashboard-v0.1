@@ -65,11 +65,14 @@ async function loadDevicesAsync() {
     try {
       const rows = await supaFetch('devices', 'GET', null, '?order=created_at.desc&limit=500');
       _devCache = (rows || []).map(dbToDevice);
-      try { localStorage.setItem(DEVICE_KEY, JSON.stringify(_devCache)); } catch(e) {}
       return _devCache;
-    } catch(e) { console.warn('Supabase devices read failed', e.message); }
+    } catch(e) {
+      console.warn('Supabase devices read failed', e.message);
+      if (_devCache) return _devCache;
+    }
   }
-  return loadDevices();
+  // Offline fallback
+  try { const d = JSON.parse(localStorage.getItem(DEVICE_KEY)||'[]'); return Array.isArray(d)?d:[]; } catch(e) { return []; }
 }
 
 async function saveDeviceAsync(data) {
@@ -86,16 +89,17 @@ async function saveDeviceAsync(data) {
         const row = deviceToDb(data);
         delete row.id;
         const result = await supaFetch('devices', 'POST', row, '?select=id');
-        // Store the Supabase-generated id back
+        // Store the Supabase-generated id back in cache
         if (result?.[0]?.id) {
-          const allDevs = loadDevices();
-          const i2 = allDevs.findIndex(d => String(d.id) === String(data.id));
-          if (i2 >= 0) { allDevs[i2]._supaId = result[0].id; storeDevices(allDevs); }
+          if (_devCache) {
+            const i2 = _devCache.findIndex(d => String(d.id) === String(data.id));
+            if (i2 >= 0) _devCache[i2]._supaId = result[0].id;
+          }
         }
       } else {
         await supaFetch('devices', 'PATCH', deviceToDb(data), `?id=eq.${data._supaId}`);
       }
-      _devCache = null;
+      // do NOT null cache here — cache is already up to date from storeDevices above
     } catch(e) { console.warn('Supabase device save failed', e.message); }
   }
 }
@@ -103,7 +107,7 @@ async function saveDeviceAsync(data) {
 async function deleteDeviceAsync(id) {
   const device = loadDevices().find(d => String(d.id) === String(id));
   storeDevices(loadDevices().filter(d => String(d.id) !== String(id)));
-  _devCache = null;
+  // cache already updated by storeDevices
   if (await checkSupa()) {
     try {
       // devices table uses BIGINT id — use _supaId stored after INSERT
@@ -114,7 +118,9 @@ async function deleteDeviceAsync(id) {
 }
 
 function loadDevices() {
-  if (_devCache !== null) return _devCache;
+  // Prefer in-memory cache (populated from Supabase by loadDevicesAsync)
+  if (_devCache !== null && _devCache.length > 0) return _devCache;
+  // Offline fallback: localStorage
   try {
     const d = JSON.parse(localStorage.getItem(DEVICE_KEY) || '[]');
     if (Array.isArray(d)) {
@@ -126,6 +132,7 @@ function loadDevices() {
 }
 function storeDevices(devices) {
   _devCache = Array.isArray(devices) ? devices : [];
+  // localStorage as offline backup only
   try { localStorage.setItem(DEVICE_KEY, JSON.stringify(_devCache)); } catch(e) {}
 }
 function nextDeviceId() {
@@ -304,9 +311,7 @@ async function markArrived(poId, qty, serialNumbers = []) {
     devices.push(device);
     newDevices.push(device);
   }
-  storeDevices(devices); // sync save to localStorage first
-  _devCache = null;
-
+  storeDevices(devices); // updates _devCache directly
   // Async push to Supabase in background
   newDevices.forEach(d => saveDeviceAsync(d).catch(e => console.warn('Device save failed', e)));
 
@@ -932,8 +937,8 @@ function submitMarkArrived() {
   markArrived(poId, qty, serials).then(() => {
     // Render from local cache immediately — don't re-fetch from Supabase
     // (async save is in-flight but local state is already updated)
-    _poCache = null; // clear cache so loadPurchaseOrders reads fresh localStorage
-    _devCache = null;
+    _poCache = null; // clear PO cache so loadPurchaseOrders reads fresh
+    // _devCache stays intact — storeDevices keeps it updated
     _renderPOTable();
     _renderDeviceTable();
   });
