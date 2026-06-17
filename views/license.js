@@ -195,7 +195,15 @@ function getLicenseStatus(lic) {
 
 // ── Main render entry point ───────────────────────────────
 function renderLicense() {
-  loadManualLicensesAsync()
+  // Load all async settings first, then render
+  Promise.all([
+    loadManualLicensesAsync(),
+    _loadLicSettingsAsync().then(d => {
+      // Sync FX rate from Supabase into localStorage if present
+      if (d.fxRate) try { localStorage.setItem('orbit-lic-fx-rate', String(d.fxRate)); } catch(e) {}
+    }).catch(() => {}),
+    _loadLicUserOverridesAsync().catch(() => {}),
+  ])
     .then(() => _renderLicTab(_licCurrentTab))
     .catch(() => _renderLicTab(_licCurrentTab));
 }
@@ -565,7 +573,6 @@ function _renderLicUsers() {
           <th style="padding-left:14px">Email</th>
           <th>Project</th>
           ${allLicCols.map(c=>`<th style="text-align:center;white-space:nowrap">${esc(c)}</th>`).join('')}
-          <th>Memo</th>
         </tr></thead>
         <tbody id="lic-usr-body"></tbody>
       </table>
@@ -607,18 +614,84 @@ function _renderLicUsersRows() {
     });
   });
 
-  tbody.innerHTML = Object.values(emailMap).map(r => {
+  // Load manual overrides from localStorage
+  const overrides = _getLicUserOverrides();
+  const mergedArr = Object.values(emailMap);
+
+  tbody.innerHTML = mergedArr.map(r => {
     const initials = r.email.substring(0, 2).toUpperCase();
+    const key = `${r.email}|${r.project}`;
     return `<tr>
       <td style="padding-left:14px">
         <span style="width:26px;height:26px;border-radius:50%;background:var(--blue-50,#E6F1FB);display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:var(--blue);margin-right:6px;vertical-align:middle">${initials}</span>
         ${esc(r.email)}
       </td>
       <td style="font-size:12px">${esc(r.project)}</td>
-      ${allLicCols.map(c => `<td style="text-align:center;font-size:13px">${r.licenses[c] ? '✅' : '<span style="color:var(--text-3)">—</span>'}</td>`).join('')}
-      <td style="font-size:11px;color:var(--text-2)">${[...r.memos].join(', ')}</td>
+      ${allLicCols.map(c => {
+        const fromMemo = r.licenses[c] === true;
+        const ovKey    = `${key}|${c}`;
+        const override = overrides[ovKey]; // true = force on, false = force off, undefined = use memo
+        const active   = override !== undefined ? override : fromMemo;
+        const icon     = active ? '✅' : '<span style="color:var(--text-3)">—</span>';
+        const btnStyle = `font-size:10px;padding:2px 5px;border-radius:3px;cursor:pointer;border:0.5px solid var(--border);background:var(--surface);color:var(--text-2);margin-left:4px;opacity:0.6`;
+        const btnTitle = override !== undefined ? 'แก้ไขด้วยตนเอง (คลิกเพื่อรีเซ็ต)' : 'คลิกเพื่อ override';
+        const btnIcon  = override !== undefined ? '↩' : '✎';
+        return `<td style="text-align:center;font-size:13px">
+          ${icon}
+          <button title="${btnTitle}" style="${btnStyle}"
+            onclick="_toggleLicUserOverride('${esc(ovKey)}', ${active})">${btnIcon}</button>
+        </td>`;
+      }).join('')}
     </tr>`;
   }).join('');
+}
+
+
+// ── License Users — manual override helpers ─────────────
+const _LIC_USR_OV_KEY = 'orbit-lic-user-overrides-v1';
+
+async function _loadLicUserOverridesAsync() {
+  if (await checkSupa()) {
+    try {
+      const rows = await supaFetch('settings', 'GET', null, '?id=eq.lic-user-overrides');
+      if (rows && rows[0]?.data) {
+        const d = rows[0].data;
+        try { localStorage.setItem(_LIC_USR_OV_KEY, JSON.stringify(d)); } catch(e) {}
+        return d;
+      }
+    } catch(e) { console.warn('_loadLicUserOverridesAsync failed', e.message); }
+  }
+  return _getLicUserOverrides();
+}
+
+async function _saveLicUserOverridesAsync(data) {
+  try { localStorage.setItem(_LIC_USR_OV_KEY, JSON.stringify(data)); } catch(e) {}
+  if (await checkSupa()) {
+    try {
+      await supaFetch('settings', 'POST', { id: 'lic-user-overrides', data }, '?on_conflict=id');
+    } catch(e) { console.warn('_saveLicUserOverridesAsync failed', e.message); }
+  }
+}
+
+function _getLicUserOverrides() {
+  try { return JSON.parse(localStorage.getItem(_LIC_USR_OV_KEY) || '{}'); } catch(e) { return {}; }
+}
+function _saveLicUserOverrides(data) {
+  try { localStorage.setItem(_LIC_USR_OV_KEY, JSON.stringify(data)); } catch(e) {}
+  // Async sync to Supabase in background
+  _saveLicUserOverridesAsync(data).catch(e => console.warn('License override sync failed', e));
+}
+function _toggleLicUserOverride(ovKey, currentActive) {
+  const overrides = _getLicUserOverrides();
+  if (overrides[ovKey] !== undefined) {
+    // Reset to memo value
+    delete overrides[ovKey];
+  } else {
+    // Override: flip current value
+    overrides[ovKey] = !currentActive;
+  }
+  _saveLicUserOverrides(overrides);
+  _renderLicUsersRows();
 }
 
 // ── TAB 4: OTHER LICENSE ─────────────────────────────────
@@ -742,12 +815,47 @@ function _renderLicOtherRows() {
   };
 }
 
-// ── FX rate persistence ──────────────────────────────────
+// ── FX rate persistence — Supabase + localStorage ────────
+const _LIC_SETTINGS_KEY = 'orbit-lic-settings-v1';
+
+async function _loadLicSettingsAsync() {
+  if (await checkSupa()) {
+    try {
+      const rows = await supaFetch('settings', 'GET', null, '?id=eq.lic-settings');
+      if (rows && rows[0]?.data) {
+        const d = rows[0].data;
+        try { localStorage.setItem(_LIC_SETTINGS_KEY, JSON.stringify(d)); } catch(e) {}
+        return d;
+      }
+    } catch(e) { console.warn('_loadLicSettingsAsync failed', e.message); }
+  }
+  try { return JSON.parse(localStorage.getItem(_LIC_SETTINGS_KEY) || '{}'); } catch(e) { return {}; }
+}
+
+async function _saveLicSettingAsync(key, val) {
+  let d = {};
+  try { d = JSON.parse(localStorage.getItem(_LIC_SETTINGS_KEY) || '{}'); } catch(e) {}
+  d[key] = val;
+  try { localStorage.setItem(_LIC_SETTINGS_KEY, JSON.stringify(d)); } catch(e) {}
+  if (await checkSupa()) {
+    try {
+      await supaFetch('settings', 'POST', { id: 'lic-settings', data: d }, '?on_conflict=id');
+    } catch(e) { console.warn('_saveLicSettingAsync failed', e.message); }
+  }
+}
+
 function _getLicFxRate() {
-  try { return Number(localStorage.getItem('orbit-lic-fx-rate')) || 35; } catch(e) { return 35; }
+  try {
+    const d = JSON.parse(localStorage.getItem(_LIC_SETTINGS_KEY) || '{}');
+    return Number(d.fxRate || localStorage.getItem('orbit-lic-fx-rate')) || 35;
+  } catch(e) { return 35; }
 }
 function _saveLicFxRate(val) {
-  try { localStorage.setItem('orbit-lic-fx-rate', String(Number(val)||35)); } catch(e) {}
+  const n = Number(val) || 35;
+  // Legacy key for backward compat
+  try { localStorage.setItem('orbit-lic-fx-rate', String(n)); } catch(e) {}
+  // Async sync to Supabase
+  _saveLicSettingAsync('fxRate', n).catch(e => console.warn('FX rate sync failed', e));
 }
 
 // ── KPI helper ───────────────────────────────────────────
