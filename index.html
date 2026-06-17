@@ -676,6 +676,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
 .cost-stab.active { background:#FFFFFF; color:#185FA5; font-weight:600; position:relative; top:1px; }
 .cost-stab.active::after { content:""; position:absolute; left:-1px; right:-1px; bottom:-2px; height:2px; background:#FFFFFF; }
 .cost-tab-panel { border:1px solid rgba(0,0,0,0.12); border-top:none; border-radius:0 6px 6px 6px; padding:14px; background:#FFFFFF; margin-bottom:14px; }
+.lic-tab-btn{transition:color .15s}.lic-tab-btn.lic-tab-active{color:var(--blue)!important;border-bottom-color:var(--blue)!important}.lic-expand{display:inline-block;transition:transform .15s;margin-right:4px;font-size:10px;color:var(--text-3)}
 </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous"></script>
 </head>
@@ -1514,70 +1515,28 @@ svg.icon { display: inline-block; vertical-align: middle; }
       <!-- ════ LICENSE ════ -->
       <div id="view-license" class="view">
 
-        <!-- Metric cards -->
-        <div class="metric-row" style="grid-template-columns:repeat(5,1fr);margin-bottom:14px">
-          <div class="metric-card"><div class="metric-label">Active Licenses</div><div class="metric-val" id="lic-active" style="color:var(--blue)">0</div><div class="metric-sub" id="lic-active-cost"></div></div>
-          <div class="metric-card"><div class="metric-label">Expiring Soon (≤30d)</div><div class="metric-val" id="lic-expiring" style="color:var(--amber)">0</div><div class="metric-sub">ต้องต่ออายุเร็วๆ นี้</div></div>
-          <div class="metric-card"><div class="metric-label">Expired</div><div class="metric-val" id="lic-expired" style="color:var(--red)">0</div><div class="metric-sub">หมดอายุแล้ว</div></div>
-          <div class="metric-card"><div class="metric-label">ค่าใช้จ่าย/เดือน</div><div class="metric-val" id="lic-monthly" style="font-size:18px;margin-top:4px">฿0</div><div class="metric-sub">รวมทุก active</div></div>
-          <div class="metric-card"><div class="metric-label">ค่าใช้จ่าย/ปี</div><div class="metric-val" id="lic-annual" style="font-size:18px;margin-top:4px">฿0</div><div class="metric-sub" id="lic-renewal-3m"></div></div>
-        </div>
-
-
-        <!-- Search & Filters + Add button -->
-        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
-          <input type="text" id="lic-search" placeholder="🔍 ค้นหา Software, Project, Owner..."
-            style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px;outline:none"
-            oninput="renderLicense()">
-          <select id="lic-filter-status" onchange="renderLicense()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกสถานะ</option>
-            <option value="active">Active</option>
-            <option value="expiring">Expiring (≤30d)</option>
-            <option value="expiring-7">≤ 7 วัน</option>
-            <option value="expiring-15">≤ 15 วัน</option>
-            <option value="expiring-30">≤ 30 วัน</option>
-            <option value="expired">Expired</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-          <select id="lic-filter-project" onchange="renderLicense()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกโครงการ</option>
-          </select>
-          <select id="lic-sort" onchange="renderLicense()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="expiry-asc">หมดอายุใกล้สุด</option>
-            <option value="cost-desc">ราคา มาก→น้อย</option>
-            <option value="seats-desc">Seats มาก→น้อย</option>
-            <option value="purchase-desc">ซื้อล่าสุด</option>
-          </select>
-          <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="downloadTemplate('license')" title="Download Template">⬇ Template</button>
-          <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="importBulk('license')" title="Import from Excel">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Import Excel
+        <!-- Tab bar -->
+        <div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:16px">
+          <button class="lic-tab-btn lic-tab-active" data-tab="memo-index" onclick="switchLicTab('memo-index')"
+            style="font-size:12px;font-weight:500;padding:8px 16px;border:none;background:transparent;cursor:pointer;color:var(--text-1);border-bottom:2px solid var(--blue)">
+            📄 Memo Index
           </button>
-          <button class="btn-primary" style="font-size:12px;padding:6px 14px" onclick="openLicenseModal()">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add License
+          <button class="lic-tab-btn" data-tab="by-project" onclick="switchLicTab('by-project')"
+            style="font-size:12px;font-weight:500;padding:8px 16px;border:none;background:transparent;cursor:pointer;color:var(--text-2);border-bottom:2px solid transparent">
+            📁 By Project
+          </button>
+          <button class="lic-tab-btn" data-tab="users" onclick="switchLicTab('users')"
+            style="font-size:12px;font-weight:500;padding:8px 16px;border:none;background:transparent;cursor:pointer;color:var(--text-2);border-bottom:2px solid transparent">
+            👥 Users
+          </button>
+          <button class="lic-tab-btn" data-tab="other" onclick="switchLicTab('other')"
+            style="font-size:12px;font-weight:500;padding:8px 16px;border:none;background:transparent;cursor:pointer;color:var(--text-2);border-bottom:2px solid transparent">
+            🗂 Other
           </button>
         </div>
 
-        <!-- Registry table -->
-        <div class="card" style="padding:0;overflow:hidden">
-          <table class="hist-table">
-            <thead><tr>
-              <th style="width:15%;padding-left:16px">Software</th>
-              <th style="width:7%">Seats</th>
-              <th style="width:9%">฿/เดือน</th>
-              <th style="width:9%">Owner</th>
-              <th style="width:8%">Department</th>
-              <th style="width:8%">โครงการ</th>
-              <th style="width:8%">วันที่ซื้อ</th>
-              <th style="width:8%">หมดอายุ</th>
-              <th style="width:9%;text-align:center">สถานะ</th>
-              <th style="width:7%;text-align:center">Source</th>
-              <th style="width:8%;text-align:center">Actions</th>
-            </tr></thead>
-            <tbody id="lic-table-body"></tbody>
-          </table>
-        </div>
+        <!-- Tab content (rendered by JS) -->
+        <div id="lic-content"></div>
 
       </div>
 
