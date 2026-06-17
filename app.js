@@ -412,6 +412,11 @@ function toggleMemoSub(el) {
 // ── PDF ──
 function renderMemoPdf(data) {
   // Use server CSS classes (.mp-*) — injected by PDF server with THSarabun font
+  // Auto-derive data.to from last approver title if not set
+  if(!data.to && data.approvers && data.approvers.length > 0) {
+    data = Object.assign({}, data, { to: data.approvers[data.approvers.length-1].title || '' });
+  }
+
   function fmtDate(v) {
     if(!v || v === '-') return '';
     // Already a Thai full date string e.g. "17 มิถุนายน 2569" — return as-is
