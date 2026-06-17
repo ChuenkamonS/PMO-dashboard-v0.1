@@ -94,19 +94,14 @@ async function loadMemosAsync() {
   if(await checkSupa()) {
     try {
       const rows = await supaFetch('memos', 'GET', null, '?order=created_at.desc&limit=500');
-      const fromSupa = (rows||[]).map(dbToMemo);
-      // Merge with localStorage: localStorage wins for memos not yet synced to Supabase
-      const lsMemos = loadMemos();
-      const supaIds = new Set(fromSupa.map(m => m.memoNo));
-      const localOnly = lsMemos.filter(m => !supaIds.has(m.memoNo));
-      _memCache = [...fromSupa, ...localOnly];
-      try { localStorage.setItem(MEMO_KEY, JSON.stringify(_memCache)); } catch(e) {}
+      _memCache = (rows||[]).map(dbToMemo);
       return _memCache;
     } catch(e) {
-      console.warn('Supabase read failed, fallback to localStorage');
+      console.warn('Supabase read failed, using cache');
+      if (_memCache) return _memCache;
     }
   }
-  // localStorage fallback
+  // Offline fallback: localStorage
   try { const p = JSON.parse(localStorage.getItem(MEMO_KEY)||'[]'); return Array.isArray(p)?p:[]; }
   catch(e) { return []; }
 }
@@ -121,11 +116,17 @@ async function saveMemoAsync(data) {
     try {
       const db = memoToDb(saved);
       await supaFetch('memos', 'POST', db, '?on_conflict=memo_no');
-      _memCache = null; // invalidate cache
+      // update cache directly — no need to re-fetch
+      if (_memCache) {
+        const ci = _memCache.findIndex(m => m.memoNo === saved.memoNo);
+        if (ci >= 0) _memCache[ci] = saved; else _memCache.unshift(saved);
+      } else {
+        _memCache = [saved];
+      }
       return saved;
     } catch(e) { console.warn('Supabase save failed', e.message); }
   }
-  // localStorage fallback
+  // Offline fallback: localStorage
   const memos = loadMemos();
   const idx = memos.findIndex(m => m.memoNo === data.memoNo);
   if(idx>=0) memos[idx]=saved; else memos.push(saved);
@@ -134,18 +135,9 @@ async function saveMemoAsync(data) {
 }
 
 async function updateMemoStatusAsync(memoNo, status, extra={}) {
-  // Always read fresh from localStorage first — never use stale cache
-  _memCache = null;
-  const freshMemos = loadMemos();
+  // Read fresh from Supabase (source of truth)
+  const freshMemos = await loadMemosAsync();
   let memo = freshMemos.find(m => m.memoNo === memoNo);
-
-  // Fall back to Supabase only if truly not in localStorage
-  if (!memo) {
-    try {
-      const supaList = await loadMemosAsync();
-      memo = supaList.find(m => m.memoNo === memoNo);
-    } catch(e) {}
-  }
   if (!memo) return null;
 
   // ── Terminal state guard ──
@@ -218,10 +210,11 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
     } catch(e) { console.warn('Supabase patch failed', e.message); }
   }
 
-  // Update localStorage first, then render
-  const allMemos = loadMemos();
-  const idx = allMemos.findIndex(m => m.memoNo === memoNo);
-  if (idx >= 0) { allMemos[idx] = updated; storeMemos(allMemos); }
+  // Update in-memory cache
+  if (_memCache) {
+    const idx = _memCache.findIndex(m => m.memoNo === memoNo);
+    if (idx >= 0) _memCache[idx] = updated;
+  }
 
   // Side effects on completion
   if (updated.status === 'completed') {
@@ -301,21 +294,30 @@ function table(headers, rows, numericIndexes=[], centerIndexes=[]) {
 }
 
 // ── Storage ──
-// MEMO_KEY defined in Supabase layer above
+// _memCache is the single source of truth — populated from Supabase on app init
+// localStorage kept only as offline fallback
 let _memMemos = [];
 function canUseLocalStorage() {
   try { localStorage.setItem('_t','1'); localStorage.removeItem('_t'); return true; }
   catch(e) { return false; }
 }
 const HAS_LS = canUseLocalStorage();
+
 function loadMemos() {
-  if(!HAS_LS) return _memMemos;
+  // Prefer in-memory cache (populated from Supabase by loadMemosAsync on app init)
+  if (_memCache && _memCache.length > 0) return _memCache;
+  // Offline fallback: localStorage
+  if (!HAS_LS) return _memMemos;
   try { const p = JSON.parse(localStorage.getItem(MEMO_KEY)||'[]'); return Array.isArray(p)?p:[]; }
   catch(e) { return _memMemos; }
 }
+
 function storeMemos(memos) {
   _memMemos = Array.isArray(memos) ? memos : [];
-  if(!HAS_LS) return;
+  // Always keep in-memory cache in sync
+  _memCache = _memMemos;
+  // localStorage as offline backup only
+  if (!HAS_LS) return;
   try { localStorage.setItem(MEMO_KEY, JSON.stringify(_memMemos)); }
   catch(e) { console.warn('localStorage write failed'); }
 }
@@ -336,7 +338,7 @@ function setNextMemoNo() {
   if(el && !el.value.trim()) el.value = nextMemoNo();
 }
 function saveMemo(data) {
-  // Sync version for backward compat — also triggers async save to Supabase
+  // Sync version for backward compat — pushes to Supabase async in background
   const now = new Date().toISOString();
   const memos = loadMemos();
   const idx = memos.findIndex(m => m.memoNo === data.memoNo);
@@ -348,12 +350,13 @@ function saveMemo(data) {
     createdAt:   existing?.createdAt || data.createdAt || now,
     updatedAt:   now,
   };
-  // Set submittedAt after spread so it always wins over data.submittedAt=null
   if (!saved.submittedAt && saved.status !== 'draft') {
     saved.submittedAt = existing?.submittedAt || now;
   }
-  if(idx>=0) memos[idx]=saved; else memos.push(saved);
-  storeMemos(memos);
+  // Update in-memory cache immediately
+  if (!_memCache) _memCache = [];
+  const ci = _memCache.findIndex(m => m.memoNo === saved.memoNo);
+  if (ci >= 0) _memCache[ci] = saved; else _memCache.unshift(saved);
   // Async push to Supabase in background
   saveMemoAsync(saved).catch(e => console.warn('Background Supabase save failed', e));
   return saved;
