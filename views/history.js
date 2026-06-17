@@ -403,13 +403,13 @@ function hideRejectionPopover() {
 function exportHistoryCsv() {
   const memos = filteredHistoryMemos();
   if (!memos.length) { alert('ไม่มีข้อมูลสำหรับ Export'); return; }
-  const headers = ['Memo No', 'Type', 'Project', 'Amount', 'Status', 'Requester', 'Approver', 'Created', 'Updated', 'Duration', 'Rejection Reason', 'Subject'];
+  const headers = ['Memo No', 'Type', 'Project', 'Amount', 'Status', 'Requester', 'Approver', 'Created', 'Updated', 'Rejection Reason', 'Subject'];
   const rows = memos.map(m => [
     m.memoNo, String(m.type || '').toUpperCase(), m.project || '',
     Number(m.total) || 0, histStatusLabel(m),
     histRequesterName(m), histApproverName(m),
     m.createdAt || '', histActivityAt(m) || '',
-    formatApprovalDuration(m), m.rejectionReason || '', m.subject || ''
+    m.rejectionReason || '', m.subject || ''
   ]);
   const csv = [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
   const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -494,7 +494,6 @@ function renderHistoryMemos() {
       <td class="hist-cell-clip" title="${esc(histApproverName(memo))}">${esc(histApproverName(memo))}</td>
       <td class="hist-dt">${esc(shortDate(memo.createdAt))}</td>
       <td class="hist-dt">${esc(shortDate(histActivityAt(memo)))}</td>
-      <td class="hist-dt">${esc(formatApprovalDuration(memo))}</td>
       <td>${rej ? `<button type="button" class="hist-reject-btn" data-hist-action="reject-reason" data-memo="${esc(memo.memoNo)}" title="${esc(rej)}">${esc(rejShort)}</button>` : '<span style="color:var(--text-3)">—</span>'}</td>
       <td style="text-align:center" onclick="event.stopPropagation()">${buildBudgetTagCell(memo)}</td>
       <td style="text-align:center" onclick="event.stopPropagation()">${histActionButtons(memo)}</td>
