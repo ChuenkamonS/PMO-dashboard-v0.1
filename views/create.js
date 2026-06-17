@@ -465,11 +465,10 @@ function collectMemoData() {
     const inp = document.querySelectorAll('#fs-ent input');
     data.entClient   = inp[0]?.value.trim() || '';
     data.entDate     = dateInput(inp[1]?.value) || '';
-    data.entTime     = inp[2]?.value || '';
-    data.entPlace    = inp[3]?.value.trim() || '';
-    data.entPeople   = inp[4]?.value || '';
-    data.total       = Number(inp[5]?.value)||0;
-    data.amountWords = inp[6]?.value.trim()||'';
+    data.entPlace    = inp[2]?.value.trim() || '';
+    data.entPeople   = inp[3]?.value || '';
+    data.total       = Number(inp[4]?.value)||0;
+    data.amountWords = inp[5]?.value.trim()||'';
   }
   if(data.type==='dep') {
     const start    = document.getElementById('dep-start')?.value || '';
@@ -517,6 +516,8 @@ function validateMemo(data) {
 
   // ── Common fields ──
   if(!data.type) missing.push('ประเภท Memo');
+  if(!val('#f-memo-no')) missing.push('เลขที่ Memo (บังคับกรอก)');
+  if(!val('#f-date')) missing.push('วันที่ Memo');
   if(!val('#f-project')) missing.push('โครงการ');
   else if(val('#f-project')==='other' && !val('#f-project-other')) missing.push('ชื่อโครงการ');
   if(!data.to) missing.push('เรียน');
@@ -524,7 +525,7 @@ function validateMemo(data) {
   if(!data.reason) missing.push('เหตุผลในการขอ');
 
   // ── Signature fields — use approvers[] array ──
-  if(!data.approvers || data.approvers.length === 0) missing.push('ต้องมี Reviewer อย่างน้อย 1 คน');
+  if(!data.approvers || data.approvers.length < 2) missing.push('ต้องมี Approver อย่างน้อย 2 คน (A1 Reviewer + A2 Final Approver)');
   else {
     if(!data.approvers[0]?.name || data.approvers[0].name === '-') missing.push('ชื่อ Reviewer (A1)');
     if(!data.approvers[0]?.title || data.approvers[0].title === '-') missing.push('ตำแหน่ง Reviewer (A1)');
@@ -542,6 +543,8 @@ function validateMemo(data) {
       if(!(parseFloat(r.querySelector('.sl-price')?.value) > 0)) missing.push(`Software แถว ${i+1}: ราคา/เดือน`);
       if(!(parseInt(r.querySelector('.sl-mo')?.value) > 0))    missing.push(`Software แถว ${i+1}: จำนวนเดือน`);
       if(!(parseInt(r.querySelector('.sl-qty')?.value) > 0))   missing.push(`Software แถว ${i+1}: จำนวน (Qty)`);
+      if(!r.querySelector('.sl-start')?.value) missing.push(`Software แถว ${i+1}: วันเริ่มต้น (บังคับ)`);
+      if(!r.querySelector('.sl-end')?.value)   missing.push(`Software แถว ${i+1}: วันสิ้นสุด (บังคับ)`);
     });
     const amtWords = document.querySelector('#fs-sl .form-grid .fg:nth-child(2) input')?.value?.trim();
     if(!amtWords) missing.push('จำนวนเงินเป็นตัวอักษร (SL)');
@@ -570,11 +573,11 @@ function validateMemo(data) {
     if(!(parseFloat(document.getElementById('int-pp')?.value) > 0)) missing.push('วงเงินต่อคน');
     if(!document.getElementById('int-amount-words')?.value?.trim()) missing.push('จำนวนเงินรวมเป็นตัวอักษร');
     if(!Array.from(document.querySelectorAll('.int-name')).some(i => i.value.trim())) missing.push('รายชื่อผู้เข้าร่วม (อย่างน้อย 1 คน)');
-    // Warn if headcount mismatch but don't block
+    // Headcount must match names exactly (mandatory)
     const hc = parseInt(document.getElementById('int-headcount')?.value)||0;
     const ac = Array.from(document.querySelectorAll('.int-name')).filter(i=>i.value.trim()).length;
-    if (hc > 0 && ac !== hc && missing.length === 0) {
-      if (!confirm(`จำนวนผู้เข้าร่วมที่ระบุ ${hc} คน แต่กรอกรายชื่อแล้ว ${ac} คน\nต้องการดำเนินการต่อไหม?`)) return false;
+    if (hc > 0 && ac !== hc) {
+      missing.push(`จำนวนผู้เข้าร่วมที่ระบุ ${hc} คน แต่กรอกรายชื่อแล้ว ${ac} คน — ต้องให้ตรงกัน`);
     }
   }
 
@@ -582,7 +585,20 @@ function validateMemo(data) {
   if(data.type==='ent') {
     const entInp = document.querySelectorAll('#fs-ent input');
     if(!entInp[0]?.value?.trim()) missing.push('ชื่อลูกค้า / บริษัท');
-    if(!entInp[1]?.value?.trim()) missing.push('วันที่ (ENT)');
+    if(!entInp[1]?.value?.trim()) missing.push('วันที่จัดงาน');
+    if(!entInp[2]?.value?.trim()) missing.push('สถานที่จัดงาน');
+    if(!(parseInt(entInp[3]?.value) > 0))    missing.push('จำนวนผู้เข้าร่วม');
+    if(!(parseFloat(entInp[4]?.value) > 0))  missing.push('วงเงินรวม');
+    if(!entInp[5]?.value?.trim())             missing.push('จำนวนเงินเป็นตัวอักษร (ENT)');
+  }
+
+  // ── DEP ──
+  if(data.type==='dep') {
+    if(!document.getElementById('dep-location')?.value?.trim()) missing.push('สถานที่ปฏิบัติงาน');
+    if(!document.getElementById('dep-start')?.value)  missing.push('วันที่ Deploy (Start)');
+    if(!document.getElementById('dep-end')?.value)    missing.push('วันที่ Deploy (End)');
+    if(!(parseInt(document.getElementById('dep-emp-count')?.value) > 0)) missing.push('จำนวนพนักงาน');
+    if(!document.getElementById('dep-amount-words')?.value?.trim()) missing.push('จำนวนเงินเป็นตัวอักษร (DEP)');
   }
 
   if(missing.length) { alert('กรุณากรอกข้อมูลให้ครบ:\n\n• '+missing.join('\n• ')); return false; }
@@ -740,8 +756,9 @@ function _approverTitleOpts(selected = '') {
 function initApproverRows() {
   const container = document.getElementById('approver-rows-form');
   if (!container || container.children.length > 0) return;
-  // Start with A1 (required)
-  _appendApproverRow(true);
+  // Start with A1 + A2 (both required, minimum 2)
+  _appendApproverRow(true);   // A1 — Reviewer
+  _appendApproverRow(false);  // A2 — Final Approver
   _updateApproverUI();
 }
 
@@ -756,7 +773,7 @@ function _appendApproverRow(isFirst) {
   const container = document.getElementById('approver-rows-form');
   if (!container) return;
   const idx = container.querySelectorAll('.appr-form-row').length;
-  const label = idx === 0 ? 'A1 — Reviewer (บังคับ)' : `A${idx + 1} — Approver (optional)`;
+  const label = idx === 0 ? 'A1 — Reviewer (บังคับ)' : idx === 1 ? 'A2 — Final Approver (บังคับ)' : `A${idx + 1} — Approver (optional)`;
 
   const row = document.createElement('div');
   row.className = 'appr-form-row';
@@ -782,6 +799,8 @@ function _appendApproverRow(isFirst) {
 }
 
 function rmApproverFormRow(btn) {
+  const count = document.querySelectorAll('#approver-rows-form .appr-form-row').length;
+  if (count <= 2) { alert('ต้องมี Approver อย่างน้อย 2 คน (A1 Reviewer + A2 Final Approver)'); return; }
   btn.closest('.appr-form-row').remove();
   _renumberApproverRows();
   _updateApproverUI();
@@ -790,7 +809,7 @@ function rmApproverFormRow(btn) {
 function _renumberApproverRows() {
   document.querySelectorAll('#approver-rows-form .appr-form-row').forEach((row, i) => {
     const label = row.querySelector('.appr-row-label');
-    if (label) label.textContent = i === 0 ? 'A1 — Reviewer (บังคับ)' : `A${i+1} — Approver (optional)`;
+    if (label) label.textContent = i === 0 ? 'A1 — Reviewer (บังคับ)' : i === 1 ? 'A2 — Final Approver (บังคับ)' : `A${i+1} — Approver (optional)`;
   });
 }
 
@@ -800,6 +819,11 @@ function _updateApproverUI() {
   const label  = document.getElementById('approver-count-label');
   if (addBtn) addBtn.style.display = count >= 3 ? 'none' : '';
   if (label)  label.textContent = `${count} คน (สูงสุด 3 คน)`;
+  // Hide rm button on first 2 rows (mandatory), show only on A3
+  document.querySelectorAll('#approver-rows-form .appr-form-row').forEach((row, i) => {
+    const rmBtn = row.querySelector('.rm-btn');
+    if (rmBtn) rmBtn.style.display = i < 2 ? 'none' : '';
+  });
 }
 
 function onApproverNameChange(sel) {
