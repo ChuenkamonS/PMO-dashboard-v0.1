@@ -146,14 +146,26 @@ function renderPendingContent() {
       <th style="text-align:center">จัดการ</th>
     </tr></thead><tbody>`;
 
-  const rows = memos.map(m => buildPendingRow(m)).join('');
+  window._pendingAllMemos = memos;
+  if (typeof window._pendingVisible === 'undefined') window._pendingVisible = 20;
+  const _pendingSlice = memos.slice(0, window._pendingVisible);
+  const rows = _pendingSlice.map(m => buildPendingRow(m)).join('');
 
   list.innerHTML = `<div class="card" style="padding:0;overflow:hidden">
     <div style="padding:8px 14px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-3)">
-      แสดง ${memos.length} รายการ · คลิกแถวเพื่อดูรายละเอียด
+      แสดง ${Math.min(memos.length, window._pendingVisible||20)} จาก ${memos.length} รายการ · คลิกแถวเพื่อดูรายละเอียด
     </div>
     <div style="overflow-x:auto">${thead}${rows}</tbody></table></div>
   </div>`;
+
+  // Load More button
+  const loadMoreContainer = document.getElementById('pending-load-more');
+  if (loadMoreContainer) {
+    const remaining = (window._pendingAllMemos||[]).length - _pendingVisible;
+    loadMoreContainer.style.display = remaining > 0 ? '' : 'none';
+    loadMoreContainer.querySelector('span').textContent =
+      `Load ${Math.min(remaining, 20)} more (เหลือ ${remaining} รายการ)`;
+  }
 
   list.onclick = function(e) {
     const btn = e.target.closest('[data-action]');
@@ -190,7 +202,7 @@ function buildPendingRow(memo) {
   const actionBtns = canAct
     ? `<button class="btn-approve" data-action="approve" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 7px">✓</button>
        <button class="btn-reject"  data-action="reject"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 7px;margin-left:2px">✕</button>
-       <button class="btn-sm"      data-action="detail"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 6px;margin-left:2px">⊙</button>`
+       <button class="btn-sm"      data-action="detail"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 6px;margin-left:2px">View</button>`
     : `<button class="btn-sm" data-action="detail" data-memo="${esc(memo.memoNo)}" style="font-size:11px;padding:3px 8px">Details</button>
        ${isOwn && isPending ? `<button class="btn-sm" data-action="cancel" data-memo="${esc(memo.memoNo)}" style="font-size:11px;padding:3px 8px;margin-left:4px;color:var(--red)" title="ยกเลิก Memo นี้">✕ Cancel</button>` : ''}`;
 
@@ -683,3 +695,10 @@ function cancelMemo(memoNo) {
 
 function approveMemo(memoNo) { openApproveModal(memoNo); }
 function rejectMemo(memoNo)  { openRejectModal(memoNo); }
+
+// ── Pending Load More ──
+function loadMorePending() {
+  if (typeof _pendingVisible === 'undefined') window._pendingVisible = 20;
+  window._pendingVisible = (_pendingVisible || 20) + 20;
+  renderPendingMemos();
+}
