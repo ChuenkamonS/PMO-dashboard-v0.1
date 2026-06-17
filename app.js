@@ -429,22 +429,46 @@ function renderMemoPdf(data) {
     return `${MONTHS_TH[parseInt(m[2],10)-1]} ${parseInt(m[1])+543}`;
   }
 
+  // ── Authority master table ──
+  // Looks up spending limit by last approver's title and memo type
+  const AUTHORITY_TABLE = {
+    'ประธานเจ้าหน้าที่บริหาร': { sl:2000000, hw:2000000, ent:150000, int:2000000, dep:2000000 },
+    'ผู้อำนวยการโครงการ':     { sl:500000,  hw:500000,  ent:150000, int:500000,  dep:500000  },
+    'ผู้อำนวยการ':             { sl:500000,  hw:500000,  ent:150000, int:500000,  dep:500000  },
+  };
+  function getAuthority(memoType) {
+    const approvers = data.approvers || [];
+    const lastApprover = approvers.length > 0 ? approvers[approvers.length-1] : null;
+    const title = lastApprover?.title || data.approverTitle || '';
+    const row = AUTHORITY_TABLE[title] || AUTHORITY_TABLE['ประธานเจ้าหน้าที่บริหาร'];
+    const limit = row[memoType] || 2000000;
+    return { title: title || 'ประธานเจ้าหน้าที่บริหาร', limit };
+  }
+  function fmtLimit(n) { return (Number(n)||0).toLocaleString('th-TH',{maximumFractionDigits:0}); }
+
+  // ── SL: collect software names from slItems ──
+  const slProgramNames = (data.slItems||[]).filter(it=>it.name&&it.name!=='-').map(it=>it.name);
+  const slProgramStr   = slProgramNames.length ? slProgramNames.join(', ') : 'โปรแกรม';
+
   const typeBody = {
-    sl: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} - บริษัท ออร์บิท ดิจิทัล จำกัด มีความจำเป็นต้องใช้งานโปรแกรม เพื่อพัฒนาโครงการและช่วยทีมพัฒนาสามารถทำงานได้อย่างมีประสิทธิภาพ จึงขออนุมัติงบประมาณเพื่อต่ออายุการใช้งานโปรแกรม ตามรายละเอียดดังต่อไปนี้`,
-    hw: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} - บริษัท ออร์บิท ดิจิทัล จำกัด มีความจำเป็นต้องจัดซื้ออุปกรณ์ Hardware เพื่อสนับสนุนการดำเนินงานของโครงการ จึงขออนุมัติงบประมาณตามรายละเอียดดังต่อไปนี้`,
-    int: `เนื่องด้วยโครงการ ${esc(data.project||'-')} มีความประสงค์จัดกิจกรรม Team Activity ${esc(data.reason||'')} ของพนักงานโครงการ ${esc(data.project||'-')} จึงขออนุมัติงบประมาณตามรายละเอียดดังต่อไปนี้`,
-    ent: `สืบเนื่องจากพนักงานโครงการ ${esc(data.project||'-')} บริษัท ออร์บิท ดิจิทัล จำกัด ได้วางแผนจัดงานบริษัทเลี้ยงรับรองลูกค้าเพื่อขอบคุณ ซึ่งจะจัดวันที่ ${esc(fmtDate(data.entDate)||'-')} สถานที่จัดคือ ${esc(data.entPlace||'-')} จำนวนผู้เข้าร่วมโดยประมาณ ${esc(data.entPeople||'-')} คน โดยกำหนดงบประมาณสำหรับค่าใช้จ่ายเลี้ยงรับรองลูกค้าเป็นจำนวนเงินไม่เกิน ${data.total ? money(data.total) : '-'} บาท`,
-    dep: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} - บริษัท ออร์บิท ดิจิทัล จำกัด วางแผนดำเนินการปฏิบัติงานที่ ${esc(data.depLocation||'-')} ในช่วงวันที่ ${esc(fmtDate(data.depStart)||'-')}${data.depEnd && data.depEnd !== data.depStart ? ` – ${esc(fmtDate(data.depEnd))}` : ''} โดยมีจำนวนทั้งสิ้น ${data.depEmpCount||'-'} คน โดยมีรายละเอียดดังต่อไปนี้`,
+    sl: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} - บริษัท ออร์บิท ดิจิทัล จำกัด มีความจำเป็นต้องใช้งานโปรแกรม ${esc(slProgramStr)} ${esc(data.reason||'')} จึงขออนุมัติงบประมาณเพื่อจัดซื้อโปรแกรมดังกล่าว ตามรายละเอียดดังต่อไปนี้`,
+    hw: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} บริษัท ออร์บิท ดิจิทัล จำกัด มีความจำเป็นต้องจัดซื้ออุปกรณ์ Hardware ${esc(data.reason||'')} จึงขออนุมัติงบประมาณตามรายละเอียดดังต่อไปนี้`,
+    int: (function() {
+      const totalStr = data.total ? (Number(data.total)||0).toLocaleString('th-TH',{maximumFractionDigits:0}) : '-';
+      return `เนื่องด้วยโครงการ ${esc(data.project||'-')} มีความประสงค์จัดกิจกรรม Team Activity ${esc(data.reason||'')} จึงขออนุมัติงบประมาณตามรายละเอียดดังต่อไปนี้
+
+<span style="display:block;text-indent:2.5em">ชื่อ/รายละเอียดกิจกรรม: ${esc(data.intActivity||'-')}</span><span style="display:block;text-indent:2.5em">โปรเจค: ${esc(data.project||'-')}</span><span style="display:block;text-indent:2.5em">วันที่: ${esc(fmtDate(data.intDate)||'-')}</span><span style="display:block;text-indent:2.5em">จำนวน: ${esc(String(data.intHeadcount||'-'))} คน</span>`;
+    })(),
+    ent: `สืบเนื่องจากพนักงานโครงการ ${esc(data.project||'-')} บริษัท ออร์บิท ดิจิทัล จำกัด ได้วางแผนจัดงานบริษัทเลี้ยงรับรองลูกค้าเพื่อขอบคุณ ซึ่งจะจัดวันที่ ${esc(fmtDate(data.entDate)||'-')} สถานที่จัดคือ ${esc(data.entPlace||'-')} จำนวนผู้เข้าร่วมโดยประมาณ ${esc(data.entPeople||'-')} คน โดยกำหนดงบประมาณสำหรับค่าใช้จ่ายงานเลี้ยงรับรองลูกค้าเป็นจำนวนเงินไม่เกิน ${data.total ? (Number(data.total)||0).toLocaleString('th-TH',{maximumFractionDigits:0}) : '-'} บาท`,
+    dep: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} บริษัท ออร์บิท ดิจิทัล จำกัด วางแผนดำเนินการปฏิบัติงานที่ ${esc(data.depLocation||'-')} ในช่วงวันที่ ${esc(fmtDate(data.depStart)||'-')}${data.depEnd && data.depEnd !== data.depStart ? ` – ${esc(fmtDate(data.depEnd))}` : ''} โดยมีจำนวนทั้งสิ้น ${data.depEmpCount||'-'} คน โดยมีรายละเอียดดังต่อไปนี้`,
   };
   const bodyText = typeBody[data.type] || `ด้วยฝ่าย PMO มีความประสงค์ขออนุมัติรายการตามรายละเอียดด้านล่าง เพื่อสนับสนุนการดำเนินงานของโครงการ ${esc(data.project||'-')} ให้เป็นไปตามแผนงาน`;
 
-  // Per-type closing paragraphs with authority reference
-  const authorityRef = 'อ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงิน (ที่มีการตั้งงบประมาณไว้) หมวดการชำระค่าบริการ ซึ่งให้อำนาจแก่ประธานเจ้าหน้าที่บริหารในวงเงินไม่เกิน 2,000,000 บาท';
-  const authorityRef500k = 'อ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงิน (ที่มีการตั้งงบประมาณไว้) หมวดการชำระค่าบริการสำหรับพนักงาน ซึ่งให้อำนาจแก่ผู้บริหารในวงเงินไม่เกิน 500,000 บาท';
   const amtStr = data.total ? `<strong>${(Number(data.total)||0).toLocaleString('th-TH', {maximumFractionDigits:0})} บาท</strong> (${esc(data.amountWords||'-')})` : '';
+  const totalNoSign = data.total ? (Number(data.total)||0).toLocaleString('th-TH',{maximumFractionDigits:0}) : '-';
 
   const closingMap = {
-    sl:  data.total ? (function(){
+    sl: data.total ? (function(){
       const slSection = (data.sections||[]).find(s => s.title === 'รายการ Software');
       let totalSeats = 0, months = 12;
       if(slSection && slSection.html) {
@@ -452,21 +476,31 @@ function renderMemoPdf(data) {
         doc.querySelectorAll('tbody tr').forEach(row => {
           const cells = row.querySelectorAll('td');
           if(cells.length >= 5) {
-            const mo = parseInt(cells[3]?.textContent)||0;
-            const qty = parseInt(cells[4]?.textContent)||0;
-            if(mo) months = mo;
+            const mo  = parseInt(cells[4]?.textContent)||0;
+            const qty = parseInt(cells[5]?.textContent)||0;
+            if(mo)  months = mo;
             totalSeats += qty;
           }
         });
       }
-      const seatsStr = totalSeats ? `จำนวนรวมทั้งหมด ${totalSeats} Seats ` : '';
+      const auth = getAuthority('sl');
+      const seatsStr  = totalSeats ? `จำนวนรวมทั้งหมด ${totalSeats} Seats ` : '';
       const monthsStr = `ระยะเวลา ${months} เดือน `;
-      return `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณสำหรับค่าใช้จ่ายดังกล่าว รวมเป็นจำนวนเงินไม่เกิน ${amtStr} ${seatsStr}${monthsStr}${authorityRef}`;
+      return `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณสำหรับค่าใช้จ่ายดังกล่าว รวมเป็นจำนวนเงินไม่เกิน ${amtStr} ${seatsStr}${monthsStr}อ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงินที่มี (การตั้งงบประมาณไว้) หมวดการชำระค่าบริการ ซึ่งให้อำนาจแก่${esc(auth.title)}ไม่เกิน ${fmtLimit(auth.limit)} บาท`;
     })() : '',
-    hw:  data.total ? `จึงขอความกรุณาโปรดพิจารณาอนุมัติค่าใช้จ่ายสำหรับรายการจัดซื้อข้างต้น ในวงเงิน ${amtStr} ถ้าอ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงิน (ที่มีการตั้งงบประมาณไว้) หมวดการชำระค่าบริการ ซึ่งให้อำนาจแก่ประธานเจ้าหน้าที่บริหารในวงเงินไม่เกิน 500,000 บาท` : '',
-    int: data.total ? `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณสำหรับค่ากิจกรรมทีม ${esc(data.project||'-')} เพื่อใช้จัดกิจกรรมดังกล่าว เป็นวงเงินจำนวนไม่เกิน ${esc(money(data.total))} บาท ( ${esc(data.amountWords||'-')} )` : '',
-    ent: data.total ? `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณค่ารับรองลูกค้าจาก ${esc(data.entClient||data.project||'-')} ในช่วงเวลาดังกล่าว อ้างอิงอำนาจอนุมัติตามคู่มืออำนาจอนุมัติ พ.ศ. 2564 ข้อ 3.2 การชำระเงิน (ที่มีการตั้งงบประมาณไว้) หมวดค่าเลี้ยงรับรอง วงเงินไม่เกิน 150,000 บาท ซึ่งให้อำนาจแก่ประธานเจ้าหน้าที่บริหารในการอนุมัติงบประมาณ` : '',
-    dep: data.total ? `จึงขอความอนุเคราะห์อนุมัติค่าใช้จ่ายสำหรับรายการ Deployment ข้างต้น ในวงเงิน ${amtStr} (${esc(data.amountWords||'')}) ถ้าอ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงิน (ที่มีการตั้งงบประมาณไว้) หมวดการชำระค่าสวัสดิการพนักงาน ซึ่งให้อำนาจแก่ประธานเจ้าหน้าที่บริหารในการอนุมัติการชำระเงินในวงเงินไม่เกิน 500,000 บาท` : '',
+    hw: data.total ? (function(){
+      const auth = getAuthority('hw');
+      return `จึงขอความกรุณาโปรดพิจารณาอนุมัติค่าใช้จ่ายสำหรับรายการจัดซื้อข้างต้น ในวงเงิน ${amtStr} อ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงินที่มี (การตั้งงบประมาณไว้) หมวดการชำระเงินค่าสวัสดิการพนักงาน ซึ่งให้อำนาจแก่${esc(auth.title)}ไม่เกิน ${fmtLimit(auth.limit)} บาท`;
+    })() : '',
+    int: data.total ? `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณสำหรับค่ากิจกรรมทีม ${esc(data.project||'-')} เพื่อใช้จัดกิจกรรมดังกล่าว เป็นวงเงินจำนวนไม่เกิน ${totalNoSign} บาท (${esc(data.amountWords||'-')})` : '',
+    ent: data.total ? (function(){
+      const auth = getAuthority('ent');
+      return `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณค่ารับรองลูกค้าจาก ${esc(data.entClient||data.project||'-')} ในช่วงเวลาดังกล่าว อ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2564 ข้อ 3.2 หมวดค่าเลี้ยงรับรอง วงเงินไม่เกิน ${fmtLimit(auth.limit)} บาท ซึ่งให้อำนาจแก่${esc(auth.title)}ในการอนุมัติงบประมาณ`;
+    })() : '',
+    dep: data.total ? (function(){
+      const auth = getAuthority('dep');
+      return `จึงขอความอนุเคราะห์อนุมัติการจัดซื้อสำหรับรายการจัดซื้อข้างต้น ในวงเงิน ${amtStr} อ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงินที่มี (การตั้งงบประมาณไว้) หมวดการชำระเงินค่าสวัสดิการพนักงาน ซึ่งให้อำนาจแก่${esc(auth.title)}ไม่เกิน ${fmtLimit(auth.limit)} บาท`;
+    })() : '',
   };
   const closingText = closingMap[data.type] || (data.total ? `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณรวมเป็นจำนวนเงินไม่เกิน ${amtStr}` : '');
 
@@ -503,65 +537,53 @@ function renderMemoPdf(data) {
     <!-- Sections with fxNote after SL table -->
     ${(data.sections||[]).map(function(s){
       let html = s.html;
+
       if(s.title === 'รายการ Software') {
-        const H = (from, to) => { html = html.split(from).join(to); };
-        // Rename headers using regex (full inline styles, not just text-align)
         const renameHeader = (from, to) => {
-          html = html.replace(new RegExp('<th([^>]*)>' + from + '<\\/th>', 'g'), '<th$1>' + to + '</th>');
+          html = html.replace(new RegExp('<th([^>]*)>' + from + '<\/th>', 'g'), '<th$1>' + to + '</th>');
         };
         renameHeader('#', 'No');
         renameHeader('ชื่อ Software', 'Item');
-        renameHeader('฿\\/เดือน', 'Price/Month (THB)');
+        renameHeader('฿\/เดือน', 'Price/Month (THB)');
         renameHeader('จำนวน', 'QTY (License)');
         renameHeader('รวม', 'Amount (THB)');
         renameHeader('เดือน', 'Month');
         renameHeader('เริ่ม', 'Start');
         renameHeader('สิ้นสุด', 'End');
-        // Convert YYYY-MM values in start/end columns to Thai month names
-        html = html.replace(/>(\d{4}-\d{2})</g, (m, v) => {
-          const parts = v.match(/^(\d{4})-(\d{2})$/);
+        html = html.replace(/>([0-9]{4}-[0-9]{2})</g, function(m, v) {
+          var parts = v.match(/^([0-9]{4})-([0-9]{2})$/);
           if (!parts) return m;
-          return `>${MONTHS_TH[parseInt(parts[2],10)-1]} ${parseInt(parts[1])+543}<`;
+          return '>' + MONTHS_TH[parseInt(parts[2],10)-1] + ' ' + (parseInt(parts[1])+543) + '<';
         });
-        // Center everything, then fix item name column (index 1) back to left
-        H('<td class="tdl" style="text-align:left">', '<td style="text-align:left">');
-        H('<td class="" style="text-align:left">', '<td style="text-align:center">');
-        H('<td class="num" style="text-align:center">', '<td style="text-align:center;font-weight:700">');
-        // Fix: first td in each row (#) should be center — it uses tdl class
-        // Re-process: make all td center, only keep left for item name cells
-        // Split by rows and fix per-column
         html = html.replace(/<tr>(.*?)<\/tr>/gs, function(match, cells) {
-          const tds = [];
-          let idx = 0;
+          if(match.includes('<th')) return match;
+          var tds = [];
+          var idx = 0;
           cells.replace(/<td([^>]*)>(.*?)<\/td>/gs, function(m, attrs, content) {
-            // col 1 (item name) = left, all others = center
-            const isLeft = idx === 1;
-            const isBold = attrs.includes('font-weight:700');
+            var isLeft = (idx === 1 || idx === 2);
+            var isBold = attrs.includes('font-weight:700');
             tds.push('<td style="padding:7px 10px;border:1px solid #ccc;font-size:13pt;text-align:'+(isLeft?'left':'center')+';'+(isBold?'font-weight:700;':'')+'">'+content+'</td>');
             idx++;
             return m;
           });
           return tds.length ? '<tr>'+tds.join('')+'</tr>' : match;
         });
-        // Add Total Amount row if not present
         if(!html.includes('Total Amount') && data.total) {
-          const colspan = 5;
-          const totalRow = '<tr><td colspan="'+colspan+'" style="text-align:right;font-weight:700;background:#f0f0f0;padding:7px 10px;border:1px solid #ccc;font-size:13pt">Total Amount</td><td style="text-align:center;font-weight:700;background:#f0f0f0;padding:7px 10px;border:1px solid #ccc;font-size:13pt">'+esc(money(data.total))+'</td></tr>';
+          var totalRow = '<tr><td colspan="8" style="text-align:right;font-weight:700;background:#f0f0f0;padding:7px 10px;border:1px solid #ccc;font-size:13pt">Total Amount</td><td style="text-align:center;font-weight:700;background:#f0f0f0;padding:7px 10px;border:1px solid #ccc;font-size:13pt">'+esc(money(data.total))+'</td></tr>';
           html = html.replace('</tbody></table>', totalRow+'</tbody></table>');
         }
       }
+
       if(s.title === 'ตาราง Account') {
-        // Add No column header
         html = html.replace('<thead><tr>', '<thead><tr><th style="background:#e8e8e8;color:#111;font-weight:600;padding:8px 10px;text-align:center;border:1px solid #ccc;font-size:13pt;width:40px">No</th>');
-        // Add row number + center all td except account/email col (index 0 = left)
-        let rowNum = 0;
+        var rowNum = 0;
         html = html.replace(/<tr>(.*?)<\/tr>/gs, function(match, cells) {
-          if(match.includes('<th')) return match; // skip header
+          if(match.includes('<th')) return match;
           rowNum++;
-          const tds = ['<td style="padding:7px 10px;border:1px solid #ccc;font-size:13pt;text-align:center">'+rowNum+'</td>'];
-          let idx = 0;
+          var tds = ['<td style="padding:7px 10px;border:1px solid #ccc;font-size:13pt;text-align:center">'+rowNum+'</td>'];
+          var idx = 0;
           cells.replace(/<td([^>]*)>(.*?)<\/td>/gs, function(m, attrs, content) {
-            const isLeft = idx === 0;
+            var isLeft = idx === 0;
             tds.push('<td style="padding:7px 10px;border:1px solid #ccc;font-size:13pt;text-align:'+(isLeft?'left':'center')+'">'+content+'</td>');
             idx++;
             return m;
@@ -569,6 +591,30 @@ function renderMemoPdf(data) {
           return tds.length > 1 ? '<tr>'+tds.join('')+'</tr>' : match;
         });
       }
+
+      if(s.title === 'รายการ Hardware') {
+        if(!html.includes('Total Amount') && data.total) {
+          var thMatch = html.match(/<thead>(.*?)<\/thead>/s);
+          var colCount = thMatch ? (thMatch[1].match(/<th/g)||[]).length : 5;
+          var totalRow = '<tr><td colspan="'+(colCount-1)+'" style="text-align:right;font-weight:700;background:#f0f0f0;padding:7px 10px;border:1px solid #ccc;font-size:13pt">Total Amount</td><td style="text-align:center;font-weight:700;background:#f0f0f0;padding:7px 10px;border:1px solid #ccc;font-size:13pt">'+esc(money(data.total))+'</td></tr>';
+          html = html.replace('</tbody></table>', totalRow+'</tbody></table>');
+        }
+      }
+
+      if(s.title === 'รายชื่อผู้เข้าร่วม') {
+        if(!html.includes('<table') && html.includes('<ol')) {
+          var names = [];
+          html.replace(/<li>(.*?)<\/li>/g, function(m, name) { names.push(name.trim()); });
+          var rows = names.map(function(n,i) {
+            return '<tr><td style="padding:7px 10px;border:1px solid #ccc;font-size:13pt;text-align:center;width:50px">'+(i+1)+'</td><td style="padding:7px 10px;border:1px solid #ccc;font-size:13pt;text-align:left">'+n+'</td></tr>';
+          }).join('');
+          html = '<table style="width:100%;border-collapse:collapse"><thead><tr>'
+            + '<th style="background:#e8e8e8;color:#111;font-weight:600;padding:8px 10px;text-align:center;border:1px solid #ccc;font-size:13pt;width:50px">No.</th>'
+            + '<th style="background:#e8e8e8;color:#111;font-weight:600;padding:8px 10px;text-align:left;border:1px solid #ccc;font-size:13pt">รายชื่อ</th>'
+            + '</tr></thead><tbody>' + rows + '</tbody></table>';
+        }
+      }
+
       return '<div style="margin-top:12px"><p style="font-weight:700;margin-bottom:6px">'+esc(s.title)+'</p>'+html+(s.title==='รายการ Software'?fxNote:'')+'</div>';
     }).join('')}
 
@@ -590,7 +636,13 @@ function renderMemoPdf(data) {
             : isFirst && arr.length === 1
             ? `เรียน ${esc(data.to || 'ผู้อำนวยการโครงการ')} เพื่อโปรดพิจารณาอนุมัติ<br>ดำเนินการ`
             : '';
-          const optText = isLast
+          // A1 (isFirst, multi): no option bullets — headText only
+          // A1 (isFirst, single): "อนุมัติ"
+          // Middle (not first, not last): "เห็นชอบ"
+          // Last (multi): "อนุมัติ"
+          const optText = isFirst && arr.length > 1
+            ? '' // A1 in multi-approver: no option text
+            : isLast
             ? `<div class="mp-appr-opt">&#9675; อนุมัติ, เพื่อโปรดพิจารณาดำเนินการ</div>
                <div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>`
             : `<div class="mp-appr-opt">&#9675; เห็นชอบ, เพื่อโปรดพิจารณาอนุมัติ</div>
