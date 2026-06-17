@@ -163,8 +163,8 @@ function renderPendingContent() {
   if (loadMoreContainer) {
     const remaining = (window._pendingAllMemos||[]).length - _pendingVisible;
     loadMoreContainer.style.display = remaining > 0 ? '' : 'none';
-    loadMoreContainer.querySelector('span').textContent =
-      `Load ${Math.min(remaining, 20)} more (เหลือ ${remaining} รายการ)`;
+    const lmBtn = loadMoreContainer.querySelector('button');
+    if (lmBtn) lmBtn.textContent = `Load ${Math.min(remaining, 20)} more (เหลือ ${remaining} รายการ)`;
   }
 
   list.onclick = function(e) {
