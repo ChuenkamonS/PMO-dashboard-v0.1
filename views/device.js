@@ -208,6 +208,7 @@ function storePurchaseOrders(pos) {
 // Called from updateMemoStatus in app.js when status = completed
 function createPurchaseOrdersFromMemo(memo) {
   if (memo.type !== 'hw') return;
+  if (memo.status !== 'completed') return; // only create POs for approved memos
   const section = memo.sections?.find(s => s.title === 'รายการ Hardware');
   if (!section) return;
   const doc = new DOMParser().parseFromString(section.html, 'text/html');
@@ -253,52 +254,63 @@ function createPurchaseOrdersFromMemo(memo) {
 
 // Mark devices as arrived — creates device records and updates PO
 async function markArrived(poId, qty, serialNumbers = []) {
+  // Always read fresh from localStorage
   const pos = loadPurchaseOrders();
-  const po = pos.find(p => p.id === poId);
+  const po  = pos.find(p => p.id === poId);
   if (!po) return;
   if (!['awaiting', 'partial_arrived'].includes(po.status)) {
     alert('กรุณาเปลี่ยนสถานะเป็น Awaiting ก่อน mark arrived');
     return;
   }
-  const now = new Date().toISOString();
-  const newArrived = Math.min(po.arrivedQty + qty, po.orderedQty);
+  const now        = new Date().toISOString();
+  const actualQty  = Math.min(qty, po.orderedQty - po.arrivedQty); // can't exceed remaining
+  const newArrived = po.arrivedQty + actualQty;
   po.arrivedQty = newArrived;
-  po.status = newArrived >= po.orderedQty ? 'fulfilled' : 'partial_arrived';
-  po.updatedAt = now;
-  storePurchaseOrders(pos);
+  po.status     = newArrived >= po.orderedQty ? 'fulfilled' : 'partial_arrived';
+  po.updatedAt  = now;
+  storePurchaseOrders(pos); // sync save first
   savePurchaseOrderAsync(po).catch(e => console.warn('PO update failed', e));
 
-  // Create device record(s) — use timestamp + index to avoid id collision
-  const batchTs = Date.now();
-  for (let i = 0; i < qty; i++) {
-    const serial = serialNumbers[i] || '';
+  // Create device records — store to localStorage first, then sync to Supabase
+  const batchTs  = Date.now();
+  const devices  = loadDevices();
+  const newDevices = [];
+
+  for (let i = 0; i < actualQty; i++) {
+    const serial = serialNumbers[i] !== undefined ? serialNumbers[i] : '';
     const device = {
-      id:             `dev_${batchTs}_${i}`,
-      name:           po.itemName,
-      brand:          '',
-      platform:       'other',
-      type:           'mobile',
-      serial,
-      assetTag:       '',
-      owner:          '',
-      assignedDate:   now.slice(0, 10),
-      project:        po.project,
-      company:        '',
-      returnDate:     '',
-      warranty:       '',
-      condition:      'new',
-      status:         'available',
-      memoNo:         po.memoNo,
-      purchaseOrderId: po.id,   // link back to PO
-      note:           `Arrived from ${po.memoNo} · ${po.itemName}`,
-      source:         'memo',
-      createdAt:      now,
-      updatedAt:      now,
+      id:              `dev_${batchTs}_${i}`,
+      name:            po.itemName    || '',
+      brand:           '',
+      platform:        'other',
+      type:            'mobile',
+      serial:          serial,
+      assetTag:        '',
+      owner:           '',
+      assignedDate:    now.slice(0, 10),
+      project:         po.project     || '',
+      company:         '',
+      returnDate:      '',
+      warranty:        '',
+      condition:       'new',
+      status:          'available',
+      memoNo:          po.memoNo      || '',
+      purchaseOrderId: po.id,
+      note:            `Arrived from ${po.memoNo} · ${po.itemName}`,
+      source:          'memo',
+      createdAt:       now,
+      updatedAt:       now,
     };
-    await saveDeviceAsync(device);
+    devices.push(device);
+    newDevices.push(device);
   }
+  storeDevices(devices); // sync save to localStorage first
   _devCache = null;
-  renderDevice();
+
+  // Async push to Supabase in background
+  newDevices.forEach(d => saveDeviceAsync(d).catch(e => console.warn('Device save failed', e)));
+
+  try { if (typeof renderDevice === 'function') renderDevice(); } catch(e) {}
 }
 
 // ── Helpers ──
@@ -541,6 +553,16 @@ function openDeviceModal(id) {
   }
 }
 function closeDeviceModal() { document.getElementById('device-modal').style.display='none'; }
+
+// ── Dedup check — find existing device by serial or assetTag ──
+function findExistingDevice(devices, data) {
+  if (!devices || !devices.length) return -1;
+  return devices.findIndex(d => {
+    if (data.serial    && data.serial    !== '' && d.serial    === data.serial)    return true;
+    if (data.assetTag  && data.assetTag  !== '' && d.assetTag  === data.assetTag)  return true;
+    return false;
+  });
+}
 
 function saveDevice() {
   const name = document.getElementById('dev-name').value.trim();
