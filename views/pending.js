@@ -198,8 +198,33 @@ function buildPendingRow(memo) {
   const statusCls = memo.status==='completed'?'background:#EAF3DE;color:#27500A':memo.status==='rejected'?'background:#FCEBEB;color:#791F1F':'background:#EEEDFE;color:#3C3489';
   const statusLbl = memo.status==='completed'?'Completed':memo.status==='rejected'?'Rejected':stage;
 
-  // All rows: single View button — Approve/Reject/Cancel inside detail modal
-  const actionBtns = `<button class="btn-sm" data-action="detail" data-memo="${esc(memo.memoNo)}" style="font-size:11px;padding:3px 10px">View</button>`;
+  const isPending  = memo.status === 'pending' || memo.status === 'pending_a2';
+  const isOwner    = isOwn;
+  const _pmo       = typeof isPMO === 'function' && isPMO();
+
+  // Row action buttons — different per role
+  let actionBtns = '';
+  if (_pmo) {
+    // PMO sees Approve + Reject + View
+    actionBtns = `
+      <button class="btn-approve" data-action="approve" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px" title="Approve">✓</button>
+      <button class="btn-reject"  data-action="reject"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px" title="Reject">✕</button>
+      <button class="btn-sm"      data-action="detail"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px">View</button>`;
+  } else if (!isOwner && canAct) {
+    // Approver (not own memo, their turn) — Approve + Reject + View
+    actionBtns = `
+      <button class="btn-approve" data-action="approve" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px" title="Approve">✓</button>
+      <button class="btn-reject"  data-action="reject"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px" title="Reject">✕</button>
+      <button class="btn-sm"      data-action="detail"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px">View</button>`;
+  } else if (isOwner && isPending) {
+    // Requester (own memo) — View + Cancel
+    actionBtns = `
+      <button class="btn-sm" data-action="detail" data-memo="${esc(memo.memoNo)}" style="font-size:11px;padding:3px 10px">View</button>
+      <button class="btn-sm" data-action="cancel" data-memo="${esc(memo.memoNo)}" style="font-size:11px;padding:3px 8px;margin-left:4px;color:var(--red)" title="ยกเลิก">✕ Cancel</button>`;
+  } else {
+    // Default (view only)
+    actionBtns = `<button class="btn-sm" data-action="detail" data-memo="${esc(memo.memoNo)}" style="font-size:11px;padding:3px 10px">View</button>`;
+  }
 
   const reqDate = memo.createdAt ? shortDate(memo.createdAt) : '—';
   const reqTime = memo.createdAt ? new Date(memo.createdAt).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'}) : '';
@@ -435,10 +460,12 @@ function openDetailModal(memoNo) {
     ` : ''}
     <button class="btn-sm" style="color:var(--blue)" onclick="if(typeof downloadMemoPdf==='function'){downloadMemoPdf(loadMemos().find(m=>m.memoNo==='${_no}'))}">⬇ Download PDF</button>
     ${typeof isPMO === "function" && isPMO() ? `
-      <button class="btn-sm" onclick="if(typeof openBudgetTagModal==='function')openBudgetTagModal('${_no}')"
-        style="background:${memo.budgetSource?'var(--green-50,#F0FDF4)':'var(--amber-50,#FFFBEB)'};color:${memo.budgetSource?'var(--green-800,#166534)':'var(--amber-800,#92400E)'}">
-        ⚑ ${memo.budgetSource ? esc(memo.budgetSource) : 'Tag Budget'}
-      </button>
+      ${memo.status === 'completed' ? `
+        <button class="btn-sm" onclick="if(typeof openBudgetTagModal==='function')openBudgetTagModal('${_no}')"
+          style="background:${memo.budgetSource?'var(--green-50,#F0FDF4)':'var(--amber-50,#FFFBEB)'};color:${memo.budgetSource?'var(--green-800,#166534)':'var(--amber-800,#92400E)'}">
+          ⚑ ${memo.budgetSource ? esc(memo.budgetSource) : 'Tag Budget'}
+        </button>
+      ` : ''}
       <button class="btn-sm" style="color:var(--blue);margin-left:4px" onclick="closeDetailModal();openPmoEditApproversModal('${_no}')">✎ Approvers</button>
       <button class="btn-sm" style="color:var(--red);margin-left:4px"  onclick="closeDetailModal();openPmoOverrideModal('${_no}')">⚠ Override</button>
     ` : ''}
