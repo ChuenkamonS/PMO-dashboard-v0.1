@@ -434,7 +434,7 @@ function openDetailModal(memoNo) {
       <button class="btn-sm" style="color:var(--red)" onclick="closeDetailModal();cancelMemo('${_no}')">✕ Cancel</button>
     ` : ''}
     <button class="btn-sm" style="color:var(--blue)" onclick="if(typeof downloadMemoPdf==='function'){downloadMemoPdf(loadMemos().find(m=>m.memoNo==='${_no}'))}">⬇ Download PDF</button>
-    ${isPMO() ? `
+    ${typeof isPMO === "function" && isPMO() ? `
       <button class="btn-sm" onclick="if(typeof openBudgetTagModal==='function')openBudgetTagModal('${_no}')"
         style="background:${memo.budgetSource?'var(--green-50,#F0FDF4)':'var(--amber-50,#FFFBEB)'};color:${memo.budgetSource?'var(--green-800,#166534)':'var(--amber-800,#92400E)'}">
         ⚑ ${memo.budgetSource ? esc(memo.budgetSource) : 'Tag Budget'}
