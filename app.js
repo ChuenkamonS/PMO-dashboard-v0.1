@@ -453,12 +453,7 @@ function renderMemoPdf(data) {
   const typeBody = {
     sl: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} - บริษัท ออร์บิท ดิจิทัล จำกัด มีความจำเป็นต้องใช้งานโปรแกรม ${esc(slProgramStr)} ${esc(data.reason||'')} จึงขออนุมัติงบประมาณเพื่อจัดซื้อโปรแกรมดังกล่าว ตามรายละเอียดดังต่อไปนี้`,
     hw: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} บริษัท ออร์บิท ดิจิทัล จำกัด มีความจำเป็นต้องจัดซื้ออุปกรณ์ Hardware ${esc(data.reason||'')} จึงขออนุมัติงบประมาณตามรายละเอียดดังต่อไปนี้`,
-    int: (function() {
-      const totalStr = data.total ? (Number(data.total)||0).toLocaleString('th-TH',{maximumFractionDigits:0}) : '-';
-      return `เนื่องด้วยโครงการ ${esc(data.project||'-')} มีความประสงค์จัดกิจกรรม Team Activity ${esc(data.reason||'')} จึงขออนุมัติงบประมาณตามรายละเอียดดังต่อไปนี้
-
-<span style="display:block;text-indent:2.5em">ชื่อ/รายละเอียดกิจกรรม: ${esc(data.intActivity||'-')}</span><span style="display:block;text-indent:2.5em">โปรเจค: ${esc(data.project||'-')}</span><span style="display:block;text-indent:2.5em">วันที่: ${esc(fmtDate(data.intDate)||'-')}</span><span style="display:block;text-indent:2.5em">จำนวน: ${esc(String(data.intHeadcount||'-'))} คน</span>`;
-    })(),
+    int: `เนื่องด้วยโครงการ ${esc(data.project||'-')} มีความประสงค์จัดกิจกรรม Team Activity ${esc(data.reason||'')} จึงขออนุมัติงบประมาณตามรายละเอียดดังต่อไปนี้`,
     ent: `สืบเนื่องจากพนักงานโครงการ ${esc(data.project||'-')} บริษัท ออร์บิท ดิจิทัล จำกัด ได้วางแผนจัดงานบริษัทเลี้ยงรับรองลูกค้าเพื่อขอบคุณ ซึ่งจะจัดวันที่ ${esc(fmtDate(data.entDate)||'-')} สถานที่จัดคือ ${esc(data.entPlace||'-')} จำนวนผู้เข้าร่วมโดยประมาณ ${esc(data.entPeople||'-')} คน โดยกำหนดงบประมาณสำหรับค่าใช้จ่ายงานเลี้ยงรับรองลูกค้าเป็นจำนวนเงินไม่เกิน ${data.total ? (Number(data.total)||0).toLocaleString('th-TH',{maximumFractionDigits:0}) : '-'} บาท`,
     dep: `เนื่องด้วยพนักงานโครงการ ${esc(data.project||'-')} บริษัท ออร์บิท ดิจิทัล จำกัด วางแผนดำเนินการปฏิบัติงานที่ ${esc(data.depLocation||'-')} ในช่วงวันที่ ${esc(fmtDate(data.depStart)||'-')}${data.depEnd && data.depEnd !== data.depStart ? ` – ${esc(fmtDate(data.depEnd))}` : ''} โดยมีจำนวนทั้งสิ้น ${data.depEmpCount||'-'} คน โดยมีรายละเอียดดังต่อไปนี้`,
   };
@@ -601,6 +596,29 @@ function renderMemoPdf(data) {
         }
       }
 
+      if(s.title === 'รายการค่าใช้จ่าย') {
+        // Convert <ol> list to numbered table for DEP
+        if(html.includes('<ol')) {
+          var depItems = [];
+          html.replace(/<li>(.*?)<\/li>/g, function(m, item) { depItems.push(item.trim()); });
+          var depRows = depItems.map(function(item, i) {
+            return '<tr>'
+              + '<td style="padding:7px 10px;border:1px solid #ccc;font-size:13pt;text-align:center;width:50px;vertical-align:top">'+(i+1)+'.</td>'
+              + '<td style="padding:7px 10px;border:1px solid #ccc;font-size:13pt;text-align:left">'+item+'</td>'
+              + '</tr>';
+          }).join('');
+          html = '<table style="width:100%;border-collapse:collapse"><thead><tr>'
+            + '<th style="background:#e8e8e8;color:#111;font-weight:600;padding:8px 10px;text-align:center;border:1px solid #ccc;font-size:13pt;width:50px">ที่</th>'
+            + '<th style="background:#e8e8e8;color:#111;font-weight:600;padding:8px 10px;text-align:center;border:1px solid #ccc;font-size:13pt">รายการ</th>'
+            + '</tr></thead><tbody>'+depRows+'</tbody></table>';
+          if(!html.includes('Total Amount') && data.total) {
+            var depTotal = '<tr><td style="text-align:right;font-weight:700;background:#f0f0f0;padding:7px 10px;border:1px solid #ccc;font-size:13pt;text-align:center">รวม</td>'
+              + '<td style="text-align:right;font-weight:700;background:#f0f0f0;padding:7px 10px;border:1px solid #ccc;font-size:13pt">'+esc(money(data.total))+'</td></tr>';
+            html = html.replace('</tbody></table>', depTotal+'</tbody></table>');
+          }
+        }
+      }
+
       if(s.title === 'รายชื่อผู้เข้าร่วม') {
         if(!html.includes('<table') && html.includes('<ol')) {
           var names = [];
@@ -610,7 +628,7 @@ function renderMemoPdf(data) {
           }).join('');
           html = '<table style="width:100%;border-collapse:collapse"><thead><tr>'
             + '<th style="background:#e8e8e8;color:#111;font-weight:600;padding:8px 10px;text-align:center;border:1px solid #ccc;font-size:13pt;width:50px">No.</th>'
-            + '<th style="background:#e8e8e8;color:#111;font-weight:600;padding:8px 10px;text-align:left;border:1px solid #ccc;font-size:13pt">รายชื่อ</th>'
+            + '<th style="background:#e8e8e8;color:#111;font-weight:600;padding:8px 10px;text-align:center;border:1px solid #ccc;font-size:13pt">รายชื่อ</th>'
             + '</tr></thead><tbody>' + rows + '</tbody></table>';
         }
       }
@@ -624,40 +642,56 @@ function renderMemoPdf(data) {
     ${closingText ? `<div class="mp-closing"><p style="font-size:14pt;line-height:1.8;text-indent:2.5em">${closingText}</p></div>` : ''}
 
     <!-- Signature boxes -->
-    <div class="mp-approval" style="display:grid;grid-template-columns:repeat(${Math.max(1, (data.approvers||[]).length)}, 1fr);gap:0;width:100%;margin-top:8px;border-collapse:collapse">
-      ${(data.approvers && data.approvers.length > 0 ? data.approvers : [
-          { name: data.reviewerName || '-', title: data.reviewerTitle || '-' },
-          ...(data.approverName && data.approverName !== '-' ? [{ name: data.approverName, title: data.approverTitle || '-' }] : [])
-        ]).map((a, i, arr) => {
+    ${(function(){
+      // Build approver array — always minimum 2 (reviewer + approver)
+      let arr = data.approvers && data.approvers.length > 0
+        ? [...data.approvers]
+        : [];
+      // If only 1 approver, prepend a reviewer slot
+      if(arr.length < 2) {
+        const revName  = data.reviewerName  && data.reviewerName  !== '-' ? data.reviewerName  : '';
+        const revTitle = data.reviewerTitle && data.reviewerTitle !== '-' ? data.reviewerTitle : 'ผู้จัดการโครงการ';
+        if(revName) {
+          arr.unshift({ name: revName, title: revTitle, status: 'pending' });
+        } else if(arr.length === 1) {
+          // duplicate as reviewer if no reviewer info
+          arr.unshift({ name: arr[0].name, title: 'ผู้จัดการโครงการ', status: 'pending' });
+        } else {
+          arr = [
+            { name: data.reviewerName||'-', title: data.reviewerTitle||'ผู้จัดการโครงการ', status:'pending' },
+            { name: data.approverName||'-', title: data.approverTitle||'ประธานเจ้าหน้าที่บริหาร', status:'pending' },
+          ];
+        }
+      }
+      return '<div class="mp-approval" style="display:grid;grid-template-columns:repeat('+arr.length+',1fr);gap:0;width:100%;margin-top:8px">'
+        + arr.map(function(a, i) {
           const isFirst = i === 0;
           const isLast  = i === arr.length - 1;
-          const headText = isFirst && arr.length > 1
-            ? `เรียน ${esc(data.to || 'ผู้อำนวยการโครงการ')} เพื่อโปรดพิจารณาอนุมัติ<br>ดำเนินการ`
-            : isFirst && arr.length === 1
-            ? `เรียน ${esc(data.to || 'ผู้อำนวยการโครงการ')} เพื่อโปรดพิจารณาอนุมัติ<br>ดำเนินการ`
+          // A1 always has headText
+          const headText = isFirst
+            ? 'เรียน ' + esc(data.to || 'ผู้อำนวยการโครงการ') + ' เพื่อโปรดพิจารณาอนุมัติ<br>ดำเนินการ'
             : '';
-          // A1 (isFirst, multi): no option bullets — headText only
-          // A1 (isFirst, single): "อนุมัติ"
-          // Middle (not first, not last): "เห็นชอบ"
-          // Last (multi): "อนุมัติ"
-          const optText = isFirst && arr.length > 1
-            ? '' // A1 in multi-approver: no option text
+          // Options: A1=เห็นชอบ (multi) or อนุมัติ (single), Last=อนุมัติ, Middle=เห็นชอบ
+          const optText = isFirst && arr.length === 1
+            ? '<div class="mp-appr-opt">&#9675; อนุมัติ, เพื่อโปรดพิจารณาดำเนินการ</div><div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>'
+            : isFirst && arr.length > 1
+            ? '<div class="mp-appr-opt">&#9675; เห็นชอบ, เพื่อโปรดพิจารณาอนุมัติ</div><div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>'
             : isLast
-            ? `<div class="mp-appr-opt">&#9675; อนุมัติ, เพื่อโปรดพิจารณาดำเนินการ</div>
-               <div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>`
-            : `<div class="mp-appr-opt">&#9675; เห็นชอบ, เพื่อโปรดพิจารณาอนุมัติ</div>
-               <div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>`;
+            ? '<div class="mp-appr-opt">&#9675; อนุมัติ, เพื่อโปรดพิจารณาดำเนินการ</div><div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>'
+            : '<div class="mp-appr-opt">&#9675; เห็นชอบ, เพื่อโปรดพิจารณาอนุมัติ</div><div class="mp-appr-opt">&#9675; อื่นๆ ..............................………</div>';
           const sigDate = isFirst ? reviewerDate : approverDate;
-          return `<div class="mp-appr-cell" style="padding:10px 12px;min-height:160px;display:flex;flex-direction:column;border:1px solid #000;${i > 0 ? 'margin-left:-1px;' : ''}">
-            ${headText ? `<div class="mp-appr-head">${headText}</div>` : ''}
-            ${optText}
-            <div style="flex:1"></div>
-            <div class="mp-sig-space"></div>
-            <div class="mp-sig-name" style="font-size:12pt;font-weight:600;text-align:center">( ${esc(a.name || '-')} )</div>
-            <div class="mp-sig-role" style="font-size:12pt;text-align:center">${esc(a.title || '-')}</div>
-            <div class="mp-sig-date" style="font-size:12pt;text-align:center">${sigDate}</div>
-          </div>`;
-        }).join('')}
+          return '<div class="mp-appr-cell" style="padding:10px 12px;min-height:160px;display:flex;flex-direction:column;border:1px solid #000;'+(i>0?'margin-left:-1px;':'')+'">'
+            + (headText ? '<div class="mp-appr-head">'+headText+'</div>' : '')
+            + optText
+            + '<div style="flex:1"></div>'
+            + '<div class="mp-sig-space"></div>'
+            + '<div class="mp-sig-name" style="font-size:12pt;font-weight:600;text-align:center">( '+esc(a.name||'-')+' )</div>'
+            + '<div class="mp-sig-role" style="font-size:12pt;text-align:center">'+esc(a.title||'-')+'</div>'
+            + '<div class="mp-sig-date" style="font-size:12pt;text-align:center">'+sigDate+'</div>'
+            + '</div>';
+        }).join('')
+        + '</div>';
+    })()}
     </div>
   </div>`;
 }
