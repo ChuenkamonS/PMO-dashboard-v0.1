@@ -536,6 +536,10 @@ function _renderLicUsers() {
     return;
   }
 
+  // Store data in window so handlers can access without embedding JSON in HTML
+  window._licUsrRows = allUserRows;
+  window._licUsrCols = allLicCols;
+
   el.innerHTML = `
     <div style="background:var(--bg-2,#F8F8F6);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:12px;font-size:11px;color:var(--text-2)">
       ℹ ข้อมูลมาจาก "ตาราง Account" ใน SL Memo — email + ✓/- ต่อโปรแกรม
@@ -543,13 +547,13 @@ function _renderLicUsers() {
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
       <input id="lic-usr-search" type="text" placeholder="ค้นหา email..."
         style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px"
-        oninput="_renderLicUsersRows(${JSON.stringify(allUserRows)}, ${JSON.stringify(allLicCols)})">
-      <select id="lic-usr-proj" onchange="_renderLicUsersRows(${JSON.stringify(allUserRows)}, ${JSON.stringify(allLicCols)})"
+        oninput="_renderLicUsersRows()">
+      <select id="lic-usr-proj" onchange="_renderLicUsersRows()"
         style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
         <option value="all">ทุก project</option>
         ${projects.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
       </select>
-      <select id="lic-usr-lic" onchange="_renderLicUsersRows(${JSON.stringify(allUserRows)}, ${JSON.stringify(allLicCols)})"
+      <select id="lic-usr-lic" onchange="_renderLicUsersRows()"
         style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
         <option value="all">ทุก license</option>
         ${allLicCols.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
@@ -570,10 +574,12 @@ function _renderLicUsers() {
       ✅ = ได้รับ license นี้ · — = ไม่ได้รับ (ตามที่กรอกใน memo)
     </div>`;
 
-  _renderLicUsersRows(allUserRows, allLicCols);
+  _renderLicUsersRows();
 }
 
-function _renderLicUsersRows(allUserRows, allLicCols) {
+function _renderLicUsersRows() {
+  const allUserRows = window._licUsrRows || [];
+  const allLicCols  = window._licUsrCols || [];
   const search  = (document.getElementById('lic-usr-search')?.value || '').toLowerCase();
   const projF   = document.getElementById('lic-usr-proj')?.value || 'all';
   const licF    = document.getElementById('lic-usr-lic')?.value || 'all';
