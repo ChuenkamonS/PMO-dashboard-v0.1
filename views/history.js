@@ -370,7 +370,7 @@ function openHistoryDetail(memoNo) {
       <button class="btn-reject"  type="button" onclick="closeDetailModal();openRejectModal('${esc(memo.memoNo)}')">✕ Reject</button>
     ` : ''}
     ${isCompleted && memo.type === 'sl' ? `<button class="btn-sm" type="button" onclick="openBudgetTagModal('${esc(memo.memoNo)}')" style="background:${memo.budgetSource ? 'var(--green-50)' : 'var(--amber-50)'};color:${memo.budgetSource ? 'var(--green-800)' : 'var(--amber-800)'}">⚑ ${memo.budgetSource ? memo.budgetSource : 'Tag Budget'}</button>` : ''}
-    ${memo.status !== 'draft' ? `<button class="btn-sm" type="button" onclick="openMemoPdf('${esc(memo.memoNo)}')" title="Download PDF">Download PDF</button>` : ''}
+    ${memo.status !== 'draft' ? `<button class="btn-sm" type="button" onclick="openHistoryDetail('${esc(memo.memoNo)}')" title="ดูรายละเอียด">View Detail</button>` : ''}
     <button class="btn-ghost" type="button" onclick="closeDetailModal()">ปิด</button>
   `;
   const modalInner = document.querySelector('#detail-modal > div');
@@ -435,7 +435,7 @@ function histActionButtons(memo) {
     ${isDraft ? `<button type="button" class="btn-sm hist-act-btn" data-hist-action="draft-edit" data-memo="${no}" title="แก้ไข Draft" style="color:var(--blue)">✎</button>
     <button type="button" class="btn-sm hist-act-btn" data-hist-action="draft-delete" data-memo="${no}" title="ลบ Draft" style="color:var(--red)">✕</button>` : ''}
     ${isRejected ? `<button type="button" class="btn-sm hist-act-btn" data-hist-action="duplicate" data-memo="${no}" title="Duplicate เป็น Memo ใหม่">⊕</button>` : ''}
-    ${!isDraft ? `<button type="button" class="btn-sm hist-act-btn" data-hist-action="pdf" data-memo="${no}" title="Download PDF">${HIST_ICON_PDF}</button>` : ''}
+    ${!isDraft ? `<button type="button" class="btn-sm hist-act-btn" data-hist-action="detail" data-memo="${no}" title="ดูรายละเอียด / Download PDF">${HIST_ICON_VIEW}</button>` : ''}
   </div>`;
 }
 
@@ -446,10 +446,7 @@ function handleHistoryTableClick(e) {
     const action = btn.dataset.histAction;
     const memoNo = btn.dataset.memo;
     if (action === 'detail') openHistoryDetail(memoNo);
-    else if (action === 'pdf') {
-      if (typeof openMemoPdf === 'function') openMemoPdf(memoNo);
-      else alert('ระบบดาวน์โหลด PDF ยังไม่พร้อมใช้งาน');
-    }
+    // pdf action removed — PDF download is now inside detail modal
     else if (action === 'reject-reason') showRejectionReason(memoNo, e);
     else if (action === 'draft-edit') {
       if (typeof editDraft === 'function') editDraft(memoNo);
@@ -465,6 +462,8 @@ function handleHistoryTableClick(e) {
 }
 
 // ── Render table ──
+if (typeof window._histVisible === 'undefined') window._histVisible = 20;
+
 function renderHistoryMemos() {
   populateHistFilterOptions();
   populateHistTabCounts();
@@ -472,8 +471,10 @@ function renderHistoryMemos() {
   const countEl = document.getElementById('hist-result-count');
   if (!body) return;
 
-  const memos = filteredHistoryMemos();
-  if (countEl) countEl.textContent = `แสดง ${memos.length} รายการ · คลิกแถวเพื่อดูรายละเอียด`;
+  const allMemos = filteredHistoryMemos();
+  window._histAllMemos = allMemos;
+  const memos = allMemos.slice(0, window._histVisible);
+  if (countEl) countEl.textContent = `แสดง ${memos.length} จาก ${allMemos.length} รายการ · คลิกแถวเพื่อดูรายละเอียด`;
 
   if (!memos.length) {
     body.innerHTML = `<tr><td colspan="13" class="hist-empty">ยังไม่มี Memo ตามเงื่อนไขที่เลือก</td></tr>`;
@@ -506,6 +507,15 @@ function renderHistoryMemos() {
   body.querySelectorAll('tr[data-memo]').forEach(row => {
     row.addEventListener('click', handleHistoryTableClick);
   });
+
+  // Load More button
+  const lmEl = document.getElementById('history-load-more');
+  if (lmEl) {
+    const rem = (window._histAllMemos||[]).length - (window._histVisible||20);
+    lmEl.style.display = rem > 0 ? '' : 'none';
+    const lmBtn = lmEl.querySelector('button');
+    if (lmBtn) lmBtn.textContent = `Load ${Math.min(rem,20)} more (เหลือ ${rem} รายการ)`;
+  }
 }
 
 // ── Draft actions (drafts live in All Memos now) ──
@@ -642,4 +652,13 @@ function saveBudgetTag(memoNo) {
   updateMemoStatus(memoNo, 'completed', { budgetSource: selected === (memo.project||'(ไม่ระบุ)') ? null : selected });
   closeBudgetTagModal();
   renderHistoryMemos();
+}
+
+// ── History Load More ──
+function loadMoreHistory() {
+  window._histVisible = (window._histVisible || 20) + 20;
+  renderHistoryMemos();
+}
+function resetHistoryPagination() {
+  window._histVisible = 20;
 }
