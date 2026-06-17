@@ -291,6 +291,9 @@ function _renderLicMemoIndex() {
       </button>
     </div>
 
+    <div id="lic-count-display" style="font-size:11px;color:var(--text-3);padding:6px 14px;border-bottom:1px solid var(--border)">
+      แสดง — รายการ
+    </div>
     <div class="card" style="padding:0;overflow:hidden">
       <table class="hist-table">
         <thead><tr>
@@ -380,8 +383,11 @@ function _renderLicMemoIndexRows() {
     return;
   }
 
-  window._licFiltered = filtered;
-  tbody.innerHTML = filtered.map((lic, _idx) => {
+  window._licAllFiltered = filtered;
+  if (typeof window._licVisible === 'undefined') window._licVisible = 20;
+  const visible = filtered.slice(0, window._licVisible);
+  window._licFiltered = visible;
+  tbody.innerHTML = visible.map((lic, _idx) => {
     const s = getLicenseStatus(lic);
     const monthlyCostLic = (lic.pricePerMonthTHB ?? lic.pricePerMonth ?? 0) * (lic.seats || 1);
     const sourceBadge = lic.source === 'memo'
@@ -418,6 +424,23 @@ function _renderLicMemoIndexRows() {
     if (btn.dataset.action === 'edit')   openLicenseModal(String(lic.id));
     if (btn.dataset.action === 'delete') deleteLicense(String(lic.id));
   };
+
+  // Load More
+  const lmEl = document.getElementById('license-load-more');
+  if (lmEl) {
+    const rem = (window._licAllFiltered||[]).length - (window._licVisible||20);
+    lmEl.style.display = rem > 0 ? '' : 'none';
+    const lmBtn = lmEl.querySelector('button');
+    if (lmBtn) lmBtn.textContent = `Load ${Math.min(rem,20)} more (เหลือ ${rem} รายการ)`;
+  }
+
+  // Update count in filter bar
+  const countEl = document.getElementById('lic-count-display');
+  if (countEl) {
+    const total = (window._licAllFiltered||[]).length;
+    const shown = Math.min(total, window._licVisible||20);
+    countEl.textContent = `แสดง ${shown} จาก ${total} รายการ`;
+  }
 }
 
 function _worstLicenseStatus(lics) {
@@ -974,3 +997,12 @@ function deleteLicense(id) {
 document.addEventListener('click', function(e) {
   if (e.target === document.getElementById('license-modal')) closeLicenseModal();
 });
+
+// ── License Load More ──
+function loadMoreLicense() {
+  window._licVisible = (window._licVisible || 20) + 20;
+  _renderLicMemoIndexTable();
+}
+function resetLicensePagination() {
+  window._licVisible = 20;
+}
