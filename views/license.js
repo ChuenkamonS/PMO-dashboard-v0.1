@@ -16,6 +16,7 @@ function licenseToDb(l) {
   return {
     id:              String(l.id),
     name:            l.name,
+    plan:            l.plan || null,
     vendor:          l.vendor || null,
     seats:           Number(l.seats) || 1,
     price_per_month: Number(l.pricePerMonth) || 0,
@@ -35,7 +36,8 @@ function licenseToDb(l) {
 }
 function dbToLicense(r) {
   return {
-    id: r.id, name: r.name, vendor: r.vendor || '',
+    id: r.id, name: r.name, plan: r.plan || '',
+    vendor: r.vendor || '',
     seats: Number(r.seats) || 1, pricePerMonth: Number(r.price_per_month) || 0,
     owner: r.owner || '', department: r.department || '', project: r.project || '',
     licenseType: r.license_type || 'subscription', purchaseDate: r.purchase_date || '',
@@ -109,7 +111,7 @@ function parseLicenseFromMemo(memo) {
       expiry.setMonth(expiry.getMonth() + months);
       return {
         id: `memo-${memo.memoNo}-${it.name}`.replace(/\s/g, '_'),
-        name: it.name, seats, pricePerMonth: price, months,
+        name: it.name, plan: it.plan || '', seats, pricePerMonth: price, months,
         fxRate, pricePerMonthTHB: price * fxRate,
         purchaseDate: start.toISOString(),
         expiry: expiry.toISOString(),
@@ -118,6 +120,7 @@ function parseLicenseFromMemo(memo) {
         vendor: '', billingFreq: 'monthly', licenseType: 'subscription',
         statusOverride: null, note: '',
         startMonth: it.startMonth || '', endMonth: it.endMonth || '',
+        memoYear: new Date(memo.approvedAt || memo.createdAt).getFullYear(),
       };
     });
 }
@@ -417,181 +420,166 @@ function _worstLicenseStatus(lics) {
 }
 
 // ── TAB 2: BY PROJECT ────────────────────────────────────
-function _renderLicByProject() {
-  const allLics   = getAllLicenses().filter(l => getLicenseStatus(l).key !== 'cancelled');
-  const fxRate    = _getLicFxRate();
-  const projects  = [...new Set(allLics.map(l=>l.project).filter(Boolean))].sort();
-  const licNames  = [...new Set(allLics.map(l=>l.name).filter(Boolean))].sort();
+// ── BY PROJECT — state ────────────────────────────────────
+let _bpGroupMode   = 'project';
+let _bpShowPlan    = true;
+let _bpShowExpiry  = true;
+let _bpShowMemo    = true;
+let _bpYear        = 'all';
+let _bpProject     = 'all';
 
+function _renderLicByProject() {
   const el = document.getElementById('lic-content');
   if (!el) return;
 
+  const allLics = getAllLicenses().filter(l => getLicenseStatus(l).key !== 'cancelled');
+  const years   = [...new Set(allLics.map(l => l.memoYear).filter(Boolean))].sort((a,b)=>b-a);
+  const projs   = [...new Set(allLics.map(l => l.project).filter(Boolean))].sort();
+
   el.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-      <div style="display:flex;gap:0;border:0.5px solid var(--border-md);border-radius:var(--r-sm);overflow:hidden">
-        <button id="lic-bp-btn-proj" onclick="_licBpToggle('project')"
-          style="font-size:12px;padding:5px 14px;border:none;cursor:pointer;background:var(--blue-50,#E6F1FB);color:var(--blue)">
-          📁 By Project
-        </button>
-        <button id="lic-bp-btn-lic" onclick="_licBpToggle('license')"
-          style="font-size:12px;padding:5px 14px;border:none;border-left:0.5px solid var(--border-md);cursor:pointer;background:var(--surface);color:var(--text-2)">
-          📋 By License
-        </button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+      <div>
+        <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Group by</div>
+        <div style="display:flex;border:0.5px solid var(--border-md);border-radius:var(--r-sm);overflow:hidden">
+          <button id="bp-btn-proj" onclick="_bpSetGroup('project')"
+            style="font-size:12px;padding:5px 13px;border:none;cursor:pointer;background:var(--blue-50,#E6F1FB);color:var(--blue)">Project</button>
+          <button id="bp-btn-lic" onclick="_bpSetGroup('license')"
+            style="font-size:12px;padding:5px 13px;border:none;border-left:0.5px solid var(--border-md);cursor:pointer;background:var(--surface);color:var(--text-2)">License</button>
+        </div>
       </div>
-      <div style="font-size:11px;color:var(--text-2);display:flex;align-items:center;gap:6px">
-        FX: <input id="lic-fx-rate2" type="number" value="${fxRate}" min="1"
-          style="width:52px;font-size:11px;padding:3px 6px;border:1px solid var(--border-md);border-radius:4px;background:var(--surface)"
-          onchange="_saveLicFxRate(this.value);_renderLicByProject()">
-        THB/USD
+      <div>
+        <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Year</div>
+        <select onchange="_bpYear=this.value;_bpRenderTable()" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1)">
+          <option value="all">All years</option>
+          ${years.map(y=>`<option value="${y}" ${String(y)===_bpYear?'selected':''}>${y}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Project</div>
+        <select onchange="_bpProject=this.value;_bpRenderTable()" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1)">
+          <option value="all">All projects</option>
+          ${projs.map(p=>`<option value="${p}" ${p===_bpProject?'selected':''}>${esc(p)}</option>`).join('')}
+        </select>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:6px;align-items:flex-end">
+        <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Columns</div>
+        ${_bpColToggle('Plan','_bpShowPlan',_bpShowPlan)}
+        ${_bpColToggle('Expiry','_bpShowExpiry',_bpShowExpiry)}
+        ${_bpColToggle('Memo','_bpShowMemo',_bpShowMemo)}
       </div>
     </div>
+    <div id="bp-table-wrap"></div>`;
 
-    <div id="lic-bp-project-view">
-      ${_buildByProjectTable(projects, licNames, allLics, fxRate)}
-    </div>
-    <div id="lic-bp-license-view" style="display:none">
-      ${_buildByLicenseTable(allLics, fxRate)}
-    </div>`;
+  _bpRenderTable();
 }
 
-function _licBpToggle(view) {
-  const isProjView = view === 'project';
-  document.getElementById('lic-bp-project-view').style.display = isProjView ? '' : 'none';
-  document.getElementById('lic-bp-license-view').style.display = isProjView ? 'none' : '';
-  const pBtn = document.getElementById('lic-bp-btn-proj');
-  const lBtn = document.getElementById('lic-bp-btn-lic');
-  if (pBtn) { pBtn.style.background = isProjView ? 'var(--blue-50,#E6F1FB)' : 'var(--surface)'; pBtn.style.color = isProjView ? 'var(--blue)' : 'var(--text-2)'; }
-  if (lBtn) { lBtn.style.background = isProjView ? 'var(--surface)' : 'var(--blue-50,#E6F1FB)'; lBtn.style.color = isProjView ? 'var(--text-2)' : 'var(--blue)'; }
+function _bpColToggle(label, varName, checked) {
+  return `<label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-2);cursor:pointer;padding:5px 9px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+    <input type="checkbox" ${checked?'checked':''} onchange="${varName}=this.checked;_bpRenderTable()" style="accent-color:var(--blue);margin:0"> ${label}
+  </label>`;
 }
 
-function _buildByProjectTable(projects, licNames, allLics, fxRate) {
-  // Group allLics by project → by licName → seats+cost
-  const projMap = {};
-  allLics.forEach(l => {
-    const p = l.project || '(ไม่ระบุ)';
-    if (!projMap[p]) projMap[p] = {};
-    if (!projMap[p][l.name]) projMap[p][l.name] = { seats: 0, cost: 0, memos: new Set() };
-    projMap[p][l.name].seats += (l.seats || 1);
-    projMap[p][l.name].cost  += (l.pricePerMonth || 0) * (l.fxRate || fxRate) * (l.seats || 1);
-    if (l.memoNo) projMap[p][l.name].memos.add(l.memoNo);
+function _bpSetGroup(mode) {
+  _bpGroupMode = mode;
+  document.getElementById('bp-btn-proj').style.cssText = mode==='project'
+    ? 'font-size:12px;padding:5px 13px;border:none;cursor:pointer;background:var(--blue-50,#E6F1FB);color:var(--blue)'
+    : 'font-size:12px;padding:5px 13px;border:none;cursor:pointer;background:var(--surface);color:var(--text-2)';
+  document.getElementById('bp-btn-lic').style.cssText = mode==='license'
+    ? 'font-size:12px;padding:5px 13px;border:none;border-left:0.5px solid var(--border-md);cursor:pointer;background:var(--blue-50,#E6F1FB);color:var(--blue)'
+    : 'font-size:12px;padding:5px 13px;border:none;border-left:0.5px solid var(--border-md);cursor:pointer;background:var(--surface);color:var(--text-2)';
+  _bpRenderTable();
+}
+
+function _bpGetFiltered() {
+  return getAllLicenses().filter(l => {
+    if (getLicenseStatus(l).key === 'cancelled') return false;
+    if (_bpYear !== 'all' && String(l.memoYear) !== String(_bpYear)) return false;
+    if (_bpProject !== 'all' && l.project !== _bpProject) return false;
+    return true;
+  });
+}
+
+function _bpGroupKey(l) {
+  const expPart = _bpShowExpiry ? (l.expiry ? l.expiry.slice(0,7) : 'null') : '';
+  return `${l.name}||${l.plan||''}||${expPart}`;
+}
+
+function _bpRenderTable() {
+  const wrap = document.getElementById('bp-table-wrap');
+  if (!wrap) return;
+  const filtered = _bpGetFiltered();
+  const primaryKey = _bpGroupMode === 'project' ? 'project' : 'name';
+  const primaryVals = [...new Set(filtered.map(l => l[primaryKey] || '(ไม่ระบุ)'))].sort();
+
+  const colCount = 2 + (_bpShowPlan?1:0) + (_bpShowExpiry?1:0) + (_bpShowMemo?1:0);
+  const head = `<thead><tr>
+    <th style="padding-left:14px">${_bpGroupMode==='project' ? 'Project / License' : 'License / Project'}</th>
+    <th style="text-align:right">Seats</th>
+    ${_bpShowPlan   ? '<th>Plan</th>' : ''}
+    ${_bpShowExpiry ? '<th style="text-align:right">Expiry</th>' : ''}
+    ${_bpShowMemo   ? '<th>Memo</th>' : ''}
+  </tr></thead>`;
+
+  let grandTotal = 0;
+  let bodyRows = '';
+
+  primaryVals.forEach(pVal => {
+    const rows = filtered.filter(l => (l[primaryKey]||'(ไม่ระบุ)') === pVal);
+    const totalSeats = rows.reduce((s,l) => s+(l.seats||1), 0);
+    grandTotal += totalSeats;
+    const safeKey = pVal.replace(/'/g,"\\'");
+
+    bodyRows += `<tr class="lic-proj-row" onclick="_bpToggle(this,'${safeKey}')" style="cursor:pointer"
+      onmouseover="this.style.background='var(--bg-2)'" onmouseout="this.style.background=''">
+      <td style="padding-left:14px;font-weight:600"><span class="lic-expand" style="font-size:9px;margin-right:6px;display:inline-block;transition:transform 0.15s">▶</span>${esc(pVal)}</td>
+      <td style="text-align:right;font-weight:600">${totalSeats}</td>
+      ${_bpShowPlan   ? '<td style="color:var(--text-3)">—</td>' : ''}
+      ${_bpShowExpiry ? '<td style="text-align:right;color:var(--text-3)">—</td>' : ''}
+      ${_bpShowMemo   ? '<td style="color:var(--text-3)">—</td>' : ''}
+    </tr>`;
+
+    // Group child rows by key
+    const grouped = {};
+    rows.forEach(l => {
+      const k = _bpGroupKey(l);
+      if (!grouped[k]) grouped[k] = { ...l, seats: 0, memos: new Set() };
+      grouped[k].seats += (l.seats||1);
+      if (l.memoNo) grouped[k].memos.add(l.memoNo);
+    });
+
+    Object.values(grouped).forEach(g => {
+      const secLabel = _bpGroupMode === 'project' ? g.name : (g.project || '(ไม่ระบุ)');
+      const expiryStr = g.expiry ? new Date(g.expiry).toLocaleDateString('th-TH',{year:'numeric',month:'short'}) : '—';
+      bodyRows += `<tr class="lic-sub-row" data-bp-parent="${safeKey}" style="display:none">
+        <td style="padding-left:28px;font-size:12px;color:var(--text-2);background:var(--bg-2,#F8F8F6)">${esc(secLabel)}</td>
+        <td style="text-align:right;font-size:12px;background:var(--bg-2,#F8F8F6)">${g.seats}</td>
+        ${_bpShowPlan   ? `<td style="font-size:12px;background:var(--bg-2,#F8F8F6)">${esc(g.plan)||'<span style="color:var(--text-3)">—</span>'}</td>` : ''}
+        ${_bpShowExpiry ? `<td style="text-align:right;font-size:12px;background:var(--bg-2,#F8F8F6)">${expiryStr}</td>` : ''}
+        ${_bpShowMemo   ? `<td style="font-size:11px;color:var(--text-2);background:var(--bg-2,#F8F8F6)">${[...g.memos].join(', ')||'manual'}</td>` : ''}
+      </tr>`;
+    });
   });
 
-  // Get top licenses by total seats for column headers (max 6)
-  const licTotals = {};
-  allLics.forEach(l => { licTotals[l.name] = (licTotals[l.name]||0) + (l.seats||1); });
-  const topLics = Object.entries(licTotals).sort((a,b)=>b[1]-a[1]).slice(0,6).map(e=>e[0]);
+  bodyRows += `<tr style="font-weight:600;background:var(--bg-2,#F8F8F6);border-top:0.5px solid var(--border-md)">
+    <td style="padding-left:14px">Total</td>
+    <td style="text-align:right">${grandTotal}</td>
+    ${_bpShowPlan   ? '<td></td>' : ''}
+    ${_bpShowExpiry ? '<td></td>' : ''}
+    ${_bpShowMemo   ? '<td></td>' : ''}
+  </tr>`;
 
-  const rows = Object.entries(projMap).sort((a,b) => a[0].localeCompare(b[0]));
-
-  // Memo lookup per project
-  const memosByProj = {};
-  loadMemos().filter(m => m.type === 'sl' && m.status === 'completed').forEach(m => {
-    if (!memosByProj[m.project]) memosByProj[m.project] = [];
-    memosByProj[m.project].push(m);
-  });
-
-  return `<div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
-    <table class="hist-table" style="min-width:600px">
-      <thead><tr>
-        <th style="padding-left:14px">Project</th>
-        ${topLics.map(n=>`<th style="text-align:right;white-space:nowrap">${esc(n)}</th>`).join('')}
-        <th style="text-align:right">Total seats</th>
-        <th style="text-align:right">Monthly (THB)</th>
-      </tr></thead>
-      <tbody>
-        ${rows.map(([proj, licMap]) => {
-          const totalSeats = Object.values(licMap).reduce((s,v)=>s+v.seats,0);
-          const totalCost  = Object.values(licMap).reduce((s,v)=>s+v.cost,0);
-          const projMemos  = memosByProj[proj] || [];
-          const memoRows   = projMemos.map(m => {
-            const mLics = parseLicenseFromMemo(m);
-            const mNames = [...new Set(mLics.map(l=>l.name))].join(', ');
-            const mSeats = mLics.reduce((s,l)=>s+(l.seats||1),0);
-            const ms = _worstLicenseStatus(mLics);
-            return `<tr class="lic-sub-row" data-proj="${esc(proj)}" style="display:none">
-              <td colspan="${topLics.length+3}" style="padding:5px 14px 5px 30px;background:var(--bg-2,#F8F8F6);font-size:11px;color:var(--text-2)">
-                📄 ${esc(m.memoNo)} · ${shortDate(m.date||m.createdAt)} · ${esc(mNames)} · ${mSeats} seats
-                <span class="badge ${ms.badge}" style="margin-left:6px">${ms.label}</span>
-              </td>
-            </tr>`;
-          }).join('');
-          return `<tr class="lic-proj-row" onclick="_toggleLicSubRows('${esc(proj)}',this)"
-            style="cursor:pointer" onmouseover="this.style.background='var(--bg-2)'" onmouseout="this.style.background=''">
-            <td style="padding-left:14px;font-weight:600"><span class="lic-expand">▶</span> ${esc(proj)}</td>
-            ${topLics.map(n => {
-              const v = licMap[n];
-              return v ? `<td style="text-align:right">${v.seats}</td>` : `<td style="text-align:right;color:var(--text-3)">—</td>`;
-            }).join('')}
-            <td style="text-align:right;font-weight:500">${totalSeats}</td>
-            <td style="text-align:right;font-weight:500" class="mono">${money(totalCost)}</td>
-          </tr>${memoRows}`;
-        }).join('')}
-        <tr style="font-weight:600;background:var(--bg-2,#F8F8F6)">
-          <td style="padding-left:14px">Total</td>
-          ${topLics.map(n => {
-            const t = Object.values(projMap).reduce((s,m)=>s+(m[n]?.seats||0),0);
-            return `<td style="text-align:right">${t||'—'}</td>`;
-          }).join('')}
-          <td style="text-align:right">${allLics.reduce((s,l)=>s+(l.seats||1),0)}</td>
-          <td style="text-align:right" class="mono">${money(allLics.reduce((s,l)=>s+((l.pricePerMonth||0)*(l.fxRate||fxRate)*(l.seats||1)),0))}</td>
-        </tr>
-      </tbody>
+  wrap.innerHTML = `<div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
+    <table class="hist-table" style="min-width:500px">
+      ${head}<tbody>${bodyRows}</tbody>
     </table>
   </div>`;
 }
 
-function _buildByLicenseTable(allLics, fxRate) {
-  // Group by name → aggregate seats, cost, plans
-  const licMap = {};
-  allLics.forEach(l => {
-    if (!licMap[l.name]) licMap[l.name] = { name: l.name, vendor: l.vendor||'', seats: 0, pricePerMonth: l.pricePerMonth||0, fxRate: l.fxRate||fxRate, memos: new Set() };
-    licMap[l.name].seats += (l.seats||1);
-    if (l.memoNo) licMap[l.name].memos.add(l.memoNo);
-  });
-  const rows = Object.values(licMap).sort((a,b) => b.seats - a.seats);
-
-  return `<div class="card" style="padding:0;overflow:hidden">
-    <table class="hist-table">
-      <thead><tr>
-        <th style="padding-left:14px">License / Program</th>
-        <th style="text-align:right">Seats</th>
-        <th style="text-align:right">$/seat/mo</th>
-        <th style="text-align:right">Monthly (THB)</th>
-        <th style="text-align:right">Yearly (THB)</th>
-        <th>Memo(s)</th>
-      </tr></thead>
-      <tbody>
-        ${rows.map(r => {
-          const monthly = r.pricePerMonth * (r.fxRate||fxRate) * r.seats;
-          return `<tr>
-            <td style="padding-left:14px;font-weight:600">${esc(r.name)}<br>
-              ${r.vendor ? `<span style="font-size:10px;color:var(--text-3);font-weight:400">${esc(r.vendor)}</span>` : ''}
-            </td>
-            <td style="text-align:right">${r.seats}</td>
-            <td style="text-align:right;font-size:11px">$${r.pricePerMonth}</td>
-            <td style="text-align:right" class="mono">${money(monthly)}</td>
-            <td style="text-align:right" class="mono">${money(monthly*12)}</td>
-            <td style="font-size:11px;color:var(--text-2)">${[...r.memos].join(', ')||'manual'}</td>
-          </tr>`;
-        }).join('')}
-        <tr style="font-weight:600;background:var(--bg-2,#F8F8F6)">
-          <td style="padding-left:14px">Total</td>
-          <td style="text-align:right">${rows.reduce((s,r)=>s+r.seats,0)}</td>
-          <td></td>
-          <td style="text-align:right" class="mono">${money(rows.reduce((s,r)=>s+(r.pricePerMonth*(r.fxRate||fxRate)*r.seats),0))}</td>
-          <td style="text-align:right" class="mono">${money(rows.reduce((s,r)=>s+(r.pricePerMonth*(r.fxRate||fxRate)*r.seats*12),0))}</td>
-          <td></td>
-        </tr>
-      </tbody>
-    </table>
-  </div>`;
-}
-
-function _toggleLicSubRows(proj, row) {
+function _bpToggle(row, key) {
   const expanded = row.classList.toggle('lic-proj-expanded');
   const arrow = row.querySelector('.lic-expand');
   if (arrow) arrow.style.transform = expanded ? 'rotate(90deg)' : '';
-  document.querySelectorAll(`.lic-sub-row[data-proj="${proj}"]`).forEach(r => {
+  document.querySelectorAll(`.lic-sub-row[data-bp-parent="${key}"]`).forEach(r => {
     r.style.display = expanded ? 'table-row' : 'none';
   });
 }

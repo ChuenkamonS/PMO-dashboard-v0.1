@@ -145,10 +145,48 @@ function rmRow(btn, cid) {
   const c = document.getElementById(cid);
   if(c.querySelectorAll('.item-row').length > 1) btn.closest('.item-row').remove();
 }
+// ── Normalize: trim + title case for consistent storage ──
+function normalizeSLText(str) {
+  if (!str) return '';
+  return str.trim().replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+}
+
+// ── Gather existing license names and plans from all SL memos ──
+function getExistingSLSuggestions() {
+  const memos = loadMemos().filter(m => m.type === 'sl');
+  const names = new Set();
+  const plans = new Set();
+  memos.forEach(m => {
+    (m.slItems || []).forEach(it => {
+      if (it.name && it.name !== '-') names.add(normalizeSLText(it.name));
+      if (it.plan) plans.add(normalizeSLText(it.plan));
+    });
+  });
+  return { names: [...names].sort(), plans: [...plans].sort() };
+}
+
+// ── Attach typeahead to an input using a suggestion list ──
+function attachTypeahead(input, suggestions, datalistId) {
+  let dl = document.getElementById(datalistId);
+  if (!dl) {
+    dl = document.createElement('datalist');
+    dl.id = datalistId;
+    document.body.appendChild(dl);
+  }
+  dl.innerHTML = suggestions.map(s => `<option value="${s}">`).join('');
+  input.setAttribute('list', datalistId);
+  input.addEventListener('blur', () => {
+    input.value = normalizeSLText(input.value);
+  });
+}
+
 function addSLRow() {
-  const d = document.createElement('div'); d.className='item-row'; d.style.gridTemplateColumns='2.5fr 1.2fr 0.8fr 0.8fr 1fr 1fr 30px';
-  d.innerHTML = `<input class="ri" type="text" placeholder="ชื่อ Software"><input class="ri sl-price" type="number" placeholder="ราคา" oninput="calcSL()"><input class="ri sl-mo" type="number" value="12" oninput="calcSL()"><input class="ri sl-qty" type="number" placeholder="จำนวน" oninput="calcSL()"><input class="ri sl-start" type="month" placeholder="YYYY-MM"><input class="ri sl-end" type="month" placeholder="YYYY-MM"><button class="rm-btn" onclick="rmRow(this,'sl-rows');calcSL()" title="ลบ">${TRASH}</button>`;
+  const d = document.createElement('div'); d.className='item-row'; d.style.gridTemplateColumns='2fr 1.2fr 1.2fr 0.8fr 0.8fr 1fr 1fr 30px';
+  d.innerHTML = `<input class="ri sl-name" type="text" placeholder="ชื่อ Software"><input class="ri sl-plan" type="text" placeholder="Plan (เช่น Pro, Business)"><input class="ri sl-price" type="number" placeholder="ราคา" oninput="calcSL()"><input class="ri sl-mo" type="number" value="12" oninput="calcSL()"><input class="ri sl-qty" type="number" placeholder="จำนวน" oninput="calcSL()"><input class="ri sl-start" type="month" placeholder="YYYY-MM"><input class="ri sl-end" type="month" placeholder="YYYY-MM"><button class="rm-btn" onclick="rmRow(this,'sl-rows');calcSL()" title="ลบ">${TRASH}</button>`;
   document.getElementById('sl-rows').appendChild(d);
+  const sugg = getExistingSLSuggestions();
+  attachTypeahead(d.querySelector('.sl-name'), sugg.names, 'dl-sl-names');
+  attachTypeahead(d.querySelector('.sl-plan'), sugg.plans, 'dl-sl-plans');
 }
 function addHWRow() {
   const d = document.createElement('div'); d.className='item-row'; d.style.gridTemplateColumns='3fr 1.4fr 1fr 30px';
@@ -379,16 +417,19 @@ function collectMemoData() {
   data.subject = typedSubject || memoSubject(data);
   if(data.type==='sl') {
     const rows = Array.from(document.querySelectorAll('#sl-rows .item-row')).map((row,i) => {
-      const inp = row.querySelectorAll('input');
-      const price=Number(inp[1]?.value)||0, months=Number(inp[2]?.value)||0, qty=Number(inp[3]?.value)||0;
-      const startMonth = inp[4]?.value || null;  // YYYY-MM
-      const endMonth   = inp[5]?.value || null;  // YYYY-MM
-      return { no:i+1, name:inp[0]?.value.trim()||'-', price, months, qty, subtotal:price*months*qty, startMonth, endMonth };
+      const name  = normalizeSLText(row.querySelector('.sl-name')?.value || '');
+      const plan  = normalizeSLText(row.querySelector('.sl-plan')?.value || '');
+      const price = Number(row.querySelector('.sl-price')?.value)||0;
+      const months= Number(row.querySelector('.sl-mo')?.value)||0;
+      const qty   = Number(row.querySelector('.sl-qty')?.value)||0;
+      const startMonth = row.querySelector('.sl-start')?.value || null;
+      const endMonth   = row.querySelector('.sl-end')?.value || null;
+      return { no:i+1, name: name||'-', plan, price, months, qty, subtotal:price*months*qty, startMonth, endMonth };
     });
     data.total = rows.reduce((s,r)=>s+r.subtotal, 0);
-    data.slItems = rows.map(r => ({ name:r.name, price:r.price, months:r.months, qty:r.qty, startMonth:r.startMonth, endMonth:r.endMonth }));
+    data.slItems = rows.map(r => ({ name:r.name, plan:r.plan, price:r.price, months:r.months, qty:r.qty, startMonth:r.startMonth, endMonth:r.endMonth }));
     data.amountWords = val('#fs-sl .form-grid .fg:nth-child(2) input');
-    data.sections.push({ title:'รายการ Software', html:table(['#','ชื่อ Software','฿/เดือน','เดือน','จำนวน','เริ่ม','สิ้นสุด','รวม'], rows.map(r=>[r.no,r.name,money(r.price),r.months,r.qty,r.startMonth||'-',r.endMonth||'-',money(r.subtotal)]), [2,7]) });
+    data.sections.push({ title:'รายการ Software', html:table(['#','ชื่อ Software','Plan','฿/เดือน','เดือน','จำนวน','เริ่ม','สิ้นสุด','รวม'], rows.map(r=>[r.no,r.name,r.plan||'-',money(r.price),r.months,r.qty,r.startMonth||'-',r.endMonth||'-',money(r.subtotal)]), [3,8]) });
     const acctCols = getAcctCols();
     const acctRows = Array.from(document.querySelectorAll('#acct-body tr')).map(tr=>[val('.acct-email',tr),...Array.from(tr.querySelectorAll('.acct-val')).map(s=>s.value)]).filter(r=>r.some(Boolean));
     if(acctCols.length && acctRows.length) data.sections.push({ title:'ตาราง Account', html:table(['Email',...acctCols], acctRows, []) });
@@ -493,10 +534,10 @@ function validateMemo(data) {
   // ── SL ──
   if(data.type==='sl') {
     const slRows = Array.from(document.querySelectorAll('#sl-rows .item-row'));
-    if(!slRows.some(r => r.querySelector('input:first-child')?.value?.trim()))
+    if(!slRows.some(r => r.querySelector('.sl-name')?.value?.trim()))
       missing.push('ชื่อ Software (อย่างน้อย 1 รายการ)');
     slRows.forEach((r, i) => {
-      const name = r.querySelector('input:first-child')?.value?.trim();
+      const name = r.querySelector('.sl-name')?.value?.trim();
       if(!name) return;
       if(!(parseFloat(r.querySelector('.sl-price')?.value) > 0)) missing.push(`Software แถว ${i+1}: ราคา/เดือน`);
       if(!(parseInt(r.querySelector('.sl-mo')?.value) > 0))    missing.push(`Software แถว ${i+1}: จำนวนเดือน`);
