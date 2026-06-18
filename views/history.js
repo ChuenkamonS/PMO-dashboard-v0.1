@@ -350,6 +350,55 @@ function _buildMemoDetailContent(memo, mode) {
         <strong>เหตุผลที่ reject:</strong> ${esc(memo.rejectionReason)}</div>`
     : '';
 
+  // ── เรียน / เหตุผล block ──
+  const toReasonHtml = (memo.to || memo.reason) ? `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+      ${memo.to ? `
+      <div style="background:var(--bg-2,var(--color-background-secondary));
+        border-radius:var(--r-sm,var(--border-radius-md));padding:9px 12px">
+        <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
+          text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">เรียน</div>
+        <div style="font-size:13px;color:var(--text-1,var(--color-text-primary))">${esc(memo.to)}</div>
+      </div>` : '<div></div>'}
+      ${memo.reason ? `
+      <div style="background:var(--bg-2,var(--color-background-secondary));
+        border-radius:var(--r-sm,var(--border-radius-md));padding:9px 12px">
+        <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
+          text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">เหตุผลในการขอ</div>
+        <div style="font-size:12px;color:var(--text-1,var(--color-text-primary));
+          line-height:1.5">${esc(memo.reason)}</div>
+      </div>` : '<div></div>'}
+    </div>` : '';
+
+  // ── Audit Log (full mode only) ──
+  const auditHtml = mode !== 'readonly' ? (() => {
+    const entries = memo.auditLog || [];
+    const rows = entries.length
+      ? entries.map(e => `
+          <div style="display:flex;gap:12px;padding:7px 0;
+            border-bottom:0.5px solid var(--border,var(--color-border-tertiary))">
+            <div style="font-size:11px;color:var(--text-3,var(--color-text-tertiary));
+              white-space:nowrap;min-width:90px">${esc(shortDate(e.timestamp))}</div>
+            <div style="font-size:12px;color:var(--text-2,var(--color-text-secondary))">
+              <span style="font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(e.actor)}</span>
+              — ${esc(e.action)}
+              ${e.comment ? `<div style="font-size:11px;color:var(--text-3,var(--color-text-tertiary));
+                margin-top:2px">${esc(e.comment)}</div>` : ''}
+            </div>
+          </div>`).join('')
+      : `<div style="font-size:12px;color:var(--text-3,var(--color-text-tertiary));
+          padding:8px 0">ยังไม่มีประวัติ</div>`;
+    return `
+      <div style="margin-top:14px">
+        <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
+          text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">Audit Log</div>
+        <div style="border:0.5px solid var(--border,var(--color-border-tertiary));
+          border-radius:var(--r-sm,var(--border-radius-md));padding:0 12px">
+          ${rows}
+        </div>
+      </div>`;
+  })() : '';
+
   return `
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
       padding-bottom:12px;margin-bottom:12px;
@@ -368,9 +417,11 @@ function _buildMemoDetailContent(memo, mode) {
       </div>
     </div>
     ${coreHtml}
+    ${toReasonHtml}
     ${sectionHtml}
     ${approversHtml}
     ${noteHtml}
+    ${auditHtml}
     ${pmoHtml}`;
 }
 
