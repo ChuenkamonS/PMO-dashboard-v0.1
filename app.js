@@ -45,8 +45,9 @@ function memoToDb(m) {
     fx_rate: m.fxRate || null,
     sections: m.sections || [], sl_items: m.slItems || [], audit_log: m.auditLog || [],
     budget_source: m.budgetSource || null,
-    pmo_evidence_url:      m.pmoEvidenceUrl      || null,
-    approval_evidence_url: m.approvalEvidenceUrl || null,
+    // pmo_evidence_url and approval_evidence_url stored locally only until
+    // Supabase columns are added via: ALTER TABLE memos ADD COLUMN IF NOT EXISTS
+    // pmo_evidence_url TEXT, ADD COLUMN IF NOT EXISTS approval_evidence_url TEXT;
     submitted_at: m.submittedAt || null,
     approved_at: m.approvedAt || null, rejected_at: m.rejectedAt || null,
     created_at: m.createdAt || new Date().toISOString(),
@@ -70,8 +71,8 @@ function dbToMemo(r) {
     entTime: r.ent_time || null, entPlace: r.ent_place || null, entPeople: r.ent_people || null,
     fxRate: r.fx_rate, sections: r.sections || [], slItems: r.sl_items || [], auditLog: r.audit_log || [],
     budgetSource: r.budget_source || null,
-    pmoEvidenceUrl:      r.pmo_evidence_url      || null,
-    approvalEvidenceUrl: r.approval_evidence_url || null,
+    pmoEvidenceUrl:      r.pmo_evidence_url      || null,   // available after ALTER TABLE
+    approvalEvidenceUrl: r.approval_evidence_url || null,   // available after ALTER TABLE
     submittedAt: r.submitted_at, approvedAt: r.approved_at, rejectedAt: r.rejected_at,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
@@ -202,12 +203,18 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   if (await checkSupa()) {
     try {
       const toSnake = s => s.replace(/([A-Z])/g, '_$1').toLowerCase();
+      // Exclude fields whose DB columns don't exist yet
+      const PENDING_COLUMNS = new Set(['approvalEvidenceUrl','pmoEvidenceUrl','auditLog']);
       const patch = {
         status: updated.status,
         updated_at: now,
         approvers: updated.approvers,
         audit_log: extra.auditLog || updated.auditLog || memo.auditLog || [],
-        ...Object.fromEntries(Object.entries(extra).map(([k,v]) => [toSnake(k), v]))
+        ...Object.fromEntries(
+          Object.entries(extra)
+            .filter(([k]) => !PENDING_COLUMNS.has(k))
+            .map(([k,v]) => [toSnake(k), v])
+        )
       };
       if (updated.approvedAt)  patch.approved_at  = updated.approvedAt;
       if (updated.rejectedAt)  patch.rejected_at  = updated.rejectedAt;
