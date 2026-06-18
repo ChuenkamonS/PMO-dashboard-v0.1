@@ -45,6 +45,8 @@ function memoToDb(m) {
     fx_rate: m.fxRate || null,
     sections: m.sections || [], sl_items: m.slItems || [], audit_log: m.auditLog || [],
     budget_source: m.budgetSource || null,
+    pmo_evidence_url:      m.pmoEvidenceUrl      || null,
+    approval_evidence_url: m.approvalEvidenceUrl || null,
     submitted_at: m.submittedAt || null,
     approved_at: m.approvedAt || null, rejected_at: m.rejectedAt || null,
     created_at: m.createdAt || new Date().toISOString(),
@@ -68,6 +70,8 @@ function dbToMemo(r) {
     entTime: r.ent_time || null, entPlace: r.ent_place || null, entPeople: r.ent_people || null,
     fxRate: r.fx_rate, sections: r.sections || [], slItems: r.sl_items || [], auditLog: r.audit_log || [],
     budgetSource: r.budget_source || null,
+    pmoEvidenceUrl:      r.pmo_evidence_url      || null,
+    approvalEvidenceUrl: r.approval_evidence_url || null,
     submittedAt: r.submitted_at, approvedAt: r.approved_at, rejectedAt: r.rejected_at,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
@@ -202,7 +206,7 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
         status: updated.status,
         updated_at: now,
         approvers: updated.approvers,
-        audit_log: updated.auditLog || memo.auditLog || [],
+        audit_log: extra.auditLog || updated.auditLog || memo.auditLog || [],
         ...Object.fromEntries(Object.entries(extra).map(([k,v]) => [toSnake(k), v]))
       };
       if (updated.approvedAt)  patch.approved_at  = updated.approvedAt;
@@ -713,9 +717,20 @@ async function downloadMemoPdf(data) {
 
   let extra = '';
   if(data.type === 'sl') {
-    // [License] = first software name from SL rows
-    const firstSL = document.querySelector('#sl-rows .item-row input[type="text"]')?.value?.trim();
-    extra = firstSL ? '_' + firstSL.replace(/\s+/g,'') : '';
+    // Read first software name from memo sections data, NOT from live form DOM
+    const slSection = (data.sections||[]).find(s => s.title === 'รายการ Software');
+    let firstName = '';
+    if (slSection?.html) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = slSection.html;
+      const firstTd = tmp.querySelector('tbody tr td:nth-child(2)');
+      firstName = firstTd?.textContent?.trim() || '';
+    }
+    // Fallback to slItems array
+    if (!firstName) {
+      firstName = (data.slItems||[]).find(it => it.name && it.name !== '-')?.name || '';
+    }
+    extra = firstName ? '_' + firstName.replace(/\s+/g,'') : '';
   }
 
   const filename = `[${typeTag}]_${memoNo}_${proj}${extra}_${dateStr}.Ver1.0.0.pdf`;
