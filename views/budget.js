@@ -1788,7 +1788,7 @@ function showActualMemos(proj, type, memoNosStr) {
           ${memos.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(m => {
             const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
             const dateStr = d.toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'2-digit'});
-            return `<tr style="cursor:pointer" onclick="document.getElementById('actual-memo-panel').remove();openHistoryDetail('${esc(m.memoNo)}')">
+            return `<tr style="cursor:pointer" onclick="document.getElementById('actual-memo-panel').remove();openMemoReadOnly('${esc(m.memoNo)}')">
               <td style="${tdS};color:var(--blue);font-weight:500">${esc(m.memoNo)}</td>
               <td style="${tdS};color:var(--text-3)">${dateStr}</td>
               <td style="${tdS}">${esc(m.subject || m.memoNo)}</td>
@@ -2079,7 +2079,7 @@ function showPoolMemos(poolId) {
           ${memos.sort((a,b) => (b.date||'').localeCompare(a.date||'')).map(m => {
             const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
             const dateStr = d.toLocaleDateString('th-TH', {day:'numeric',month:'short',year:'2-digit'});
-            return `<tr style="cursor:pointer" onclick="document.getElementById('bva-memo-panel').remove();openHistoryDetail('${esc(m.memoNo)}')">
+            return `<tr style="cursor:pointer" onclick="document.getElementById('bva-memo-panel').remove();openMemoReadOnly('${esc(m.memoNo)}')">
               <td style="${tdS};color:var(--blue);font-weight:500">${esc(m.memoNo)}</td>
               <td style="${tdS};color:var(--text-3)">${dateStr}</td>
               <td style="${tdS}"><span style="font-size:10px;padding:2px 7px;border-radius:4px;background:var(--bg)">${BGT_TYPE_LABELS[m.type] || m.type}</span></td>
