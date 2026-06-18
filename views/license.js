@@ -397,7 +397,7 @@ function _renderLicMemoIndexRows() {
       <td style="padding-left:16px;font-weight:600">
         ${esc(lic.name)}
         ${lic.vendor ? `<div style="font-size:10px;color:var(--text-3);font-weight:400">${esc(lic.vendor)}</div>` : ''}
-        ${lic.memoNo ? `<div style="font-size:10px;color:var(--blue);font-weight:400;cursor:pointer" onclick="openMemoPdf && openMemoPdf('${esc(lic.memoNo)}')">${esc(lic.memoNo)}</div>` : ''}
+        ${lic.memoNo ? `<div style="font-size:10px;color:var(--blue);font-weight:400;cursor:pointer" onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly('${esc(lic.memoNo)}')">${esc(lic.memoNo)}</div>` : ''}
       </td>
       <td>${esc(lic.seats || 1)}</td>
       <td class="mono">${esc(money(monthlyCostLic))}</td>
