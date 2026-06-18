@@ -274,7 +274,7 @@ function calcDepGrand() {
   if (grandEl) grandEl.textContent = '฿' + grand.toLocaleString();
   const totalEl = document.getElementById('dep-total');
   if (totalEl) { totalEl.value = grand; totalEl.dispatchEvent(new Event('input')); }
-  updateTotal();
+  // updateTotal() removed — function does not exist; dep-total input event handles display
 }
 
 function depSyncQty() {
