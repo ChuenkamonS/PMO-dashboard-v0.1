@@ -987,7 +987,6 @@ function closeBudgetTagModal() {
 function saveBudgetTag(memoNo) {
   const memo = getHistoryMemos().find(m => m.memoNo === memoNo);
   if(!memo) return;
-  // Only completed memos can be tagged
   if(memo.status !== 'completed') {
     alert('Tag Budget ได้เฉพาะ Memo ที่อนุมัติแล้วเท่านั้น');
     closeBudgetTagModal();
@@ -995,11 +994,34 @@ function saveBudgetTag(memoNo) {
   }
   const selected = document.querySelector('input[name="bsrc-opt"]:checked')?.value;
   if(!selected) { alert('กรุณาเลือก Budget Source'); return; }
-  // patch budgetSource only — do NOT change status
-  const newSource = selected === (memo.project||'(ไม่ระบุ)') ? null : selected;
-  updateMemoStatus(memoNo, memo.status, { budgetSource: newSource });
+
+  // null means "use project default" — set when user picks the memo's own project
+  const newSource = selected === (memo.project || '(ไม่ระบุ)') ? null : selected;
+
+  // ── Write to localStorage directly (bypass terminal guard in updateMemoStatusAsync) ──
+  const memos = loadMemos();
+  const idx   = memos.findIndex(m => m.memoNo === memoNo);
+  if (idx < 0) { closeBudgetTagModal(); return; }
+  memos[idx] = { ...memos[idx], budgetSource: newSource, updatedAt: new Date().toISOString() };
+  storeMemos(memos);
+
+  // ── Write to Supabase directly (budgetSource only patch, no status change) ──
+  if (typeof checkSupa === 'function') {
+    checkSupa().then(async ok => {
+      if (!ok) return;
+      try {
+        await supaFetch('memos', 'PATCH',
+          { budget_source: newSource, updated_at: new Date().toISOString() },
+          '?memo_no=eq.' + encodeURIComponent(memoNo)
+        );
+      } catch(e) { console.warn('Budget tag Supabase sync failed:', e.message); }
+    });
+  }
+
   closeBudgetTagModal();
-  renderHistoryMemos();
+  // Re-render both tabs so the change is visible immediately
+  if (typeof renderHistoryMemos === 'function') renderHistoryMemos();
+  if (typeof renderBudget === 'function') renderBudget();
 }
 
 // ── History Load More ──
