@@ -430,68 +430,87 @@ function _buildMemoTypeSection(memo) {
   const type = memo.type;
   const sections = memo.sections || [];
 
-  // SL: software table + collapsible account table
+  // Shared mini-table builder — used as fallback when sections is empty
+  function miniTable(headers, rows) {
+    if (!rows.length) return '';
+    const thCss = 'background:var(--bg-2,var(--color-background-secondary));padding:5px 9px;text-align:left;font-weight:500;font-size:11px;color:var(--text-2,var(--color-text-secondary));border-bottom:0.5px solid var(--border,var(--color-border-tertiary))';
+    const tdCss = 'padding:6px 9px;border-bottom:0.5px solid var(--bg-2,var(--color-border-tertiary));color:var(--text-1,var(--color-text-primary));font-size:11px';
+    const ths = headers.map(h => `<th style="${thCss}">${esc(h)}</th>`).join('');
+    const trs = rows.map(r => `<tr>${r.map(c => `<td style="${tdCss}">${esc(String(c ?? '—'))}</td>`).join('')}</tr>`).join('');
+    return `<table style="width:100%;border-collapse:collapse"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
+  }
+
+  // ── SL ──
   if (type === 'sl') {
     const swSection = sections.find(s => s.title === 'รายการ Software');
     const acctSection = sections.find(s => s.title === 'ตาราง Account');
-    const acctId = 'acct-' + memo.memoNo.replace(/[^a-z0-9]/gi,'');
-    const acctRows = acctSection
-      ? (() => {
-          const tmp = document.createElement('div');
-          tmp.innerHTML = acctSection.html;
-          return tmp.querySelectorAll('tbody tr').length;
-        })() : 0;
+
+    let swHtml = swSection ? _cleanSectionTable(swSection.html) : '';
+    // Fallback: rebuild from slItems raw data (older/imported memos)
+    if (!swHtml && (memo.slItems || []).length) {
+      const rows = memo.slItems.map((it, i) => [
+        i + 1, it.name || '—', it.plan || '—',
+        it.price ? money(it.price) : '—', it.months || '—', it.qty || '—',
+        it.startMonth || '—', it.endMonth || '—',
+        (it.price && it.months && it.qty) ? money(it.price * it.months * it.qty) : '—',
+      ]);
+      swHtml = miniTable(['#','ชื่อ Software','Plan','฿/เดือน','เดือน','จำนวน','เริ่ม','สิ้นสุด','รวม'], rows);
+    }
+
+    const acctRows = acctSection ? (() => {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = acctSection.html;
+      return tmp.querySelectorAll('tbody tr').length;
+    })() : 0;
 
     return `
-      ${swSection ? `
+      ${swHtml ? `
         <div style="margin-bottom:14px">
           <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
             text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">รายการ Software</div>
           <div style="border:0.5px solid var(--border,var(--color-border-tertiary));
-            border-radius:var(--r-sm,var(--border-radius-md));overflow:hidden">
-            ${_cleanSectionTable(swSection.html)}
-          </div>
+            border-radius:var(--r-sm,var(--border-radius-md));overflow:hidden">${swHtml}</div>
         </div>` : ''}
       ${acctSection && acctRows > 0 ? `
         <div style="margin-bottom:14px">
           <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
             text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">
-            ตาราง Account
-            <span style="font-weight:400;color:var(--text-3,var(--color-text-tertiary))">(${acctRows} account)</span>
-          </div>
+            ตาราง Account <span style="font-weight:400">(${acctRows} account)</span></div>
           <div style="border:0.5px solid var(--border,var(--color-border-tertiary));
             border-radius:var(--r-sm,var(--border-radius-md));overflow:hidden">
-            <div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';
-              this.querySelector('span').style.transform=this.querySelector('span').style.transform==='rotate(180deg)'?'':'rotate(180deg)'"
-              style="display:flex;align-items:center;justify-content:space-between;
-                padding:7px 10px;cursor:pointer;
-                background:var(--bg-2,var(--color-background-secondary))">
+            <div onclick="var n=this.nextElementSibling;n.style.display=n.style.display==='none'?'block':'none';this.querySelector('span').style.transform=this.querySelector('span').style.transform==='rotate(180deg)'?'':'rotate(180deg)'"
+              style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;cursor:pointer;background:var(--bg-2,var(--color-background-secondary))">
               <span style="font-size:11px;color:var(--text-2,var(--color-text-secondary))">ดูรายชื่อ account</span>
-              <span style="font-size:12px;color:var(--text-3,var(--color-text-tertiary));
-                transition:transform .15s;display:inline-block">&#x25BC;</span>
+              <span style="font-size:12px;color:var(--text-3,var(--color-text-tertiary));transition:transform .15s;display:inline-block">&#x25BC;</span>
             </div>
-            <div style="display:none">
-              ${_cleanSectionTable(acctSection.html)}
-            </div>
+            <div style="display:none">${_cleanSectionTable(acctSection.html)}</div>
           </div>
         </div>` : ''}`;
   }
 
-  // HW: hardware table
+  // ── HW ──
   if (type === 'hw') {
     const hwSection = sections.find(s => s.title === 'รายการ Hardware');
-    return hwSection ? `
+    let hwHtml = hwSection ? _cleanSectionTable(hwSection.html) : '';
+    // Fallback from hwItems
+    if (!hwHtml && (memo.hwItems || []).length) {
+      const rows = memo.hwItems.map((it, i) => [
+        i + 1, it.name || '—',
+        it.price ? money(it.price) : '—', it.qty || '—',
+        (it.price && it.qty) ? money(it.price * it.qty) : '—',
+      ]);
+      hwHtml = miniTable(['#','ชื่ออุปกรณ์','ราคา/ชิ้น','จำนวน','รวม'], rows);
+    }
+    return hwHtml ? `
       <div style="margin-bottom:14px">
         <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
           text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">รายการ Hardware</div>
         <div style="border:0.5px solid var(--border,var(--color-border-tertiary));
-          border-radius:var(--r-sm,var(--border-radius-md));overflow:hidden">
-          ${_cleanSectionTable(hwSection.html)}
-        </div>
+          border-radius:var(--r-sm,var(--border-radius-md));overflow:hidden">${hwHtml}</div>
       </div>` : '';
   }
 
-  // INT: activity info row + collapsible name list
+  // ── INT ──
   if (type === 'int') {
     const nameSection = sections.find(s => s.title === 'รายชื่อผู้เข้าร่วม');
     const actSection  = sections.find(s => s.title === 'รายละเอียดกิจกรรม');
@@ -500,49 +519,36 @@ function _buildMemoTypeSection(memo) {
       tmp.innerHTML = nameSection.html;
       return tmp.querySelectorAll('tbody tr').length;
     })() : 0;
-
     const infoHtml = `
-      <div style="display:flex;gap:14px;flex-wrap:wrap;
-        background:var(--bg-2,var(--color-background-secondary));
-        border-radius:var(--r-sm,var(--border-radius-md));
-        padding:9px 12px;margin-bottom:10px">
+      <div style="display:flex;gap:14px;flex-wrap:wrap;background:var(--bg-2,var(--color-background-secondary));border-radius:var(--r-sm,var(--border-radius-md));padding:9px 12px;margin-bottom:10px">
         ${memo.intActivity ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">กิจกรรม</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(memo.intActivity)}</span></div>` : ''}
         ${memo.intDate ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">วันที่จัด</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(memo.intDate)}</span></div>` : ''}
         ${memo.intHeadcount ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">จำนวน</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${memo.intHeadcount} คน</span></div>` : ''}
         ${memo.intPP ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">฿/คน</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(money(memo.intPP))}</span></div>` : ''}
+        ${!memo.intActivity && actSection ? `<div style="font-size:12px;color:var(--text-1)">${actSection.html}</div>` : ''}
       </div>`;
-
     return `
       <div style="margin-bottom:14px">
-        <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
-          text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">กิจกรรม Team Activity</div>
+        <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">กิจกรรม Team Activity</div>
         ${infoHtml}
         ${nameSection && nameCount > 0 ? `
-        <div style="border:0.5px solid var(--border,var(--color-border-tertiary));
-          border-radius:var(--r-sm,var(--border-radius-md));overflow:hidden">
-          <div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';
-            this.querySelector('span').style.transform=this.querySelector('span').style.transform==='rotate(180deg)'?'':'rotate(180deg)'"
-            style="display:flex;align-items:center;justify-content:space-between;
-              padding:7px 10px;cursor:pointer;
-              background:var(--bg-2,var(--color-background-secondary))">
+        <div style="border:0.5px solid var(--border,var(--color-border-tertiary));border-radius:var(--r-sm,var(--border-radius-md));overflow:hidden">
+          <div onclick="var n=this.nextElementSibling;n.style.display=n.style.display==='none'?'block':'none';this.querySelector('span').style.transform=this.querySelector('span').style.transform==='rotate(180deg)'?'':'rotate(180deg)'"
+            style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;cursor:pointer;background:var(--bg-2,var(--color-background-secondary))">
             <span style="font-size:11px;color:var(--text-2,var(--color-text-secondary))">รายชื่อผู้เข้าร่วม (${nameCount} คน)</span>
-            <span style="font-size:12px;color:var(--text-3,var(--color-text-tertiary));
-              transition:transform .15s;display:inline-block">&#x25BC;</span>
+            <span style="font-size:12px;color:var(--text-3,var(--color-text-tertiary));transition:transform .15s;display:inline-block">&#x25BC;</span>
           </div>
           <div style="display:none">${_cleanSectionTable(nameSection.html)}</div>
         </div>` : ''}
       </div>`;
   }
 
-  // ENT: event info row
+  // ── ENT ──
   if (type === 'ent') {
     return `
       <div style="margin-bottom:14px">
-        <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
-          text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">รายละเอียดงานรับรอง</div>
-        <div style="display:flex;gap:14px;flex-wrap:wrap;
-          background:var(--bg-2,var(--color-background-secondary));
-          border-radius:var(--r-sm,var(--border-radius-md));padding:9px 12px">
+        <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">รายละเอียดงานรับรอง</div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;background:var(--bg-2,var(--color-background-secondary));border-radius:var(--r-sm,var(--border-radius-md));padding:9px 12px">
           ${memo.entClient ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">ลูกค้า</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(memo.entClient)}</span></div>` : ''}
           ${memo.entDate ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">วันที่จัดงาน</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(memo.entDate)}</span></div>` : ''}
           ${memo.entPlace ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">สถานที่</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(memo.entPlace)}</span></div>` : ''}
@@ -551,29 +557,22 @@ function _buildMemoTypeSection(memo) {
       </div>`;
   }
 
-  // DEP: deployment info + expense table
+  // ── DEP ──
   if (type === 'dep') {
     const expSection = sections.find(s => s.title === 'รายการค่าใช้จ่าย' || s.title === 'รายละเอียดค่าใช้จ่าย');
     return `
       <div style="margin-bottom:14px">
-        <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
-          text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">รายละเอียด Deployment</div>
-        <div style="display:flex;gap:14px;flex-wrap:wrap;
-          background:var(--bg-2,var(--color-background-secondary));
-          border-radius:var(--r-sm,var(--border-radius-md));padding:9px 12px;margin-bottom:10px">
+        <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">รายละเอียด Deployment</div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;background:var(--bg-2,var(--color-background-secondary));border-radius:var(--r-sm,var(--border-radius-md));padding:9px 12px;margin-bottom:10px">
           ${memo.depLocation ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">สถานที่</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(memo.depLocation)}</span></div>` : ''}
           ${memo.depStart ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">วันที่</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(memo.depStart)}${memo.depEnd && memo.depEnd!==memo.depStart?' – '+esc(memo.depEnd):''}</span></div>` : ''}
           ${memo.depEmpCount ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">จำนวน</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${memo.depEmpCount} คน</span></div>` : ''}
         </div>
-        ${expSection ? `
-        <div style="border:0.5px solid var(--border,var(--color-border-tertiary));
-          border-radius:var(--r-sm,var(--border-radius-md));overflow:hidden">
-          ${_cleanSectionTable(expSection.html)}
-        </div>` : ''}
+        ${expSection ? `<div style="border:0.5px solid var(--border,var(--color-border-tertiary));border-radius:var(--r-sm,var(--border-radius-md));overflow:hidden">${_cleanSectionTable(expSection.html)}</div>` : ''}
       </div>`;
   }
 
-  // Fallback: render all sections as-is
+  // ── Fallback: render all sections as generic blocks ──
   return sections.map(s => `
     <div style="margin-bottom:14px">
       <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
