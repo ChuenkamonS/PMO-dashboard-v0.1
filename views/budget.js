@@ -1874,17 +1874,25 @@ async function deletePoolAsync(id) {
 }
 
 // ── Auto-match memo → pool ──
-// Returns the best matching pool for a memo, or null
+// Priority: 1) direct budgetPoolId  2) budgetSource project  3) memo.project
 function matchMemoToPool(memo, pools) {
+  if (!pools || !pools.length) return null;
+
+  // Priority 1: PMO set a direct pool ID — use it if pool still exists
+  if (memo.budgetPoolId) {
+    const direct = pools.find(p => p.id === memo.budgetPoolId);
+    if (direct) return direct;
+    // Pool was deleted — fall through to auto-match
+  }
+
+  // Priority 2 & 3: auto-match by project + type + date
   const d = parseThaiDate(memo.date) || new Date(memo.updatedAt || memo.createdAt);
   const memoKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-  // budgetSource overrides project for pool matching (PMO tagging)
   const proj = memo.budgetSource || memo.project || '(ไม่ระบุ)';
   const type = memo.type;
 
   const matches = pools.filter(p => {
     if (p.project !== proj) return false;
-    // memoTypes=[] or undefined/null means accept all types
     const types = Array.isArray(p.memoTypes) ? p.memoTypes : [];
     if (types.length > 0 && !types.includes(type)) return false;
     if (p.startMonth && memoKey < p.startMonth) return false;
@@ -1892,7 +1900,6 @@ function matchMemoToPool(memo, pools) {
     return true;
   });
   if (!matches.length) return null;
-  // Pick most specific (narrowest date range)
   return matches.sort((a, b) => {
     const aLen = a.startMonth && a.endMonth
       ? (new Date(a.endMonth+'-01') - new Date(a.startMonth+'-01')) : Infinity;
@@ -1900,6 +1907,29 @@ function matchMemoToPool(memo, pools) {
       ? (new Date(b.endMonth+'-01') - new Date(b.startMonth+'-01')) : Infinity;
     return aLen - bLen;
   })[0];
+}
+
+// ── Auto-tag a completed memo to the best matching pool ──
+// Called from app.js updateMemoStatusAsync when status becomes completed
+// Only runs if memo.budgetPoolId is not already set (respect PMO manual tag)
+// Returns updated memo if pool found, null otherwise
+function autoTagBudgetPool(memo) {
+  const pools = loadBudgetPools();
+  if (!pools.length) return null;
+  const matched = matchMemoToPool(memo, pools);
+  if (!matched) return null;
+  const memos = loadMemos();
+  const idx   = memos.findIndex(m => m.memoNo === memo.memoNo);
+  if (idx < 0) return null;
+  const updated = {
+    ...memos[idx],
+    budgetPoolId: matched.id,
+    budgetSource: matched.project,
+    updatedAt: new Date().toISOString(),
+  };
+  memos[idx] = updated;
+  storeMemos(memos);
+  return updated;
 }
 
 // Get memos that belong to this pool
