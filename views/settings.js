@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS = {
   },
   defaultReviewer: { name:'', title:'ผู้จัดการโครงการ' },
   defaultApprover: { name:'', title:'ประธานเจ้าหน้าที่บริหาร' },
+  signatureUrl: null,
 };
 
 // ── Load / Save ──
@@ -176,6 +177,40 @@ function renderSettingsUI(s) {
       <button class="btn-ghost" onclick="renderSettings()">↺ รีเซ็ต</button>
       <button class="btn-primary" onclick="saveSettings()">💾 บันทึก Settings</button>
     </div>
+
+    <!-- Signature Upload -->
+    <div class="card" style="padding:20px;margin-bottom:14px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px;color:var(--blue)">✍️ ลายเซ็นสำหรับเอกสาร PDF</div>
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:14px">
+        อัปโหลดภาพลายเซ็นของคุณ (PNG พื้นหลังโปร่งใส ดีที่สุด) — จะถูกประทับในเอกสารเมื่อคุณ Approve
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:6px">ลายเซ็นปัจจุบัน</div>
+          <div id="sig-current-preview" style="width:180px;height:70px;border:1px dashed var(--border-md);border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;background:var(--bg)">
+            ${s.signatureUrl
+              ? `<img src="${esc(s.signatureUrl)}" style="max-width:170px;max-height:62px;object-fit:contain">`
+              : `<span style="font-size:11px;color:var(--text-3)">ยังไม่มีลายเซ็น</span>`}
+          </div>
+        </div>
+        <div style="flex:1;min-width:220px">
+          <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:6px">อัปโหลดใหม่</div>
+          <input type="file" id="sig-upload-input" accept="image/png,image/jpeg,image/jpg"
+            style="font-size:12px;color:var(--text-2);margin-bottom:8px"
+            onchange="handleSignatureUpload(this)">
+          <div id="sig-upload-preview" style="margin-top:6px"></div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button class="btn-primary" onclick="saveSignature()" style="font-size:12px">💾 บันทึกลายเซ็น</button>
+            ${s.signatureUrl
+              ? `<button class="btn-sm" style="color:var(--red);font-size:12px" onclick="deleteSignature()">✕ ลบลายเซ็น</button>`
+              : ''}
+          </div>
+          <div style="font-size:10px;color:var(--text-3);margin-top:6px">
+            ขนาดแนะนำ: กว้าง 300–500px · สูง 80–120px · PNG พื้นหลังโปร่งใส · ไม่เกิน 200KB
+          </div>
+        </div>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -312,4 +347,55 @@ async function initSettings() {
   const s = await loadSettingsAsync();
   refreshProjectDropdowns(s.projects);
   return s;
+}
+
+// ── Signature management ──────────────────────────────
+let _pendingSignatureDataUrl = null;
+
+function handleSignatureUpload(input) {
+  const file = input.files[0];
+  const preview = document.getElementById('sig-upload-preview');
+  if (!file) { _pendingSignatureDataUrl = null; if(preview) preview.innerHTML = ''; return; }
+  if (file.size > 500 * 1024) {
+    if(preview) { preview.innerHTML = '<span style="font-size:11px;color:var(--red)">⚠ ไฟล์ใหญ่เกิน 200KB — โปรดบีบอัดก่อน</span>'; }
+    input.value = '';
+    _pendingSignatureDataUrl = null;
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    _pendingSignatureDataUrl = e.target.result;
+    if (preview) {
+      preview.innerHTML = `
+        <div style="font-size:11px;color:var(--text-3);margin-bottom:4px">ตัวอย่าง:</div>
+        <div style="border:1px solid var(--border);border-radius:var(--r-sm);padding:4px;background:var(--bg);display:inline-block">
+          <img src="${e.target.result}" style="max-width:200px;max-height:70px;object-fit:contain">
+        </div>`;
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+async function saveSignature() {
+  if (!_pendingSignatureDataUrl) { alert('กรุณาเลือกไฟล์ลายเซ็นก่อน'); return; }
+  const s = loadSettings();
+  s.signatureUrl = _pendingSignatureDataUrl;
+  await saveSettingsAsync(s);
+  _pendingSignatureDataUrl = null;
+  alert('✓ บันทึกลายเซ็นเรียบร้อย');
+  renderSettings();
+}
+
+async function deleteSignature() {
+  if (!confirm('ลบลายเซ็นออกจากระบบ?')) return;
+  const s = loadSettings();
+  delete s.signatureUrl;
+  await saveSettingsAsync(s);
+  alert('✓ ลบลายเซ็นเรียบร้อย');
+  renderSettings();
+}
+
+// Helper: get current user's signature URL (used by PDF generation in future)
+function getCurrentSignatureUrl() {
+  return loadSettings().signatureUrl || null;
 }
