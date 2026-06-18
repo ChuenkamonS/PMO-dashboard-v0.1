@@ -1580,10 +1580,10 @@ function _renderSpendBreakdown() {
       return k >= cutoffKey;
     });
   }
-  if(projVal !== 'all') approved = approved.filter(m => (m.project||'ไม่ระบุ') === projVal);
+  if(projVal !== 'all') approved = approved.filter(m => (m.budgetSource || m.project || 'ไม่ระบุ') === projVal);
   approved = approved.filter(m => types.includes(m.type));
 
-  const projects = [...new Set(approved.map(m => m.project||'ไม่ระบุ'))].sort();
+  const projects = [...new Set(approved.map(m => m.budgetSource || m.project || 'ไม่ระบุ'))].sort();
 
   const thS = 'padding:7px 10px;font-size:10px;font-weight:600;color:var(--text-3);border-bottom:1px solid var(--border);text-align:right;white-space:nowrap';
 
@@ -1604,7 +1604,7 @@ function _renderSpendBreakdown() {
       const byType = {};
       let rowTotal = 0;
       types.forEach(t => {
-        const amt = approved.filter(m => (m.project||'ไม่ระบุ')===proj && m.type===t)
+        const amt = approved.filter(m => (m.budgetSource || m.project || 'ไม่ระบุ') === proj && m.type === t)
           .reduce((s,m) => s+(Number(m.total)||0), 0);
         byType[t] = amt;
         rowTotal += amt;
@@ -1683,7 +1683,11 @@ function renderActualSpend() {
 
   const projSel = document.getElementById('as-project');
   if (projSel && projSel.options.length <= 1) {
-    const projs = [...new Set(loadMemos().filter(m => memoStatusKey(m) === 'completed').map(m => m.project || '(ไม่ระบุ)'))].sort();
+    // Include both original project and any PMO-overridden budgetSource values
+    const projs = [...new Set(loadMemos()
+      .filter(m => memoStatusKey(m) === 'completed')
+      .map(m => m.budgetSource || m.project || '(ไม่ระบุ)')
+    )].sort();
     projs.forEach(p => { const o = document.createElement('option'); o.value = o.textContent = p; projSel.appendChild(o); });
   }
 
@@ -1698,7 +1702,7 @@ function renderActualSpend() {
       return (!fromVal || k >= fromVal) && (!toVal || k <= toVal);
     });
   }
-  if (projVal !== 'all') approved = approved.filter(m => (m.project || '(ไม่ระบุ)') === projVal);
+  if (projVal !== 'all') approved = approved.filter(m => (m.budgetSource || m.project || '(ไม่ระบุ)') === projVal);
   if (typeVal !== 'all') approved = approved.filter(m => m.type === typeVal);
 
   if (!approved.length) {
@@ -1708,7 +1712,8 @@ function renderActualSpend() {
 
   const byProj = {};
   approved.forEach(m => {
-    const p = m.project || '(ไม่ระบุ)';
+    // Use budgetSource if PMO tagged it, otherwise fall back to memo.project
+    const p = m.budgetSource || m.project || '(ไม่ระบุ)';
     const t = m.type    || 'other';
     if (!byProj[p])    byProj[p] = {};
     if (!byProj[p][t]) byProj[p][t] = { total: 0, memos: [] };
