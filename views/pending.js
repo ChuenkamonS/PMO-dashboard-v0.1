@@ -423,7 +423,6 @@ function openDetailModal(memoNo) {
       </button>
     ` : ''}
     ${_isPMO && isPending ? `
-      <button class="btn-sm" style="color:var(--blue)" onclick="closeDetailModal();openPmoEditApproversModal('${_no}')">✎ Approvers</button>
       <button class="btn-sm" style="color:var(--red)"  onclick="closeDetailModal();openPmoOverrideModal('${_no}')">⚠ Override</button>
     ` : ''}
     <button class="btn-ghost" onclick="closeDetailModal()">ปิด</button>
@@ -460,18 +459,34 @@ function openPmoOverrideModal(memoNo) {
   modal.innerHTML = `
     <div class="card" style="width:480px;max-width:95vw;padding:24px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-        <span style="font-size:15px;font-weight:700;color:var(--red)">⚠ PMO Override Status</span>
+        <span style="font-size:15px;font-weight:700;color:var(--red)">⚠ PMO Override</span>
         <button class="btn-sm" onclick="document.getElementById('pmo-override-modal').remove()" style="padding:4px 10px">✕</button>
       </div>
-      <div style="font-size:12px;color:var(--text-2);margin-bottom:14px">
+      <div style="font-size:12px;color:var(--text-2);margin-bottom:16px">
         Memo: <strong>${esc(memo.memoNo)}</strong> · ${esc(memo.subject || memo.project || '-')}
       </div>
+
+      <!-- Section A: Edit Approvers -->
+      <div style="background:var(--bg);border-radius:var(--r-sm);padding:12px;margin-bottom:14px">
+        <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:10px">✎ แก้ไข Approvers</div>
+        <div id="pmo-appr-edit-rows">
+          ${(memo.approvers||[]).map((a,i) => `
+            <div class="approver-edit-row" style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:center;margin-bottom:6px">
+              <input class="ri appr-name" style="font-size:12px" value="${esc(a.name||'')}" placeholder="ชื่อ A${i+1}" ${a.status==='approved'?'disabled':''}>
+              <input class="ri appr-title" style="font-size:12px" value="${esc(a.title||'')}" placeholder="ตำแหน่ง" ${a.status==='approved'?'disabled':''}>
+              <span style="font-size:10px;color:${a.status==='approved'?'var(--green)':'var(--text-3)'}">A${i+1}${a.status==='approved'?' ✓':''}</span>
+            </div>`).join('')}
+        </div>
+        <button class="btn-sm" onclick="addPmoApproverRow()" style="font-size:11px;margin-top:4px">+ เพิ่ม Approver</button>
+      </div>
+
+      <!-- Section B: Override Status -->
       <div class="fg" style="margin-bottom:10px">
-        <label style="font-size:11px;font-weight:600;color:var(--text-2)">เปลี่ยนสถานะเป็น *</label>
+        <label style="font-size:11px;font-weight:600;color:var(--text-2)">เปลี่ยนสถานะเป็น</label>
         <select id="pmo-new-status" class="ri" style="margin-top:4px">${statusOpts}</select>
       </div>
       <div class="fg" style="margin-bottom:10px">
-        <label style="font-size:11px;font-weight:600;color:var(--text-2)">อนุมัติโดย (ชื่อผู้อนุมัติจริง)</label>
+        <label style="font-size:11px;font-weight:600;color:var(--text-2)">อนุมัติโดย (ชื่อผู้อนุมัติจริง นอกระบบ)</label>
         <input id="pmo-approved-by" class="ri" style="margin-top:4px" placeholder="เช่น นาย ปกรณ์ เจียมสกุลทิพย์">
       </div>
       <div class="fg" style="margin-bottom:10px">
@@ -482,7 +497,7 @@ function openPmoOverrideModal(memoNo) {
         <label style="font-size:11px;font-weight:600;color:var(--text-2)">
           แนบหลักฐาน * (บังคับ — ภาพ Email, เอกสารสแกน, PDF)
         </label>
-        <div style="margin-top:6px;display:flex;align-items:center;gap:8px">
+        <div style="margin-top:6px">
           <input type="file" id="pmo-evidence-file" accept="image/*,.pdf"
             style="font-size:12px;color:var(--text-2)"
             onchange="handlePmoEvidenceUpload(this)">
@@ -492,7 +507,7 @@ function openPmoOverrideModal(memoNo) {
       </div>
       <div style="display:flex;justify-content:flex-end;gap:10px">
         <button class="btn-ghost" onclick="document.getElementById('pmo-override-modal').remove()">Cancel</button>
-        <button class="btn-primary" style="background:var(--red);border-color:var(--red)" onclick="confirmPmoOverride('${esc(memoNo)}')">⚠ Override</button>
+        <button class="btn-primary" style="background:var(--red);border-color:var(--red)" onclick="confirmPmoOverride('${esc(memoNo)}')">⚠ Confirm Override</button>
       </div>
     </div>`;
   document.body.appendChild(modal);
@@ -519,14 +534,43 @@ function handlePmoEvidenceUpload(input) {
   reader.readAsDataURL(file);
 }
 
+function addPmoApproverRow() {
+  const container = document.getElementById('pmo-appr-edit-rows');
+  if (!container) return;
+  const count = container.querySelectorAll('.approver-edit-row').length;
+  if (count >= 3) { alert('สามารถมี Approver ได้สูงสุด 3 คน'); return; }
+  const row = document.createElement('div');
+  row.className = 'approver-edit-row';
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:center;margin-bottom:6px';
+  row.innerHTML = `
+    <input class="ri appr-name" style="font-size:12px" placeholder="ชื่อ A${count+1}">
+    <input class="ri appr-title" style="font-size:12px" placeholder="ตำแหน่ง">
+    <button class="btn-sm" onclick="this.closest('.approver-edit-row').remove()" style="color:var(--red);padding:3px 7px">✕</button>`;
+  container.appendChild(row);
+}
+
 function confirmPmoOverride(memoNo) {
-  const newStatus  = document.getElementById('pmo-new-status')?.value;
-  const note       = document.getElementById('pmo-override-note')?.value.trim();
-  const approvedBy = document.getElementById('pmo-approved-by')?.value.trim();
+  const newStatus   = document.getElementById('pmo-new-status')?.value;
+  const note        = document.getElementById('pmo-override-note')?.value.trim();
+  const approvedBy  = document.getElementById('pmo-approved-by')?.value.trim();
   const evidenceUrl = document.getElementById('pmo-evidence-url')?.value || '';
 
   if (!note) { alert('กรุณาระบุเหตุผล/หมายเหตุ'); return; }
   if (!evidenceUrl) { alert('กรุณาแนบหลักฐาน (ภาพ Email หรือเอกสาร)'); return; }
+
+  // Collect updated approvers from edit rows
+  const editRows = document.querySelectorAll('#pmo-appr-edit-rows .approver-edit-row');
+  const memo     = loadMemos().find(m => m.memoNo === memoNo);
+  let newApprovers = null;
+  if (editRows.length && memo) {
+    newApprovers = Array.from(editRows).map((row, i) => {
+      const name  = row.querySelector('.appr-name')?.value.trim()  || '';
+      const title = row.querySelector('.appr-title')?.value.trim() || '';
+      const orig  = (memo.approvers||[])[i];
+      if (orig?.status === 'approved') return orig; // keep approved entries intact
+      return { name, title, status: 'pending', approvedAt: null, approvedBy: null };
+    }).filter(a => a.name);
+  }
 
   const memos = loadMemos();
   const user  = currentUser();
@@ -534,14 +578,17 @@ function confirmPmoOverride(memoNo) {
   storeMemos(memos);
   const updatedAuditLog = memos.find(m => m.memoNo === memoNo)?.auditLog || [];
 
-  updateMemoStatusAsync(memoNo, newStatus, {
-    pmoOverrideNote:      note,
-    pmoOverrideBy:        user,
-    approvedBy:           approvedBy || user,
-    approvalNote:         note,
-    pmoEvidenceUrl:       evidenceUrl,
-    auditLog:             updatedAuditLog,
-  });
+  const extra = {
+    pmoOverrideNote:  note,
+    pmoOverrideBy:    user,
+    approvedBy:       approvedBy || user,
+    approvalNote:     note,
+    pmoEvidenceUrl:   evidenceUrl,
+    auditLog:         updatedAuditLog,
+  };
+  if (newApprovers) extra.approvers = newApprovers;
+
+  updateMemoStatusAsync(memoNo, newStatus, extra);
 
   document.getElementById('pmo-override-modal')?.remove();
   closeDetailModal();
