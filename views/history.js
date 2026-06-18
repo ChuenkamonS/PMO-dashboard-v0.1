@@ -636,6 +636,7 @@ function openMemoReadOnly(memoNo) {
   if (!memo) { alert('ไม่พบ Memo'); return; }
   document.getElementById('detail-content').innerHTML = _buildMemoDetailContent(memo, 'readonly');
   const acts = document.getElementById('detail-actions');
+  // Read-only tabs: ปิด only — no approve, no reject, no tag budget, no duplicate
   if (acts) acts.innerHTML = `<button class="btn-ghost" type="button" onclick="closeDetailModal()">ปิด</button>`;
   const modalInner = document.querySelector('#detail-modal > div');
   if (modalInner) modalInner.style.maxWidth = '680px';
