@@ -890,7 +890,7 @@ function _renderPOTable() {
     const pct = po.orderedQty > 0 ? Math.round(po.arrivedQty / po.orderedQty * 100) : 0;
     const barColor = pct >= 100 ? '#3B6D11' : '#185FA5';
     return `<tr style="${po.status==='fulfilled'?'opacity:0.7':''}">
-      <td style="color:#185FA5;font-weight:500;cursor:pointer;padding:9px 12px" onclick="typeof openHistoryDetail==='function'&&openHistoryDetail('${esc(po.memoNo)}')">${esc(po.memoNo)}</td>
+      <td style="color:#185FA5;font-weight:500;cursor:pointer;padding:9px 12px" onclick="typeof openHistoryDetail==='function'&&openMemoReadOnly('${esc(po.memoNo)}')">${esc(po.memoNo)}</td>
       <td style="padding:9px 12px;font-size:12px">${esc(po.itemName)}</td>
       <td style="padding:9px 12px;font-size:12px">${esc(po.project||'—')}</td>
       <td style="padding:9px 12px;text-align:center;font-size:12px">${po.orderedQty}</td>
