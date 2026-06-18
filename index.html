@@ -1967,29 +1967,42 @@ svg.icon { display: inline-block; vertical-align: middle; }
 
 <!-- Approve Modal -->
 <div id="approve-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:300;align-items:center;justify-content:center">
-  <div style="background:var(--surface);border-radius:var(--r);padding:24px;width:460px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,0.2)">
-    <div style="font-size:15px;font-weight:700;margin-bottom:16px">✓ Approve Memo</div>
-    <div style="background:var(--bg);border-radius:var(--r-sm);padding:12px;margin-bottom:14px;font-size:13px">
-      <div style="display:grid;grid-template-columns:80px 1fr;gap:6px">
-        <span style="color:var(--text-3);font-size:11px;font-weight:600">MEMO</span><span id="approve-memo-no" style="font-family:monospace;font-weight:600"></span>
-        <span style="color:var(--text-3);font-size:11px;font-weight:600">PROJECT</span><span id="approve-project"></span>
-        <span style="color:var(--text-3);font-size:11px;font-weight:600">AMOUNT</span><span id="approve-amount" style="font-weight:700;color:var(--blue-800)"></span>
-        <span style="color:var(--text-3);font-size:11px;font-weight:600">SUBJECT</span><span id="approve-subject" style="color:var(--text-2)"></span>
+  <div style="background:var(--surface);border-radius:var(--r);padding:0;width:520px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,0.2);overflow:hidden">
+    <!-- Header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px 14px;border-bottom:1px solid var(--border)">
+      <div style="font-size:15px;font-weight:700;color:var(--text)">✓ Approve Memo</div>
+      <button onclick="closeApproveModal()" style="background:none;border:none;cursor:pointer;color:var(--text-3);font-size:20px;line-height:1">&#x2715;</button>
+    </div>
+    <!-- Memo summary -->
+    <div style="padding:14px 22px;background:var(--bg);border-bottom:1px solid var(--border)">
+      <div style="display:grid;grid-template-columns:80px 1fr;gap:5px;font-size:12px">
+        <span style="color:var(--text-3);font-weight:600;text-transform:uppercase;font-size:10px;padding-top:2px">MEMO</span>
+        <span id="approve-memo-no" style="font-family:monospace;font-weight:700;color:var(--text)"></span>
+        <span style="color:var(--text-3);font-weight:600;text-transform:uppercase;font-size:10px;padding-top:2px">PROJECT</span>
+        <span id="approve-project" style="color:var(--text-2)"></span>
+        <span style="color:var(--text-3);font-weight:600;text-transform:uppercase;font-size:10px;padding-top:2px">AMOUNT</span>
+        <span id="approve-amount" style="font-weight:700;color:var(--blue-800)"></span>
+        <span style="color:var(--text-3);font-weight:600;text-transform:uppercase;font-size:10px;padding-top:2px">SUBJECT</span>
+        <span id="approve-subject" style="color:var(--text-2);font-size:11px;line-height:1.4"></span>
       </div>
     </div>
-    <div class="fg" style="margin-bottom:16px">
-      <label>Approval Note <span style="color:var(--text-3);font-weight:400">(optional)</span></label>
-      <textarea id="approve-note" placeholder="เช่น Approved via email, Reviewed in meeting..." style="min-height:60px;font-family:inherit;font-size:13px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);width:100%;resize:vertical;outline:none"></textarea>
+    <!-- Fields -->
+    <div style="padding:16px 22px">
+      <div class="fg" style="margin-bottom:14px">
+        <label style="font-size:11px;font-weight:600;color:var(--text-2)">Approval Note <span style="color:var(--text-3);font-weight:400">(optional)</span></label>
+        <textarea id="approve-note" placeholder="เช่น Approved via email, Reviewed in meeting..." style="min-height:60px;font-family:inherit;font-size:13px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);width:100%;resize:vertical;outline:none;margin-top:4px"></textarea>
+      </div>
+      <div class="fg" style="margin-bottom:6px">
+        <label style="font-size:11px;font-weight:600;color:var(--text-2)">แนบเอกสารประกอบ <span style="color:var(--text-3);font-weight:400">(optional — ภาพ Email, เอกสารสแกน)</span></label>
+        <input type="file" id="approve-evidence-file" accept="image/*,.pdf"
+          style="margin-top:6px;font-size:12px;color:var(--text-2)"
+          onchange="handleApproveEvidenceUpload(this)">
+        <div id="approve-evidence-preview" style="margin-top:4px;font-size:11px;color:var(--text-3)"></div>
+        <input type="hidden" id="approve-evidence-url" value="">
+      </div>
     </div>
-    <div class="fg" style="margin-bottom:16px">
-      <label>แนบเอกสารประกอบ <span style="color:var(--text-3);font-weight:400">(optional — ภาพ Email, เอกสารสแกน)</span></label>
-      <input type="file" id="approve-evidence-file" accept="image/*,.pdf"
-        style="margin-top:6px;font-size:12px;color:var(--text-2)"
-        onchange="handleApproveEvidenceUpload(this)">
-      <div id="approve-evidence-preview" style="margin-top:4px;font-size:11px;color:var(--text-3)"></div>
-      <input type="hidden" id="approve-evidence-url" value="">
-    </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end">
+    <!-- Actions -->
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:12px 22px;border-top:1px solid var(--border)">
       <button class="btn-ghost" onclick="closeApproveModal()">Cancel</button>
       <button class="btn-primary" onclick="confirmApprove()" style="background:var(--green)">✓ Confirm Approve</button>
     </div>
