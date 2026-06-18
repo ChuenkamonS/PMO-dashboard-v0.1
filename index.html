@@ -2211,8 +2211,12 @@ document.addEventListener('click', e => {
       <div id="budget-tag-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
         <div class="card" style="width:420px;max-width:95vw;max-height:88vh;overflow-y:auto;padding:24px;display:flex;flex-direction:column">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-shrink:0">
-            <span style="font-size:15px;font-weight:700">Assign Budget Source</span>
-            <button class="btn-sm" onclick="closeBudgetTagModal()" style="padding:3px 8px">✕</button>
+            <span style="font-size:15px;font-weight:700">Assign Budget Pool</span>
+            <div style="display:flex;align-items:center;gap:8px">
+              <label style="font-size:11px;color:var(--text-3)">ปี</label>
+              <select id="btm-year-filter" class="ri" style="font-size:12px;padding:3px 8px;width:90px"></select>
+              <button class="btn-sm" onclick="closeBudgetTagModal()" style="padding:3px 8px">✕</button>
+            </div>
           </div>
           <div style="margin-bottom:14px;padding:10px 12px;background:var(--bg);border-radius:var(--r);border:1px solid var(--border);flex-shrink:0">
             <div style="font-size:13px;font-weight:600" id="btm-memo-no"></div>
