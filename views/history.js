@@ -282,82 +282,309 @@ function buildApprovalTimeline(memo) {
     </div>`).join('');
 }
 
+// ── Shared memo detail content builder ──────────────────
+// mode: 'full' (History/Pending) | 'readonly' (Budget/License/Device)
+function _buildMemoDetailContent(memo, mode) {
+  const _st = memo.status || '';
+  const isCompleted = _st === 'completed';
+  const isDraft     = _st === 'draft';
+  const isPMOUser   = typeof isPMO === 'function' && isPMO();
+
+  // ── Core 3-field row ──
+  const dateLabel  = isCompleted ? 'วันที่อนุมัติ' : isDraft ? 'สร้างเมื่อ' : 'วันที่ขอ';
+  const dateValue  = isCompleted
+    ? (shortDate(memo.approvedAt || memo.updatedAt) || '—')
+    : (shortDate(memo.createdAt) || '—');
+
+  const coreHtml = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;
+      background:var(--bg-2,var(--color-background-secondary));
+      border-radius:var(--r-sm,var(--border-radius-md));
+      padding:10px 12px;margin-bottom:14px">
+      <div>
+        <span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
+          text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">วงเงิน</span>
+        <span style="font-size:14px;font-weight:500;color:var(--blue-800,var(--color-text-info));
+          font-family:var(--font-mono)">${esc(money(memo.total||0))}</span>
+      </div>
+      <div>
+        <span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
+          text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">ผู้ขอ</span>
+        <span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(histRequesterName(memo))}</span>
+      </div>
+      <div>
+        <span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
+          text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">${dateLabel}</span>
+        <span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${dateValue}</span>
+      </div>
+    </div>`;
+
+  // ── Type-specific section ──
+  const sectionHtml = _buildMemoTypeSection(memo);
+
+  // ── Approvers timeline (minimal) ──
+  const approversHtml = _buildMemoApproversTimeline(memo);
+
+  // ── PMO-only: Budget Source ──
+  const pmoHtml = isPMOUser && !isDraft && mode !== 'readonly' ? `
+    <div style="background:var(--amber-50,var(--color-background-warning));
+      border:0.5px solid var(--amber,var(--color-border-warning));
+      border-radius:var(--r-sm,var(--border-radius-md));
+      padding:9px 12px;margin-top:14px">
+      <div style="font-size:9px;font-weight:500;
+        color:var(--amber-800,var(--color-text-warning));
+        text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">PMO only</div>
+      ${buildBudgetSourceBadge(memo)}
+      <span style="font-size:11px;color:var(--amber-800,var(--color-text-warning));margin-left:8px">
+        ${memo.budgetSource ? 'override · คลิกเพื่อเปลี่ยน' : 'auto-assigned'}
+      </span>
+    </div>` : '';
+
+  // ── Rejection / Cancellation note ──
+  const noteHtml = memo.rejectionReason
+    ? `<div style="background:var(--red-50,var(--color-background-danger));
+        border:0.5px solid var(--color-border-danger);
+        border-radius:var(--r-sm,var(--border-radius-md));
+        padding:8px 12px;margin-top:12px;font-size:12px;
+        color:var(--red-800,var(--color-text-danger))">
+        <strong>เหตุผลที่ reject:</strong> ${esc(memo.rejectionReason)}</div>`
+    : '';
+
+  return `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
+      padding-bottom:12px;margin-bottom:12px;
+      border-bottom:0.5px solid var(--border,var(--color-border-tertiary))">
+      <div style="min-width:0">
+        <div style="font-size:14px;font-weight:500;
+          color:var(--text-1,var(--color-text-primary));margin-bottom:4px">${esc(memo.memoNo)}</div>
+        <div style="font-size:11px;color:var(--text-2,var(--color-text-secondary));
+          overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:440px">
+          ${esc(memo.subject || memoSubject(memo))}</div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:5px">
+          <span class="badge ${badgeClass(memo.type)}">${esc(String(memo.type||'').toUpperCase())}</span>
+          <span class="badge ${histStatusBadgeClass(memo)}">${esc(histStatusLabel(memo))}</span>
+          ${memo.project ? `<span style="font-size:11px;color:var(--text-2,var(--color-text-secondary))">${esc(memo.project)}</span>` : ''}
+        </div>
+      </div>
+    </div>
+    ${coreHtml}
+    ${sectionHtml}
+    ${approversHtml}
+    ${noteHtml}
+    ${pmoHtml}`;
+}
+
+// ── Type-specific section builder ──────────────────────
+function _buildMemoTypeSection(memo) {
+  const type = memo.type;
+  const sections = memo.sections || [];
+
+  // SL: software table + collapsible account table
+  if (type === 'sl') {
+    const swSection = sections.find(s => s.title === 'รายการ Software');
+    const acctSection = sections.find(s => s.title === 'ตาราง Account');
+    const acctId = 'acct-' + memo.memoNo.replace(/[^a-z0-9]/gi,'');
+    const acctRows = acctSection
+      ? (() => {
+          const tmp = document.createElement('div');
+          tmp.innerHTML = acctSection.html;
+          return tmp.querySelectorAll('tbody tr').length;
+        })() : 0;
+
+    return `
+      ${swSection ? `
+        <div style="margin-bottom:14px">
+          <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
+            text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">รายการ Software</div>
+          <div style="border:0.5px solid var(--border,var(--color-border-tertiary));
+            border-radius:var(--r-sm,var(--border-radius-md));overflow:hidden">
+            ${_cleanSectionTable(swSection.html)}
+          </div>
+        </div>` : ''}
+      ${acctSection && acctRows > 0 ? `
+        <div style="margin-bottom:14px">
+          <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
+            text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">
+            ตาราง Account
+            <span style="font-weight:400;color:var(--text-3,var(--color-text-tertiary))">(${acctRows} account)</span>
+          </div>
+          <div style="border:0.5px solid var(--border,var(--color-border-tertiary));
+            border-radius:var(--r-sm,var(--border-radius-md));overflow:hidden">
+            <div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';
+              this.querySelector('span').style.transform=this.querySelector('span').style.transform==='rotate(180deg)'?'':'rotate(180deg)'"
+              style="display:flex;align-items:center;justify-content:space-between;
+                padding:7px 10px;cursor:pointer;
+                background:var(--bg-2,var(--color-background-secondary))">
+              <span style="font-size:11px;color:var(--text-2,var(--color-text-secondary))">ดูรายชื่อ account</span>
+              <span style="font-size:12px;color:var(--text-3,var(--color-text-tertiary));
+                transition:transform .15s;display:inline-block">&#x25BC;</span>
+            </div>
+            <div style="display:none">
+              ${_cleanSectionTable(acctSection.html)}
+            </div>
+          </div>
+        </div>` : ''}`;
+  }
+
+  // HW: hardware table
+  if (type === 'hw') {
+    const hwSection = sections.find(s => s.title === 'รายการ Hardware');
+    return hwSection ? `
+      <div style="margin-bottom:14px">
+        <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
+          text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">รายการ Hardware</div>
+        <div style="border:0.5px solid var(--border,var(--color-border-tertiary));
+          border-radius:var(--r-sm,var(--border-radius-md));overflow:hidden">
+          ${_cleanSectionTable(hwSection.html)}
+        </div>
+      </div>` : '';
+  }
+
+  // INT: activity info row + collapsible name list
+  if (type === 'int') {
+    const nameSection = sections.find(s => s.title === 'รายชื่อผู้เข้าร่วม');
+    const actSection  = sections.find(s => s.title === 'รายละเอียดกิจกรรม');
+    const nameCount = nameSection ? (() => {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = nameSection.html;
+      return tmp.querySelectorAll('tbody tr').length;
+    })() : 0;
+
+    const infoHtml = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;
+        background:var(--bg-2,var(--color-background-secondary));
+        border-radius:var(--r-sm,var(--border-radius-md));
+        padding:9px 12px;margin-bottom:10px">
+        ${memo.intActivity ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">กิจกรรม</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(memo.intActivity)}</span></div>` : ''}
+        ${memo.intDate ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">วันที่จัด</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(memo.intDate)}</span></div>` : ''}
+        ${memo.intHeadcount ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">จำนวน</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${memo.intHeadcount} คน</span></div>` : ''}
+        ${memo.intPP ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">฿/คน</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(money(memo.intPP))}</span></div>` : ''}
+      </div>`;
+
+    return `
+      <div style="margin-bottom:14px">
+        <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
+          text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">กิจกรรม Team Activity</div>
+        ${infoHtml}
+        ${nameSection && nameCount > 0 ? `
+        <div style="border:0.5px solid var(--border,var(--color-border-tertiary));
+          border-radius:var(--r-sm,var(--border-radius-md));overflow:hidden">
+          <div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';
+            this.querySelector('span').style.transform=this.querySelector('span').style.transform==='rotate(180deg)'?'':'rotate(180deg)'"
+            style="display:flex;align-items:center;justify-content:space-between;
+              padding:7px 10px;cursor:pointer;
+              background:var(--bg-2,var(--color-background-secondary))">
+            <span style="font-size:11px;color:var(--text-2,var(--color-text-secondary))">รายชื่อผู้เข้าร่วม (${nameCount} คน)</span>
+            <span style="font-size:12px;color:var(--text-3,var(--color-text-tertiary));
+              transition:transform .15s;display:inline-block">&#x25BC;</span>
+          </div>
+          <div style="display:none">${_cleanSectionTable(nameSection.html)}</div>
+        </div>` : ''}
+      </div>`;
+  }
+
+  // ENT: event info row
+  if (type === 'ent') {
+    return `
+      <div style="margin-bottom:14px">
+        <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
+          text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">รายละเอียดงานรับรอง</div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;
+          background:var(--bg-2,var(--color-background-secondary));
+          border-radius:var(--r-sm,var(--border-radius-md));padding:9px 12px">
+          ${memo.entClient ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">ลูกค้า</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(memo.entClient)}</span></div>` : ''}
+          ${memo.entDate ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">วันที่จัดงาน</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(memo.entDate)}</span></div>` : ''}
+          ${memo.entPlace ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">สถานที่</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(memo.entPlace)}</span></div>` : ''}
+          ${memo.entPeople ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">จำนวนผู้ร่วม</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(memo.entPeople)} คน</span></div>` : ''}
+        </div>
+      </div>`;
+  }
+
+  // DEP: deployment info + expense table
+  if (type === 'dep') {
+    const expSection = sections.find(s => s.title === 'รายการค่าใช้จ่าย' || s.title === 'รายละเอียดค่าใช้จ่าย');
+    return `
+      <div style="margin-bottom:14px">
+        <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
+          text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">รายละเอียด Deployment</div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;
+          background:var(--bg-2,var(--color-background-secondary));
+          border-radius:var(--r-sm,var(--border-radius-md));padding:9px 12px;margin-bottom:10px">
+          ${memo.depLocation ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">สถานที่</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(memo.depLocation)}</span></div>` : ''}
+          ${memo.depStart ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">วันที่</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${esc(memo.depStart)}${memo.depEnd && memo.depEnd!==memo.depStart?' – '+esc(memo.depEnd):''}</span></div>` : ''}
+          ${memo.depEmpCount ? `<div><span style="display:block;font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">จำนวน</span><span style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">${memo.depEmpCount} คน</span></div>` : ''}
+        </div>
+        ${expSection ? `
+        <div style="border:0.5px solid var(--border,var(--color-border-tertiary));
+          border-radius:var(--r-sm,var(--border-radius-md));overflow:hidden">
+          ${_cleanSectionTable(expSection.html)}
+        </div>` : ''}
+      </div>`;
+  }
+
+  // Fallback: render all sections as-is
+  return sections.map(s => `
+    <div style="margin-bottom:14px">
+      <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
+        text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">${esc(s.title)}</div>
+      <div>${s.html}</div>
+    </div>`).join('');
+}
+
+// ── Approvers timeline ──────────────────────────────────
+function _buildMemoApproversTimeline(memo) {
+  const approvers = memo.approvers || [];
+  if (!approvers.length) return '';
+
+  const items = approvers.map(a => {
+    const isApproved = a.status === 'approved';
+    const isRejected = a.status === 'rejected';
+    const dotColor   = isApproved ? 'var(--green-800,var(--color-text-success))'
+                     : isRejected ? 'var(--red-800,var(--color-text-danger))'
+                     : 'var(--text-3,var(--color-text-tertiary))';
+    const statusText = isApproved ? 'Approved'
+                     : isRejected ? 'Rejected'
+                     : 'Pending';
+    const statusColor = isApproved ? 'var(--green-800,var(--color-text-success))'
+                      : isRejected ? 'var(--red-800,var(--color-text-danger))'
+                      : 'var(--text-3,var(--color-text-tertiary))';
+    return `
+      <div style="position:relative;margin-bottom:8px;padding-left:18px">
+        <div style="position:absolute;left:0;top:4px;width:7px;height:7px;border-radius:50%;
+          background:${dotColor};border:2px solid var(--surface,var(--color-background-primary))"></div>
+        <div style="font-size:12px;font-weight:500;color:var(--text-1,var(--color-text-primary))">
+          ${esc(a.name||'—')}
+          <span style="font-weight:400;color:var(--text-2,var(--color-text-secondary));font-size:11px"> · ${esc(a.title||'')}</span>
+        </div>
+        <div style="font-size:11px;color:${statusColor}">${statusText}</div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div style="margin-bottom:14px">
+      <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
+        text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">ผู้อนุมัติ</div>
+      <div style="border-left:2px solid var(--border-md,var(--color-border-secondary));
+        margin-left:4px;padding-left:12px">
+        ${items}
+      </div>
+    </div>`;
+}
+
+// ── Clean section HTML (ensure tables have proper styling) ──
+function _cleanSectionTable(html) {
+  return html
+    .replace(/<table/g, '<table style="width:100%;border-collapse:collapse;font-size:11px"')
+    .replace(/<th/g, '<th style="background:var(--bg-2,var(--color-background-secondary));padding:5px 9px;text-align:left;font-weight:500;font-size:11px;color:var(--text-2,var(--color-text-secondary));border-bottom:0.5px solid var(--border,var(--color-border-tertiary))"')
+    .replace(/<td/g, '<td style="padding:6px 9px;border-bottom:0.5px solid var(--bg-2,var(--color-border-tertiary));color:var(--text-1,var(--color-text-primary))"');
+}
+
+// ── Main entry points ───────────────────────────────────
 function openHistoryDetail(memoNo) {
   const memo = getHistoryMemos().find(m => m.memoNo === memoNo);
   if (!memo) { alert('ไม่พบ Memo'); return; }
-  const sections = (memo.sections || []).map(s =>
-    `<div class="hist-detail-section"><div class="hist-detail-section-title">${esc(s.title)}</div>${s.html}</div>`
-  ).join('');
 
-  const licenses = getLinkedLicenses(memo);
-  const devices = getLinkedDevices(memo);
-  const linkedLic = licenses.length ? `
-    <div class="hist-detail-block">
-      <div class="hist-detail-block-title">Linked Licenses (${licenses.length})</div>
-      ${licenses.map(l => `<div class="hist-linked-row"><span>${esc(l.name)}</span><span class="mono">${esc(money(l.pricePerMonth))}/เดือน · ${l.seats} seats</span></div>`).join('')}
-    </div>` : '';
-
-  const linkedDev = devices.length ? `
-    <div class="hist-detail-block">
-      <div class="hist-detail-block-title">Linked Devices (${devices.length})</div>
-      ${devices.map(d => `<div class="hist-linked-row"><span>${esc(d.name)}</span><span style="font-size:11px;color:var(--text-3)">${esc(d.owner || '—')} · ${esc(d.serial || '')}</span></div>`).join('')}
-    </div>` : '';
-
-  const attachments = (memo.attachments || []).length
-    ? (memo.attachments || []).map(a => `<div class="hist-linked-row"><span>${esc(a.name || a)}</span></div>`).join('')
-    : '<div style="font-size:11px;color:var(--text-3)">ไม่มีไฟล์แนบ</div>';
-
-  const auditHtml = (memo.auditLog || []).length
-    ? (memo.auditLog || []).map(e => `
-        <div class="hist-audit-row">
-          <span class="hist-audit-time">${esc(formatDateTime(e.timestamp))}</span>
-          <span><strong>${esc(e.actor)}</strong> — ${esc(e.action)}${e.comment ? `<br><span style="color:var(--text-3)">${esc(e.comment)}</span>` : ''}</span>
-        </div>`).join('')
-    : '<div style="font-size:11px;color:var(--text-3)">ยังไม่มี audit log</div>';
-
-  const isTerminal = ['completed', 'rejected', 'cancelled', 'expired'].includes(memo.status);
-
-  document.getElementById('detail-content').innerHTML = `
-    <div class="hist-detail-header">
-      <div>
-        <div style="font-size:17px;font-weight:700">${esc(memo.memoNo)}</div>
-        <div style="font-size:12px;color:var(--text-3);margin-top:2px">${esc(memo.subject || memoSubject(memo))}</div>
-      </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <span class="badge ${badgeClass(memo.type)}">${esc(String(memo.type || '').toUpperCase())}</span>
-        <span class="badge ${histStatusBadgeClass(memo)}">${esc(histStatusLabel(memo))}</span>
-      </div>
-    </div>
-    <div class="hist-detail-meta">
-      <div><span class="lbl">โครงการ</span>${esc(memo.project || '—')}</div>
-      <div><span class="lbl">วงเงิน</span><span class="mono" style="font-weight:700;color:var(--blue-800)">${esc(money(memo.total || 0))}</span></div>
-      <div><span class="lbl">ผู้ขอ</span>${esc(histRequesterName(memo))}<br><span style="font-size:11px;color:var(--text-3)">${esc(memo.requesterTitle || 'PMO')}</span></div>
-      <div><span class="lbl">ผู้อนุมัติ</span>${esc(histApproverName(memo))}</div>
-      <div><span class="lbl">สร้างเมื่อ</span>${esc(formatDateTime(memo.createdAt))}</div>
-      <div><span class="lbl">อัปเดตล่าสุด</span>${esc(formatDateTime(histActivityAt(memo)))}</div>
-      <div><span class="lbl">ระยะเวลาอนุมัติ</span>${esc(formatApprovalDuration(memo))}</div>
-      <div><span class="lbl">เรียน</span>${esc(memo.to || '—')}</div>
-      <div><span class="lbl">Budget Source</span>${buildBudgetSourceBadge(memo)}</div>
-    </div>
-    ${memo.reason ? `<div class="hist-detail-block"><div class="hist-detail-block-title">เหตุผล</div><p style="font-size:13px;margin:0">${esc(memo.reason)}</p></div>` : ''}
-    ${sections ? `<div class="hist-detail-block"><div class="hist-detail-block-title">รายละเอียด</div>${sections}</div>` : ''}
-    ${memo.approvalNote ? `<div class="hist-detail-note hist-detail-note--ok"><strong>Approval comment:</strong> ${esc(memo.approvalNote)}</div>` : ''}
-    ${memo.rejectionReason ? `<div class="hist-detail-note hist-detail-note--err"><strong>Rejection reason:</strong> ${esc(memo.rejectionReason)}</div>` : ''}
-    <div class="hist-detail-block">
-      <div class="hist-detail-block-title">Approval timeline</div>
-      <div class="hist-timeline">${buildApprovalTimeline(memo)}</div>
-    </div>
-    <div class="hist-detail-block">
-      <div class="hist-detail-block-title">Audit log <span style="font-weight:400;color:var(--text-3)">(read-only)</span></div>
-      <div class="hist-audit-log">${auditHtml}</div>
-    </div>
-    <div class="hist-detail-block">
-      <div class="hist-detail-block-title">Attachments</div>
-      ${attachments}
-    </div>
-    ${linkedLic}${linkedDev}
-
-  `;
+  document.getElementById('detail-content').innerHTML = _buildMemoDetailContent(memo, 'full');
 
   const acts = document.getElementById('detail-actions');
   const _no  = esc(memo.memoNo);
@@ -400,6 +627,18 @@ function openHistoryDetail(memoNo) {
   `;
   const modalInner = document.querySelector('#detail-modal > div');
   if (modalInner) modalInner.style.maxWidth = '720px';
+  document.getElementById('detail-modal').style.display = 'flex';
+}
+
+// ── Read-only detail (Budget / License / Device tabs) ──
+function openMemoReadOnly(memoNo) {
+  const memo = loadMemos().find(m => m.memoNo === memoNo) || getHistoryMemos().find(m => m.memoNo === memoNo);
+  if (!memo) { alert('ไม่พบ Memo'); return; }
+  document.getElementById('detail-content').innerHTML = _buildMemoDetailContent(memo, 'readonly');
+  const acts = document.getElementById('detail-actions');
+  if (acts) acts.innerHTML = `<button class="btn-ghost" type="button" onclick="closeDetailModal()">ปิด</button>`;
+  const modalInner = document.querySelector('#detail-modal > div');
+  if (modalInner) modalInner.style.maxWidth = '680px';
   document.getElementById('detail-modal').style.display = 'flex';
 }
 
