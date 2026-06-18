@@ -457,7 +457,7 @@ function openPmoOverrideModal(memoNo) {
   ].map(o => `<option value="${o.v}" ${memo.status === o.v ? 'selected' : ''}>${o.l}</option>`).join('');
 
   modal.innerHTML = `
-    <div class="card" style="width:480px;max-width:95vw;padding:24px">
+    <div class="card" style="width:480px;max-width:95vw;max-height:90vh;overflow-y:auto;padding:24px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
         <span style="font-size:15px;font-weight:700;color:var(--red)">⚠ PMO Override</span>
         <button class="btn-sm" onclick="document.getElementById('pmo-override-modal').remove()" style="padding:4px 10px">✕</button>
