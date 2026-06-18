@@ -143,6 +143,12 @@ async function saveMemoAsync(data) {
   if(await checkSupa()) {
     try {
       const db = memoToDb(saved);
+      // Strip columns that don't exist in DB yet — remove each entry after running ALTER TABLE
+      const DB_PENDING = ['int_activity','int_date','int_headcount','int_pp',
+        'ent_client','ent_date','ent_place','ent_people',
+        'dep_location','dep_start','dep_end','dep_emp_count',
+        'pmo_evidence_url','approval_evidence_url'];
+      DB_PENDING.forEach(k => delete db[k]);
       await supaFetch('memos', 'POST', db, '?on_conflict=memo_no');
       // update cache directly — no need to re-fetch
       if (_memCache) {
@@ -172,10 +178,11 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   if (!memo) return null;
 
   // ── Terminal state guard ──
-  // completed and rejected memos cannot be changed except by PMO override
-  const isPmoOverride = extra.pmoOverrideNote || extra.pmoOverrideBy;
-  const isTerminal    = memo.status === 'completed' || memo.status === 'rejected' || memo.status === 'cancelled';
-  if (isTerminal && !isPmoOverride) return memo; // silently return current state
+  // completed and rejected memos cannot be changed except by PMO override or budget tagging
+  const isPmoOverride  = extra.pmoOverrideNote || extra.pmoOverrideBy;
+  const isBudgetTagOnly = Object.keys(extra).length === 1 && 'budgetSource' in extra;
+  const isTerminal     = memo.status === 'completed' || memo.status === 'rejected' || memo.status === 'cancelled';
+  if (isTerminal && !isPmoOverride && !isBudgetTagOnly) return memo; // silently return current state
 
   // ── Approver order enforcement ──
   // Prevent A2 from approving if A1 hasn't approved yet
@@ -226,8 +233,14 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   if (await checkSupa()) {
     try {
       const toSnake = s => s.replace(/([A-Z])/g, '_$1').toLowerCase();
-      // Only exclude auditLog (handled separately above) and evidence URLs (now in DB)
-      const PENDING_COLUMNS = new Set(['auditLog']);
+      // Exclude fields whose DB columns don't exist yet — add after running ALTER TABLE
+      const PENDING_COLUMNS = new Set([
+        'approvalEvidenceUrl', 'pmoEvidenceUrl', 'auditLog',
+        // INT / ENT / DEP type fields — add columns via ALTER TABLE then remove from here
+        'intActivity', 'intDate', 'intHeadcount', 'intPP',
+        'entClient', 'entDate', 'entPlace', 'entPeople',
+        'depLocation', 'depStart', 'depEnd', 'depEmpCount',
+      ]);
       const patch = {
         status: updated.status,
         updated_at: now,
