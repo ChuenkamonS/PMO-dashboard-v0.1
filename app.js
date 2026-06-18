@@ -143,12 +143,6 @@ async function saveMemoAsync(data) {
   if(await checkSupa()) {
     try {
       const db = memoToDb(saved);
-      // Strip columns that don't exist in DB yet — remove each entry after running ALTER TABLE
-      const DB_PENDING = ['int_activity','int_date','int_headcount','int_pp',
-        'ent_client','ent_date','ent_place','ent_people',
-        'dep_location','dep_start','dep_end','dep_emp_count',
-        'pmo_evidence_url','approval_evidence_url'];
-      DB_PENDING.forEach(k => delete db[k]);
       await supaFetch('memos', 'POST', db, '?on_conflict=memo_no');
       // update cache directly — no need to re-fetch
       if (_memCache) {
@@ -232,14 +226,8 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   if (await checkSupa()) {
     try {
       const toSnake = s => s.replace(/([A-Z])/g, '_$1').toLowerCase();
-      // Exclude fields whose DB columns don't exist yet — add after running ALTER TABLE
-      const PENDING_COLUMNS = new Set([
-        'approvalEvidenceUrl', 'pmoEvidenceUrl', 'auditLog',
-        // INT / ENT / DEP type fields — add columns via ALTER TABLE then remove from here
-        'intActivity', 'intDate', 'intHeadcount', 'intPP',
-        'entClient', 'entDate', 'entPlace', 'entPeople',
-        'depLocation', 'depStart', 'depEnd', 'depEmpCount',
-      ]);
+      // Only exclude auditLog (handled separately above) and evidence URLs (now in DB)
+      const PENDING_COLUMNS = new Set(['auditLog']);
       const patch = {
         status: updated.status,
         updated_at: now,
