@@ -274,19 +274,46 @@ function openApproveModal(memoNo, bulk) {
     el('approve-subject').textContent  = memo?.subject || '-';
   }
   el('approve-note').value = '';
+  // Reset evidence file upload
+  const evFile = document.getElementById('approve-evidence-file');
+  if (evFile) evFile.value = '';
+  const evUrl = document.getElementById('approve-evidence-url');
+  if (evUrl) evUrl.value = '';
+  const evPrev = document.getElementById('approve-evidence-preview');
+  if (evPrev) evPrev.textContent = '';
   el('approve-modal').dataset.targets = JSON.stringify(targets);
   el('approve-modal').style.display   = 'flex';
 }
 function closeApproveModal() { document.getElementById('approve-modal').style.display='none'; }
+
+function handleApproveEvidenceUpload(input) {
+  const file = input.files[0];
+  const preview = document.getElementById('approve-evidence-preview');
+  const urlInput = document.getElementById('approve-evidence-url');
+  if (!file) { urlInput.value = ''; preview.textContent = ''; return; }
+  if (file.size > 5 * 1024 * 1024) {
+    preview.textContent = '⚠ ไฟล์ใหญ่เกิน 5MB';
+    preview.style.color = 'var(--red)';
+    input.value = ''; urlInput.value = '';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    urlInput.value = e.target.result;
+    preview.textContent = `✓ แนบแล้ว: ${file.name} (${(file.size/1024).toFixed(1)} KB)`;
+    preview.style.color = 'var(--green-800,#166534)';
+  };
+  reader.readAsDataURL(file);
+}
 function confirmApprove() {
   const targets = JSON.parse(document.getElementById('approve-modal').dataset.targets || '[]');
   const note    = document.getElementById('approve-note').value.trim();
+  const evidenceUrl = document.getElementById('approve-evidence-url')?.value || '';
   const memos   = loadMemos();
 
   targets.forEach(memoNo => {
     const memo      = memos.find(m => m.memoNo === memoNo);
     if (!memo) return;
-    const approvers = memo.approvers || [];
     const user      = currentUser();
 
     // Determine which approver step we're on
@@ -295,9 +322,19 @@ function confirmApprove() {
     const actionKey   = isPendingA3 ? 'approved_a3' : isPendingA2 ? 'approved_a2' : 'approved_a1';
     const stageLabel  = isPendingA3 ? 'A3' : isPendingA2 ? 'A2' : 'A1';
 
+    // Write audit log entry into the in-memory memos array FIRST
     appendAuditLog(memos, memoNo, `${stageLabel} Approved by ${user}`, note);
 
-    updateMemoStatusAsync(memoNo, actionKey, { approvalNote: note, approvedBy: user });
+    // Now read the updated auditLog back out and pass it to async function
+    // so Supabase gets the same audit log that localStorage gets
+    const updatedAuditLog = memos.find(m => m.memoNo === memoNo)?.auditLog || [];
+
+    updateMemoStatusAsync(memoNo, actionKey, {
+      approvalNote:  note,
+      approvedBy:    user,
+      auditLog:      updatedAuditLog,
+      ...(evidenceUrl ? { approvalEvidenceUrl: evidenceUrl } : {}),
+    });
   });
   storeMemos(memos);
   closeApproveModal();
@@ -323,9 +360,17 @@ function confirmReject() {
   if(!reason) { alert('กรุณาเลือกเหตุผลการ Reject'); return; }
   const full  = reason==='Other' ? (comment||'Other') : (comment?`${reason}: ${comment}`:reason);
   const memos = loadMemos();
-  targets.forEach(memoNo => appendAuditLog(memos, memoNo, 'rejected', full));
+  const user  = currentUser();
+  targets.forEach(memoNo => appendAuditLog(memos, memoNo, 'Rejected', full));
   storeMemos(memos);
-  targets.forEach(memoNo => updateMemoStatus(memoNo, 'rejected', { rejectionReason:full, rejectedBy:currentUser() }));
+  targets.forEach(memoNo => {
+    const updatedAuditLog = memos.find(m => m.memoNo === memoNo)?.auditLog || [];
+    updateMemoStatusAsync(memoNo, 'rejected', {
+      rejectionReason: full,
+      rejectedBy:      user,
+      auditLog:        updatedAuditLog,
+    });
+  });
   closeRejectModal();
   alert(`Rejected ${targets.length} รายการแล้ว`);
 }
@@ -335,142 +380,56 @@ function openDetailModal(memoNo) {
   const memo = loadMemos().find(m=>m.memoNo===memoNo);
   if(!memo) return;
 
-  const typeLabel = { sl:'Software License', hw:'Hardware', int:'Team Activity', ent:'Client Expense', dep:'Deployment' }[memo.type] || (memo.type||'').toUpperCase();
-  const accentColor = { sl:'#185FA5', hw:'#444441', int:'#3B6D11', ent:'#854F0B', dep:'#3C3489' }[memo.type] || '#888780';
-  const statusCls   = memo.status==='completed'?'badge-green':memo.status==='rejected'?'badge-red':memo.status==='draft'?'badge-gray':'badge-amber';
-  const statusLabel = memo.status==='completed'?'Completed':memo.status==='rejected'?'Rejected':memo.status==='draft'?'Draft':memo.status==='pending_a3'?'Pending A3':memo.status==='pending_a2'?'Pending A2':'Pending A1';
+  // Use shared builder from history.js (already in global scope)
+  if (typeof _buildMemoDetailContent === 'function') {
+    document.getElementById('detail-content').innerHTML = _buildMemoDetailContent(memo, 'full');
+  } else {
+    // Fallback if history.js not yet loaded
+    document.getElementById('detail-content').innerHTML =
+      `<div style="padding:20px;color:var(--text-3)">Loading...</div>`;
+  }
 
-  const isOwn  = (memo.requesterName || '') === currentUser();
-  const isPMO  = true; // TODO: replace with role check after auth
-  const canAct = (memo.status==='pending'||memo.status==='pending_a2'||memo.status==='pending_a3') && !isOwn;
+  const _no       = esc(memo.memoNo);
+  const _st       = memo.status || '';
+  const isPending = _st === 'pending' || _st === 'pending_a2' || _st === 'pending_a3';
+  const isDraft   = _st === 'draft';
+  const isOwn     = (memo.requesterName || '') === currentUser();
+  const _isPMO    = typeof isPMO === 'function' && isPMO();
 
-  // Approval chain display
-  const approvers = memo.approvers || [];
-  const approvalChain = approvers.length ? `
-    <div style="margin-bottom:16px">
-      <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Approval Chain</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        ${approvers.map((a, i) => {
-          const dotColor = a.status==='approved' ? 'var(--green)' : a.status==='rejected' ? 'var(--red)' : 'var(--amber)';
-          const dotLabel = a.status==='approved' ? '✅' : a.status==='rejected' ? '❌' : '⏳';
-          return `<div style="border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 12px;min-width:140px">
-            <div style="font-size:10px;color:var(--text-3);margin-bottom:2px">A${i+1} ${dotLabel}</div>
-            <div style="font-size:12px;font-weight:600">${esc(a.name||'-')}</div>
-            <div style="font-size:11px;color:var(--text-3)">${esc(a.title||'-')}</div>
-            ${a.approvedAt ? `<div style="font-size:10px;color:var(--green);margin-top:3px">${shortDate(a.approvedAt)}</div>` : ''}
-            ${a.status==='rejected' ? `<div style="font-size:10px;color:var(--red);margin-top:3px">Rejected</div>` : ''}
-          </div>`;
-        }).join('<div style="display:flex;align-items:center;color:var(--text-3);font-size:18px;padding-top:12px">→</div>')}
-      </div>
-    </div>` : '';
-
-  // PMO override note (if any)
-  const pmoNote = memo.pmoOverrideNote ? `
-    <div style="padding:8px 12px;background:#FFF7E6;border-radius:var(--r-sm);margin-bottom:12px;font-size:12px;border-left:3px solid var(--amber)">
-      <span style="font-weight:600;color:var(--amber)">⚠ PMO Override</span>
-      <span style="color:var(--text-2);margin-left:8px">${esc(memo.pmoOverrideNote)}</span>
-      ${memo.pmoOverrideBy ? `<div style="font-size:10px;color:var(--text-3);margin-top:2px">โดย ${esc(memo.pmoOverrideBy)}</div>` : ''}
-    </div>` : '';
-
-  const sections = (memo.sections||[]).map(s=>`
-    <div style="margin-bottom:16px">
-      <div style="font-size:11px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">${esc(s.title)}</div>
-      <div style="border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden;font-size:12px">${s.html}</div>
-    </div>`).join('');
-
-  const auditLog = (memo.auditLog||[]).length
-    ? (memo.auditLog||[]).map(e=>`
-        <div style="display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)">
-          <div style="font-size:11px;color:var(--text-3);white-space:nowrap;min-width:90px">${esc(shortDate(e.timestamp))}</div>
-          <div style="font-size:12px;color:var(--text-2)">
-            <span style="font-weight:600;color:var(--text)">${esc(e.actor)}</span> — ${esc(e.action)}
-            ${e.comment?`<div style="font-size:11px;color:var(--text-3);margin-top:2px">${esc(e.comment)}</div>`:''}
-          </div>
-        </div>`).join('')
-    : '<div style="font-size:12px;color:var(--text-3);padding:8px 0">ยังไม่มีประวัติ</div>';
-
-  document.getElementById('detail-content').innerHTML = `
-    <!-- Header -->
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid var(--border)">
-      <div style="width:4px;height:32px;background:${accentColor};border-radius:2px;flex-shrink:0"></div>
-      <div style="flex:1;min-width:0">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
-          <span style="font-size:15px;font-weight:700;color:var(--text)">${esc(memo.memoNo)}</span>
-          <span class="badge ${statusCls}" style="font-size:10px">${statusLabel}</span>
-        </div>
-        <div style="font-size:11px;color:var(--text-3)">${esc(typeLabel)} · ${esc(memo.project||'-')} · ${esc(memo.date||'-')}</div>
-      </div>
-      <div style="text-align:right;flex-shrink:0">
-        <div style="font-size:20px;font-weight:700;color:var(--blue-800)">${esc(money(memo.total||0))}</div>
-      </div>
-    </div>
-
-    <!-- Info row -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
-      <div style="background:var(--bg);border-radius:var(--r-sm);padding:10px 12px">
-        <div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:4px">เรียน</div>
-        <div style="font-size:13px;color:var(--text)">${esc(memo.to||'-')}</div>
-      </div>
-      <div style="background:var(--bg);border-radius:var(--r-sm);padding:10px 12px">
-        <div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:4px">เหตุผลในการขอ</div>
-        <div style="font-size:12px;color:var(--text);line-height:1.5">${esc(memo.reason||'-')}</div>
-      </div>
-    </div>
-
-    <!-- Sections (tables) -->
-    ${sections}
-
-    <!-- People -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
-      <div style="border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px">
-        <div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:4px">ผู้ขอ</div>
-        <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(memo.requesterName||memo.reviewerName||'-')}</div>
-        <div style="font-size:11px;color:var(--text-3)">${esc(memo.requesterTitle||'PMO')}</div>
-      </div>
-      <div style="border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px">
-        <div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:4px">Approver</div>
-        <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(memo.approverName||'-')}</div>
-        <div style="font-size:11px;color:var(--text-3)">${esc(memo.approverTitle||'-')}</div>
-      </div>
-    </div>
-
-    <!-- Approval/Rejection note -->
-    ${memo.approvalNote?`<div style="padding:10px 12px;background:var(--green-50);border-radius:var(--r-sm);margin-bottom:12px;font-size:12px;color:var(--green)"><span style="font-weight:600">Approval Note:</span> ${esc(memo.approvalNote)}</div>`:''}
-    ${memo.rejectionReason?`<div style="padding:10px 12px;background:var(--red-50);border-radius:var(--r-sm);margin-bottom:12px;font-size:12px;color:var(--red)"><span style="font-weight:600">Rejection Reason:</span> ${esc(memo.rejectionReason)}</div>`:''}
-    ${approvalChain}
-    ${pmoNote}
-
-    <!-- Audit log -->
-    <div>
-      <div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Audit Log</div>
-      <div style="border:1px solid var(--border);border-radius:var(--r-sm);padding:0 12px">${auditLog}</div>
-    </div>`;
-
-  const _no  = esc(memo.memoNo);
-  const canCancel = (memo.status==='pending'||memo.status==='pending_a2'||memo.status==='pending_a3') && isOwn;
+  // canApprove: pending memo AND current user is NOT the requester
+  const canApprove = isPending && !isOwn;
+  // canCancel: pending memo AND current user IS the requester
+  const canCancel  = isPending && isOwn;
 
   const acts = document.getElementById('detail-actions');
   acts.innerHTML = `
-    ${canAct ? `
+    ${canApprove ? `
       <button class="btn-primary" onclick="closeDetailModal();openApproveModal('${_no}')">✓ Approve</button>
       <button class="btn-reject"  onclick="closeDetailModal();openRejectModal('${_no}')">✕ Reject</button>
     ` : ''}
     ${canCancel ? `
       <button class="btn-sm" style="color:var(--red)" onclick="closeDetailModal();cancelMemo('${_no}')">✕ Cancel</button>
     ` : ''}
-    <button class="btn-sm" style="color:var(--blue)" onclick="if(typeof downloadMemoPdf==='function'){downloadMemoPdf(loadMemos().find(m=>m.memoNo==='${_no}'))}">⬇ Download PDF</button>
-    ${typeof isPMO === "function" && isPMO() ? `
-      ${memo.status === 'completed' ? `
-        <button class="btn-sm" onclick="if(typeof openBudgetTagModal==='function')openBudgetTagModal('${_no}')"
-          style="background:${memo.budgetSource?'var(--green-50,#F0FDF4)':'var(--amber-50,#FFFBEB)'};color:${memo.budgetSource?'var(--green-800,#166534)':'var(--amber-800,#92400E)'}">
-          ⚑ ${memo.budgetSource ? esc(memo.budgetSource) : 'Tag Budget'}
-        </button>
-      ` : ''}
-      <button class="btn-sm" style="color:var(--blue);margin-left:4px" onclick="closeDetailModal();openPmoEditApproversModal('${_no}')">✎ Approvers</button>
-      <button class="btn-sm" style="color:var(--red);margin-left:4px"  onclick="closeDetailModal();openPmoOverrideModal('${_no}')">⚠ Override</button>
+    ${isDraft ? `
+      <button class="btn-sm" style="color:var(--blue)" onclick="closeDetailModal();if(typeof editDraft==='function')editDraft('${_no}')">✎ Edit Draft</button>
+      <button class="btn-sm" style="color:var(--red)"  onclick="closeDetailModal();if(typeof deleteDraft==='function')deleteDraft('${_no}')">✕ Delete</button>
+    ` : `
+      <button class="btn-sm" style="color:var(--blue)" onclick="if(typeof downloadMemoPdf==='function'){downloadMemoPdf(loadMemos().find(m=>m.memoNo==='${_no}'))}">⬇ Download PDF</button>
+    `}
+    ${_isPMO && _st === 'completed' ? `
+      <button class="btn-sm" onclick="if(typeof openBudgetTagModal==='function')openBudgetTagModal('${_no}')"
+        style="background:${memo.budgetSource?'var(--green-50,#F0FDF4)':'var(--amber-50,#FFFBEB)'};color:${memo.budgetSource?'var(--green-800,#166534)':'var(--amber-800,#92400E)'}">
+        ⚑ ${memo.budgetSource ? esc(memo.budgetSource) : 'Tag Budget'}
+      </button>
+    ` : ''}
+    ${_isPMO && isPending ? `
+      <button class="btn-sm" style="color:var(--blue)" onclick="closeDetailModal();openPmoEditApproversModal('${_no}')">✎ Approvers</button>
+      <button class="btn-sm" style="color:var(--red)"  onclick="closeDetailModal();openPmoOverrideModal('${_no}')">⚠ Override</button>
     ` : ''}
     <button class="btn-ghost" onclick="closeDetailModal()">ปิด</button>
   `;
+  const modalInner = document.querySelector('#detail-modal > div');
+  if (modalInner) modalInner.style.maxWidth = '720px';
   document.getElementById('detail-modal').style.display = 'flex';
 }
 function closeDetailModal() { document.getElementById('detail-modal').style.display='none'; }
@@ -483,7 +442,6 @@ function closeDetailModal() { document.getElementById('detail-modal').style.disp
 function openPmoOverrideModal(memoNo) {
   const memo = loadMemos().find(m => m.memoNo === memoNo);
   if (!memo) return;
-  document.getElementById('pmo-override-memo-no')?.remove?.();
 
   const existing = document.getElementById('pmo-override-modal');
   if (existing) existing.remove();
@@ -500,7 +458,7 @@ function openPmoOverrideModal(memoNo) {
   ].map(o => `<option value="${o.v}" ${memo.status === o.v ? 'selected' : ''}>${o.l}</option>`).join('');
 
   modal.innerHTML = `
-    <div class="card" style="width:460px;max-width:95vw;padding:24px">
+    <div class="card" style="width:480px;max-width:95vw;padding:24px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
         <span style="font-size:15px;font-weight:700;color:var(--red)">⚠ PMO Override Status</span>
         <button class="btn-sm" onclick="document.getElementById('pmo-override-modal').remove()" style="padding:4px 10px">✕</button>
@@ -516,9 +474,21 @@ function openPmoOverrideModal(memoNo) {
         <label style="font-size:11px;font-weight:600;color:var(--text-2)">อนุมัติโดย (ชื่อผู้อนุมัติจริง)</label>
         <input id="pmo-approved-by" class="ri" style="margin-top:4px" placeholder="เช่น นาย ปกรณ์ เจียมสกุลทิพย์">
       </div>
-      <div class="fg" style="margin-bottom:16px">
+      <div class="fg" style="margin-bottom:10px">
         <label style="font-size:11px;font-weight:600;color:var(--red)">เหตุผล/หมายเหตุ * (บังคับ)</label>
         <textarea id="pmo-override-note" class="ri" rows="3" style="margin-top:4px" placeholder="ระบุเหตุผล เช่น อนุมัติผ่าน Email เมื่อ 10/06/69 จาก CEO"></textarea>
+      </div>
+      <div class="fg" style="margin-bottom:16px">
+        <label style="font-size:11px;font-weight:600;color:var(--text-2)">
+          แนบหลักฐาน * (บังคับ — ภาพ Email, เอกสารสแกน, PDF)
+        </label>
+        <div style="margin-top:6px;display:flex;align-items:center;gap:8px">
+          <input type="file" id="pmo-evidence-file" accept="image/*,.pdf"
+            style="font-size:12px;color:var(--text-2)"
+            onchange="handlePmoEvidenceUpload(this)">
+        </div>
+        <div id="pmo-evidence-preview" style="margin-top:6px;font-size:11px;color:var(--text-3)"></div>
+        <input type="hidden" id="pmo-evidence-url" value="">
       </div>
       <div style="display:flex;justify-content:flex-end;gap:10px">
         <button class="btn-ghost" onclick="document.getElementById('pmo-override-modal').remove()">Cancel</button>
@@ -529,23 +499,48 @@ function openPmoOverrideModal(memoNo) {
   modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
 }
 
+function handlePmoEvidenceUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const preview = document.getElementById('pmo-evidence-preview');
+  const urlInput = document.getElementById('pmo-evidence-url');
+  if (file.size > 5 * 1024 * 1024) {
+    preview.textContent = '⚠ ไฟล์ใหญ่เกิน 5MB';
+    preview.style.color = 'var(--red)';
+    input.value = '';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    urlInput.value = e.target.result; // base64 data URL stored for now
+    preview.textContent = `✓ แนบแล้ว: ${file.name} (${(file.size/1024).toFixed(1)} KB)`;
+    preview.style.color = 'var(--green)';
+  };
+  reader.readAsDataURL(file);
+}
+
 function confirmPmoOverride(memoNo) {
-  const newStatus   = document.getElementById('pmo-new-status')?.value;
-  const note        = document.getElementById('pmo-override-note')?.value.trim();
-  const approvedBy  = document.getElementById('pmo-approved-by')?.value.trim();
+  const newStatus  = document.getElementById('pmo-new-status')?.value;
+  const note       = document.getElementById('pmo-override-note')?.value.trim();
+  const approvedBy = document.getElementById('pmo-approved-by')?.value.trim();
+  const evidenceUrl = document.getElementById('pmo-evidence-url')?.value || '';
 
   if (!note) { alert('กรุณาระบุเหตุผล/หมายเหตุ'); return; }
+  if (!evidenceUrl) { alert('กรุณาแนบหลักฐาน (ภาพ Email หรือเอกสาร)'); return; }
 
   const memos = loadMemos();
   const user  = currentUser();
   appendAuditLog(memos, memoNo, `PMO Override → ${newStatus} by ${user}`, note);
   storeMemos(memos);
+  const updatedAuditLog = memos.find(m => m.memoNo === memoNo)?.auditLog || [];
 
   updateMemoStatusAsync(memoNo, newStatus, {
-    pmoOverrideNote: note,
-    pmoOverrideBy:   user,
-    approvedBy:      approvedBy || user,
-    approvalNote:    note,
+    pmoOverrideNote:      note,
+    pmoOverrideBy:        user,
+    approvedBy:           approvedBy || user,
+    approvalNote:         note,
+    pmoEvidenceUrl:       evidenceUrl,
+    auditLog:             updatedAuditLog,
   });
 
   document.getElementById('pmo-override-modal')?.remove();
