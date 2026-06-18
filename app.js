@@ -45,6 +45,7 @@ function memoToDb(m) {
     fx_rate: m.fxRate || null,
     sections: m.sections || [], sl_items: m.slItems || [], audit_log: m.auditLog || [],
     budget_source: m.budgetSource || null,
+    budget_pool_id: m.budgetPoolId || null,
     // INT fields
     int_activity:  m.intActivity  || null,
     int_date:      m.intDate      || null,
@@ -94,6 +95,7 @@ function dbToMemo(r) {
     depEmpCount:  r.dep_emp_count || null,
     fxRate: r.fx_rate, sections: r.sections || [], slItems: r.sl_items || [], auditLog: r.audit_log || [],
     budgetSource: r.budget_source || null,
+    budgetPoolId: r.budget_pool_id || null,
     pmoEvidenceUrl:      r.pmo_evidence_url      || null,   // available after ALTER TABLE
     approvalEvidenceUrl: r.approval_evidence_url || null,   // available after ALTER TABLE
     submittedAt: r.submitted_at, approvedAt: r.approved_at, rejectedAt: r.rejected_at,
@@ -147,7 +149,8 @@ async function saveMemoAsync(data) {
       const DB_PENDING = ['int_activity','int_date','int_headcount','int_pp',
         'ent_client','ent_date','ent_place','ent_people',
         'dep_location','dep_start','dep_end','dep_emp_count',
-        'pmo_evidence_url','approval_evidence_url'];
+        'pmo_evidence_url','approval_evidence_url',
+        'budget_pool_id'];
       DB_PENDING.forEach(k => delete db[k]);
       await supaFetch('memos', 'POST', db, '?on_conflict=memo_no');
       // update cache directly — no need to re-fetch
@@ -179,9 +182,9 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
 
   // ── Terminal state guard ──
   // completed and rejected memos cannot be changed except by PMO override or budget tagging
-  const isPmoOverride  = extra.pmoOverrideNote || extra.pmoOverrideBy;
-  const isBudgetTagOnly = Object.keys(extra).length === 1 && 'budgetSource' in extra;
-  const isTerminal     = memo.status === 'completed' || memo.status === 'rejected' || memo.status === 'cancelled';
+  const isPmoOverride   = extra.pmoOverrideNote || extra.pmoOverrideBy;
+  const isBudgetTagOnly = Object.keys(extra).filter(k => k !== 'updatedAt').every(k => ['budgetSource','budgetPoolId'].includes(k));
+  const isTerminal      = memo.status === 'completed' || memo.status === 'rejected' || memo.status === 'cancelled';
   if (isTerminal && !isPmoOverride && !isBudgetTagOnly) return memo; // silently return current state
 
   // ── Approver order enforcement ──
@@ -240,6 +243,8 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
         'intActivity', 'intDate', 'intHeadcount', 'intPP',
         'entClient', 'entDate', 'entPlace', 'entPeople',
         'depLocation', 'depStart', 'depEnd', 'depEmpCount',
+        // Pool direct-link — add after: ALTER TABLE memos ADD COLUMN IF NOT EXISTS budget_pool_id TEXT;
+        'budgetPoolId',
       ]);
       const patch = {
         status: updated.status,
@@ -269,6 +274,25 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   if (updated.status === 'completed') {
     if (typeof createPurchaseOrdersFromMemo === 'function') {
       createPurchaseOrdersFromMemo(updated);
+    }
+    // ── Auto-tag budget pool on completion ──
+    // Only set if PMO hasn't already manually set a pool
+    if (!updated.budgetPoolId && typeof autoTagBudgetPool === 'function') {
+      const tagged = autoTagBudgetPool(updated);
+      if (tagged) {
+        // Persist the auto-tagged pool back to cache + Supabase
+        const cacheIdx2 = _memCache ? _memCache.findIndex(m => m.memoNo === memoNo) : -1;
+        if (cacheIdx2 >= 0) _memCache[cacheIdx2] = tagged;
+        if (await checkSupa()) {
+          try {
+            await supaFetch('memos', 'PATCH',
+              { budget_source: tagged.budgetSource || null, updated_at: new Date().toISOString() },
+              '?memo_no=eq.' + encodeURIComponent(memoNo)
+            );
+          } catch(e) { console.warn('Auto-tag pool Supabase sync failed', e.message); }
+        }
+        return tagged;
+      }
     }
   }
 
