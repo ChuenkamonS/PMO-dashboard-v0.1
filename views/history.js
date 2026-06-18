@@ -425,6 +425,17 @@ function _buildMemoDetailContent(memo, mode) {
     ${pmoHtml}`;
 }
 
+// ── Collapsible toggle helper ──────────────────────────────────────
+// Using a named function avoids Thai text encoding issues in inline onclick strings
+function _toggleCollapsible(headerEl) {
+  const body  = headerEl.nextElementSibling;
+  const arrow = headerEl.querySelector('.coll-arrow');
+  if (!body) return;
+  const isOpen = body.style.display === 'block';
+  body.style.display  = isOpen ? 'none' : 'block';
+  if (arrow) arrow.style.transform = isOpen ? '' : 'rotate(180deg)';
+}
+
 // ── Type-specific section builder ──────────────────────
 function _buildMemoTypeSection(memo) {
   const type = memo.type;
@@ -478,10 +489,10 @@ function _buildMemoTypeSection(memo) {
             ตาราง Account <span style="font-weight:400">(${acctRows} account)</span></div>
           <div style="border:0.5px solid var(--border,var(--color-border-tertiary));
             border-radius:var(--r-sm,var(--border-radius-md));overflow:hidden">
-            <div onclick="var n=this.nextElementSibling;n.style.display=n.style.display==='none'?'block':'none';this.querySelector('span').style.transform=this.querySelector('span').style.transform==='rotate(180deg)'?'':'rotate(180deg)'"
+            <div onclick="_toggleCollapsible(this)"
               style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;cursor:pointer;background:var(--bg-2,var(--color-background-secondary))">
               <span style="font-size:11px;color:var(--text-2,var(--color-text-secondary))">ดูรายชื่อ account</span>
-              <span style="font-size:12px;color:var(--text-3,var(--color-text-tertiary));transition:transform .15s;display:inline-block">&#x25BC;</span>
+              <span class="coll-arrow" style="font-size:12px;color:var(--text-3,var(--color-text-tertiary));transition:transform .15s;display:inline-block">&#x25BC;</span>
             </div>
             <div style="display:none">${_cleanSectionTable(acctSection.html)}</div>
           </div>
@@ -533,10 +544,10 @@ function _buildMemoTypeSection(memo) {
         ${infoHtml}
         ${nameSection && nameCount > 0 ? `
         <div style="border:0.5px solid var(--border,var(--color-border-tertiary));border-radius:var(--r-sm,var(--border-radius-md));overflow:hidden">
-          <div onclick="var n=this.nextElementSibling;n.style.display=n.style.display==='none'?'block':'none';this.querySelector('span').style.transform=this.querySelector('span').style.transform==='rotate(180deg)'?'':'rotate(180deg)'"
+          <div onclick="_toggleCollapsible(this)"
             style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;cursor:pointer;background:var(--bg-2,var(--color-background-secondary))">
             <span style="font-size:11px;color:var(--text-2,var(--color-text-secondary))">รายชื่อผู้เข้าร่วม (${nameCount} คน)</span>
-            <span style="font-size:12px;color:var(--text-3,var(--color-text-tertiary));transition:transform .15s;display:inline-block">&#x25BC;</span>
+            <span class="coll-arrow" style="font-size:12px;color:var(--text-3,var(--color-text-tertiary));transition:transform .15s;display:inline-block">&#x25BC;</span>
           </div>
           <div style="display:none">${_cleanSectionTable(nameSection.html)}</div>
         </div>` : ''}
