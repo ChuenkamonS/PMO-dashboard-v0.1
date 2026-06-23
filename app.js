@@ -719,15 +719,21 @@ function renderMemoPdf(data) {
             : isLast
             ? '<div class="mp-appr-opt" style="font-size:12pt">&#9675; อนุมัติ, เพื่อโปรดพิจารณาดำเนินการ</div><div class="mp-appr-opt" style="font-size:12pt">&#9675; อื่นๆ ..............................………</div>'
             : '<div class="mp-appr-opt" style="font-size:12pt">&#9675; เห็นชอบ, เพื่อโปรดพิจารณาอนุมัติ</div><div class="mp-appr-opt" style="font-size:12pt">&#9675; อื่นๆ ..............................………</div>';
-          const sigDate = isFirst ? reviewerDate : approverDate;
+          const sigDate = data.date || '';
+          const isApproved = a.status === 'approved';
+          const sigImgUrl  = isApproved ? getSignatureFromCache(a.name) : null;
+          const sigHtml    = sigImgUrl
+            ? `<div style="text-align:center;height:54px;display:flex;align-items:center;justify-content:center">` +
+              `<img src="${sigImgUrl}" style="max-width:170px;max-height:52px;object-fit:contain"></div>`
+            : `<div class="mp-sig-space" style="height:54px"></div>`;
           return '<div class="mp-appr-cell" style="font-size:12pt;padding:10px 12px;min-height:160px;display:flex;flex-direction:column;border:1px solid #000;'+(i>0?'margin-left:-1px;':'')+'">'
             + (headText ? '<div class="mp-appr-head" style="font-size:12pt">'+headText+'</div>' : '')
             + optText
             + '<div style="flex:1"></div>'
-            + '<div class="mp-sig-space"></div>'
+            + sigHtml
             + '<div class="mp-sig-name" style="font-size:12pt;font-weight:600;text-align:center">( '+esc(a.name||'-')+' )</div>'
             + '<div class="mp-sig-role" style="font-size:12pt;text-align:center">'+esc(a.title||'-')+'</div>'
-            + '<div class="mp-sig-date" style="font-size:12pt;text-align:center">'+sigDate+'</div>'
+            + '<div class="mp-sig-date" style="font-size:12pt;text-align:center">'+(isApproved ? sigDate : '')+'</div>'
             + '</div>';
         }).join('')
         + '</div>';
@@ -786,9 +792,12 @@ function _normalisePdfData(data) {
 
 async function downloadMemoPdf(data) {
   // ── Ensure sections are populated before PDF render ──────────────
-  // Old/imported memos may have sections:[] but still have slItems/hwItems.
-  // Rebuild missing sections from raw item data so PDF always shows tables.
   data = _normalisePdfData(data);
+
+  // ── Preload signatures for all approvers ─────────────────────────
+  if (typeof _preloadSignatures === 'function') {
+    await _preloadSignatures(data.approvers || []);
+  }
 
   const stage = document.getElementById('pdf-stage');
   stage.innerHTML = renderMemoPdf(data);
