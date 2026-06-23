@@ -796,20 +796,21 @@ svg.icon { display: inline-block; vertical-align: middle; }
 /* Toggle button */
 .sb-toggle {
   position: absolute;
-  top: 14px;
-  right: -11px;
+  top: 12px;
+  right: 8px;
   width: 22px; height: 22px;
   border-radius: 50%;
-  background: var(--surface);
-  border: 1px solid var(--border-md);
+  background: transparent;
+  border: 1px solid var(--border);
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   color: var(--text-3);
   z-index: 10;
-  transition: background .12s;
+  transition: background .12s, border-color .12s;
 }
-.sb-toggle:hover { background: var(--bg); color: var(--text); }
-.sb-toggle svg { width: 12px; height: 12px; transition: transform .2s; }
+.sb-toggle:hover { background: var(--bg); color: var(--text); border-color: var(--border-md); }
+.sb-toggle svg { width: 11px; height: 11px; transition: transform .2s; }
+.sidebar.collapsed .sb-toggle { right: 50%; transform: translateX(50%); top: 12px; }
 .sb-logo { position: relative; }
 
 /* ── FILTER ROW CONSISTENCY ── */
