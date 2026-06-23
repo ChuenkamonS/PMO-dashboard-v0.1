@@ -45,7 +45,6 @@ function memoToDb(m) {
     fx_rate: m.fxRate || null,
     sections: m.sections || [], sl_items: m.slItems || [], audit_log: m.auditLog || [],
     budget_source: m.budgetSource || null,
-    budget_pool_id: m.budgetPoolId || null,
     // INT fields
     int_activity:  m.intActivity  || null,
     int_date:      m.intDate      || null,
@@ -95,7 +94,6 @@ function dbToMemo(r) {
     depEmpCount:  r.dep_emp_count || null,
     fxRate: r.fx_rate, sections: r.sections || [], slItems: r.sl_items || [], auditLog: r.audit_log || [],
     budgetSource: r.budget_source || null,
-    budgetPoolId: r.budget_pool_id || null,
     pmoEvidenceUrl:      r.pmo_evidence_url      || null,   // available after ALTER TABLE
     approvalEvidenceUrl: r.approval_evidence_url || null,   // available after ALTER TABLE
     submittedAt: r.submitted_at, approvedAt: r.approved_at, rejectedAt: r.rejected_at,
@@ -145,13 +143,6 @@ async function saveMemoAsync(data) {
   if(await checkSupa()) {
     try {
       const db = memoToDb(saved);
-      // Strip columns that don't exist in DB yet — remove each entry after running ALTER TABLE
-      const DB_PENDING = ['int_activity','int_date','int_headcount','int_pp',
-        'ent_client','ent_date','ent_place','ent_people',
-        'dep_location','dep_start','dep_end','dep_emp_count',
-        'pmo_evidence_url','approval_evidence_url',
-        'budget_pool_id'];
-      DB_PENDING.forEach(k => delete db[k]);
       await supaFetch('memos', 'POST', db, '?on_conflict=memo_no');
       // update cache directly — no need to re-fetch
       if (_memCache) {
@@ -181,11 +172,10 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   if (!memo) return null;
 
   // ── Terminal state guard ──
-  // completed and rejected memos cannot be changed except by PMO override or budget tagging
-  const isPmoOverride   = extra.pmoOverrideNote || extra.pmoOverrideBy;
-  const isBudgetTagOnly = Object.keys(extra).filter(k => k !== 'updatedAt').every(k => ['budgetSource','budgetPoolId'].includes(k));
-  const isTerminal      = memo.status === 'completed' || memo.status === 'rejected' || memo.status === 'cancelled';
-  if (isTerminal && !isPmoOverride && !isBudgetTagOnly) return memo; // silently return current state
+  // completed and rejected memos cannot be changed except by PMO override
+  const isPmoOverride = extra.pmoOverrideNote || extra.pmoOverrideBy;
+  const isTerminal    = memo.status === 'completed' || memo.status === 'rejected' || memo.status === 'cancelled';
+  if (isTerminal && !isPmoOverride) return memo; // silently return current state
 
   // ── Approver order enforcement ──
   // Prevent A2 from approving if A1 hasn't approved yet
@@ -236,16 +226,8 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   if (await checkSupa()) {
     try {
       const toSnake = s => s.replace(/([A-Z])/g, '_$1').toLowerCase();
-      // Exclude fields whose DB columns don't exist yet — add after running ALTER TABLE
-      const PENDING_COLUMNS = new Set([
-        'approvalEvidenceUrl', 'pmoEvidenceUrl', 'auditLog',
-        // INT / ENT / DEP type fields — add columns via ALTER TABLE then remove from here
-        'intActivity', 'intDate', 'intHeadcount', 'intPP',
-        'entClient', 'entDate', 'entPlace', 'entPeople',
-        'depLocation', 'depStart', 'depEnd', 'depEmpCount',
-        // Pool direct-link — add after: ALTER TABLE memos ADD COLUMN IF NOT EXISTS budget_pool_id TEXT;
-        'budgetPoolId',
-      ]);
+      // Only exclude auditLog (handled separately above) and evidence URLs (now in DB)
+      const PENDING_COLUMNS = new Set(['auditLog']);
       const patch = {
         status: updated.status,
         updated_at: now,
@@ -274,25 +256,6 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   if (updated.status === 'completed') {
     if (typeof createPurchaseOrdersFromMemo === 'function') {
       createPurchaseOrdersFromMemo(updated);
-    }
-    // ── Auto-tag budget pool on completion ──
-    // Only set if PMO hasn't already manually set a pool
-    if (!updated.budgetPoolId && typeof autoTagBudgetPool === 'function') {
-      const tagged = autoTagBudgetPool(updated);
-      if (tagged) {
-        // Persist the auto-tagged pool back to cache + Supabase
-        const cacheIdx2 = _memCache ? _memCache.findIndex(m => m.memoNo === memoNo) : -1;
-        if (cacheIdx2 >= 0) _memCache[cacheIdx2] = tagged;
-        if (await checkSupa()) {
-          try {
-            await supaFetch('memos', 'PATCH',
-              { budget_source: tagged.budgetSource || null, updated_at: new Date().toISOString() },
-              '?memo_no=eq.' + encodeURIComponent(memoNo)
-            );
-          } catch(e) { console.warn('Auto-tag pool Supabase sync failed', e.message); }
-        }
-        return tagged;
-      }
     }
   }
 
@@ -887,42 +850,6 @@ function openMemoPdf(memoNo) {
 }
 
 // ── Init ──
-// ── Shared CSV export helper ──────────────────────────────────────
-// Outputs UTF-8 CSV with BOM so Excel opens Thai text correctly
-function _downloadCSV(filename, headers, rows) {
-  const esc = v => {
-    if (v === null || v === undefined) return '';
-    const s = String(v);
-    if (s.includes(',') || s.includes('"') || s.includes('\n')) return '"' + s.replace(/"/g, '""') + '"';
-    return s;
-  };
-  const lines = [headers.map(esc).join(','), ...rows.map(r => r.map(esc).join(','))];
-  const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href     = url;
-  a.download = filename + '_' + new Date().toISOString().slice(0,10) + '.csv';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-// ── Sidebar collapse ─────────────────────────────────────────────
-function toggleSidebar() {
-  const sb = document.querySelector('.sidebar');
-  if (!sb) return;
-  const collapsed = sb.classList.toggle('collapsed');
-  try { localStorage.setItem('orbit-sb-collapsed', collapsed ? '1' : '0'); } catch(e) {}
-}
-function initSidebarState() {
-  const sb = document.querySelector('.sidebar');
-  if (!sb) return;
-  try {
-    if (localStorage.getItem('orbit-sb-collapsed') === '1') sb.classList.add('collapsed');
-  } catch(e) {}
-}
-
 function initApp() {
   ['f-date','f-signdate','f-apprdate','sl-ratedate'].forEach(id => {
     const el = document.getElementById(id); if(el) el.value = todayISO;
