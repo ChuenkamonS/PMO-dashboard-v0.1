@@ -174,7 +174,7 @@ function switchBudgetTab(tab, btn) {
     const p = document.getElementById('bgt-tab-' + t);
     if (p) p.style.display = 'none';
   });
-  document.querySelectorAll('#view-budget .cost-stab').forEach(b => {
+  document.querySelectorAll('#view-budget .tab-btn, #view-budget .cost-stab').forEach(b => {
     b.classList.remove('active');
     b.style.background = '';
     b.style.color = '';
@@ -191,6 +191,58 @@ function switchBudgetTab(tab, btn) {
 }
 
 // ── Main entry ──
+// ── Export Budget CSVs ──────────────────────────────────────────
+
+function exportActualSpendCSV() {
+  const approved = loadMemos().filter(m => m.status === 'completed');
+  if (!approved.length) { alert('ไม่มีข้อมูล'); return; }
+  const headers = ['Memo No','ประเภท','โครงการ','Budget Source','วงเงิน','วันที่อนุมัติ',
+    'ผู้ขอ','ผู้อนุมัติ','หัวเรื่อง'];
+  const rows = approved.map(m => [
+    m.memoNo, m.type?.toUpperCase(),
+    m.project,
+    m.budgetSource || m.project || '',
+    m.total,
+    m.approvedAt?.slice(0,10)||'',
+    m.requesterName||'', m.approvedBy||m.approvers?.find(a=>a.status==='approved')?.name||'',
+    m.subject||''
+  ]);
+  _downloadCSV('Actual_Spend', headers, rows);
+}
+
+function exportBudgetVsActualCSV() {
+  const pools   = loadBudgetPools();
+  const memos   = loadMemos().filter(m => m.status === 'completed');
+  if (!pools.length) { alert('ไม่มี Budget Pool'); return; }
+  const headers = ['Pool ID','โครงการ','ชื่อ Pool','ปี','ประเภท Memo','งบประมาณ',
+    'ใช้ไปจริง','คงเหลือ','% ใช้ไป','เริ่ม','สิ้นสุด'];
+  const rows = pools.map(pool => {
+    const actual    = typeof getPoolActual === 'function' ? getPoolActual(pool, memos, pools) : 0;
+    const remaining = pool.budget - actual;
+    const pct       = pool.budget > 0 ? Math.round(actual / pool.budget * 100) : 0;
+    return [
+      pool.id, pool.project, pool.name, pool.year,
+      (pool.memoTypes||[]).join('+') || 'ทุกประเภท',
+      pool.budget, actual, remaining, pct + '%',
+      pool.startMonth||'', pool.endMonth||''
+    ];
+  });
+  _downloadCSV('Budget_vs_Actual', headers, rows);
+}
+
+function exportBudgetPoolsCSV() {
+  const pools = loadBudgetPools();
+  if (!pools.length) { alert('ไม่มี Budget Pool'); return; }
+  const headers = ['Pool ID','โครงการ','ชื่อ Pool','งบประมาณ','ปี',
+    'เริ่ม (YYYY-MM)','สิ้นสุด (YYYY-MM)','ประเภท Memo'];
+  const rows = pools.map(p => [
+    p.id, p.project, p.name, p.budget, p.year,
+    p.startMonth||'', p.endMonth||'',
+    (p.memoTypes||[]).join('+') || 'ทุกประเภท'
+  ]);
+  _downloadCSV('Budget_Pools', headers, rows);
+}
+
 function renderBudget() {
   // Sync SL budgets from Supabase on first load, then render
   loadSLBudgetsAsync().then(d => {
