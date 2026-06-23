@@ -45,11 +45,20 @@ function pendingAge(memo) {
   return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000));
 }
 function currentUser() { return document.getElementById('sb-uname')?.textContent?.trim() || 'Chuen K.'; }
-function appendAuditLog(memos, memoNo, action, comment) {
+function appendAuditLog(memos, memoNo, action, comment, extra = {}) {
   const idx = memos.findIndex(m => m.memoNo === memoNo);
   if(idx<0) return;
   if(!memos[idx].auditLog) memos[idx].auditLog = [];
-  memos[idx].auditLog.push({ actor:currentUser(), action, comment:comment||'', timestamp:new Date().toISOString() });
+  memos[idx].auditLog.push({
+    actor:        currentUser(),
+    action,
+    comment:      comment || '',
+    timestamp:    new Date().toISOString(),
+    statusBefore: extra.statusBefore || null,
+    statusAfter:  extra.statusAfter  || null,
+    evidenceUrl:  extra.evidenceUrl  || null,
+    channel:      extra.channel      || 'in-app',
+  });
 }
 function formatDateTime(iso) {
   if(!iso) return '-';
@@ -103,6 +112,23 @@ function renderPendingMemos() {
   if (el('pending-total-amt')) el('pending-total-amt').textContent = pending.length ? money(totalAmt) : '—';
 
   renderPendingContent();
+}
+
+// ── Export Pending CSV ──────────────────────────────────────────
+function exportPendingCSV() {
+  const memos = loadMemos().filter(m => ['pending','pending_a2','pending_a3'].includes(m.status));
+  const headers = ['เลข Memo','ประเภท','โครงการ','ผู้ขอ','ตำแหน่ง','วงเงิน','สถานะ',
+    'A1 ชื่อ','A1 ตำแหน่ง','A2 ชื่อ','A2 ตำแหน่ง','A3 ชื่อ','A3 ตำแหน่ง',
+    'วันที่สร้าง','วันที่อัปเดต','เหตุผล'];
+  const rows = memos.map(m => [
+    m.memoNo, m.type?.toUpperCase(), m.project, m.requesterName, m.requesterTitle,
+    m.total, m.status,
+    m.approvers?.[0]?.name||'', m.approvers?.[0]?.title||'',
+    m.approvers?.[1]?.name||'', m.approvers?.[1]?.title||'',
+    m.approvers?.[2]?.name||'', m.approvers?.[2]?.title||'',
+    m.createdAt?.slice(0,10), m.updatedAt?.slice(0,10), m.reason,
+  ]);
+  _downloadCSV('Pending_Approval', headers, rows);
 }
 
 function renderPendingContent() {
