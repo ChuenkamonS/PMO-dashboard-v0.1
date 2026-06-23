@@ -852,6 +852,42 @@ function openMemoPdf(memoNo) {
 }
 
 // ── Init ──
+// ── Shared CSV export helper ──────────────────────────────────────
+// UTF-8 CSV with BOM so Excel opens Thai text correctly
+function _downloadCSV(filename, headers, rows) {
+  const esc = v => {
+    if (v === null || v === undefined) return '';
+    const s = String(v);
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  };
+  const lines = [headers.map(esc).join(','), ...rows.map(r => r.map(esc).join(','))];
+  const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = filename + '_' + new Date().toISOString().slice(0,10) + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ── Sidebar collapse ──────────────────────────────────────────────
+function toggleSidebar() {
+  const sb = document.querySelector('.sidebar');
+  if (!sb) return;
+  const collapsed = sb.classList.toggle('collapsed');
+  try { localStorage.setItem('orbit-sb-collapsed', collapsed ? '1' : '0'); } catch(e) {}
+}
+function initSidebarState() {
+  const sb = document.querySelector('.sidebar');
+  if (!sb) return;
+  try {
+    if (localStorage.getItem('orbit-sb-collapsed') === '1') sb.classList.add('collapsed');
+  } catch(e) {}
+}
+
 function initApp() {
   ['f-date','f-signdate','f-apprdate','sl-ratedate'].forEach(id => {
     const el = document.getElementById(id); if(el) el.value = todayISO;
