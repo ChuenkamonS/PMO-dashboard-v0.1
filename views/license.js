@@ -194,6 +194,144 @@ function getLicenseStatus(lic) {
 }
 
 // ── Main render entry point ───────────────────────────────
+// ── Export License CSV ──────────────────────────────────────────
+function exportLicenseCSV() {
+  const memos    = loadMemos().filter(m => m.type === 'sl' && m.status === 'completed');
+  const manuals  = typeof loadManualLicenses === 'function' ? loadManualLicenses() : [];
+  // Build one row per license item from SL memos
+  const headers = ['Memo No','โครงการ','ชื่อ Software','Plan','฿/เดือน','จำนวน (Seats)',
+    'เริ่ม','สิ้นสุด','รวม (฿)','วันที่อนุมัติ','สถานะ','ผู้ขอ','แหล่งข้อมูล'];
+  const rows = [];
+  memos.forEach(m => {
+    const items = m.slItems?.length ? m.slItems : [];
+    items.forEach(it => {
+      rows.push([
+        m.memoNo, m.project, it.name, it.plan||'',
+        it.price||0, it.qty||1,
+        it.startMonth||'', it.endMonth||'',
+        (it.price||0) * (it.months||0) * (it.qty||1),
+        m.approvedAt?.slice(0,10)||'', 'จาก Memo',
+        m.requesterName||'', 'Memo'
+      ]);
+    });
+  });
+  manuals.forEach(l => {
+    rows.push([
+      l.memoNo||'', l.project||'', l.name, l.plan||'',
+      l.pricePerMonth||0, l.seats||1,
+      l.purchaseDate||'', l.expiry?.slice?.(0,10)||'',
+      (l.pricePerMonth||0) * (l.seats||1),
+      l.purchaseDate||'', l.statusOverride||'active',
+      l.owner||'', 'Manual'
+    ]);
+  });
+  if (!rows.length) { alert('ไม่มีข้อมูล License'); return; }
+  _downloadCSV('License', headers, rows);
+}
+
+// ── Bulk Import / Template ─────────────────────────────────────
+function downloadTemplate(type) {
+  if (type === 'license') {
+    const headers = ['name','vendor','plan','seats','price_per_month','billing_freq',
+      'expiry','project','owner','note'];
+    const example = ['Figma','Figma Inc.','Professional','5','600','monthly',
+      '2026-06-30','Geo9','กนกวรรณ มีสุข',''];
+    _downloadCSV('License_Template', headers, [example]);
+  } else if (type === 'device') {
+    downloadDeviceTemplate();
+  }
+}
+
+function importBulk(type) {
+  if (type === 'license') {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv,.xlsx,.xls';
+    input.onchange = e => _handleLicenseBulkUpload(e.target.files[0]);
+    input.click();
+  } else if (type === 'device') {
+    importDeviceBulk(null);
+  }
+}
+
+async function _handleLicenseBulkUpload(file) {
+  if (!file) return;
+  let rows = [];
+  try {
+    if (file.name.endsWith('.csv')) {
+      const text = await file.text();
+      const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim());
+      const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g,'').trim());
+      rows = lines.slice(1).map(line => {
+        const vals = line.match(/(".*?"|[^,]+|(?<=,)(?=,)|(?<=,)$|^(?=,))/g) || [];
+        const obj = {};
+        headers.forEach((h, i) => { obj[h] = (vals[i]||'').replace(/^"|"$/g,'').trim(); });
+        return obj;
+      });
+    } else if (typeof XLSX !== 'undefined') {
+      const buf = await file.arrayBuffer();
+      const wb  = XLSX.read(buf, { type:'array' });
+      const ws  = wb.Sheets[wb.SheetNames[0]];
+      rows      = XLSX.utils.sheet_to_json(ws, { defval:'' });
+    } else {
+      alert('กรุณาใช้ไฟล์ CSV สำหรับ import (ไม่พบ SheetJS สำหรับ Excel)');
+      return;
+    }
+  } catch(e) { alert('อ่านไฟล์ไม่ได้: ' + e.message); return; }
+
+  if (!rows.length) { alert('ไม่พบข้อมูลในไฟล์'); return; }
+
+  const get = (row, ...keys) => {
+    for (const k of keys) {
+      const found = Object.keys(row).find(rk => rk.toLowerCase().replace(/[\s_]/g,'') === k.toLowerCase().replace(/[\s_]/g,''));
+      if (found && row[found] !== '') return String(row[found]).trim();
+    }
+    return '';
+  };
+
+  const valid = [], errors = [];
+  rows.forEach((row, i) => {
+    const name  = get(row, 'name', 'licensename', 'software');
+    const seats = parseInt(get(row, 'seats', 'qty', 'quantity')) || 1;
+    const price = parseFloat(String(get(row, 'price_per_month', 'pricemonth', 'cost', 'price')).replace(/[^0-9.]/g,'')) || 0;
+    if (!name) { errors.push('Row ' + (i+2) + ': ไม่มีชื่อ Software'); return; }
+    valid.push({
+      id:            'lic_bulk_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+      name,
+      vendor:        get(row,'vendor','company','provider'),
+      plan:          get(row,'plan','tier'),
+      seats,
+      pricePerMonth: price,
+      billingFreq:   get(row,'billing_freq','billingfreq','billing') || 'monthly',
+      expiry:        get(row,'expiry','expirydate','expire') || null,
+      project:       get(row,'project','projectname'),
+      owner:         get(row,'owner','assignee','contact'),
+      note:          get(row,'note','remark','comment'),
+      source:        'bulk-import',
+      createdAt:     new Date().toISOString(),
+      updatedAt:     new Date().toISOString(),
+    });
+  });
+
+  if (errors.length) {
+    alert('พบข้อผิดพลาด ' + errors.length + ' รายการ:\n' + errors.slice(0,5).join('\n'));
+    if (!valid.length) return;
+    if (!confirm('มีข้อมูลที่ถูกต้อง ' + valid.length + ' รายการ — ต้องการ import ต่อไหม?')) return;
+  } else {
+    if (!confirm('พบข้อมูล ' + valid.length + ' รายการ — ยืนยัน import?')) return;
+  }
+
+  const existing = loadManualLicenses();
+  const merged   = [...existing, ...valid.filter(v => !existing.find(e => e.name === v.name && e.project === v.project))];
+  storeManualLicenses(merged);
+  // Sync to Supabase
+  valid.forEach(lic => {
+    if (typeof saveLicenseAsync === 'function') saveLicenseAsync(lic).catch(e => console.warn('License bulk sync failed', e));
+  });
+  renderLicense();
+  alert('✓ Import License สำเร็จ — เพิ่ม ' + valid.length + ' รายการ');
+}
+
 function renderLicense() {
   // Load all async settings first, then render
   Promise.all([
@@ -210,8 +348,10 @@ function renderLicense() {
 
 function switchLicTab(tab) {
   _licCurrentTab = tab;
-  document.querySelectorAll('.lic-tab-btn').forEach(b => {
-    b.classList.toggle('lic-tab-active', b.dataset.tab === tab);
+  document.querySelectorAll('.lic-tab-btn, #view-license .tab-btn').forEach(b => {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle('lic-tab-active', on);
+    b.classList.toggle('active', on);
   });
   _renderLicTab(tab);
 }
