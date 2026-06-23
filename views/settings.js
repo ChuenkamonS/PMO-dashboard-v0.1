@@ -180,33 +180,27 @@ function renderSettingsUI(s) {
 
     <!-- Signature Upload -->
     <div class="card" style="padding:20px;margin-bottom:14px">
-      <div style="font-size:13px;font-weight:700;margin-bottom:6px;color:var(--blue)">✍️ ลายเซ็นสำหรับเอกสาร PDF</div>
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px;color:var(--blue)">✍️ ลายเซ็นของฉัน</div>
       <div style="font-size:12px;color:var(--text-3);margin-bottom:14px">
-        อัปโหลดภาพลายเซ็นของคุณ (PNG พื้นหลังโปร่งใส ดีที่สุด) — จะถูกประทับในเอกสารเมื่อคุณ Approve
+        ลายเซ็นนี้จะถูกประทับในเอกสาร PDF เมื่อ <strong>${esc(currentUser())}</strong> เป็นผู้อนุมัติ
+        — แนะนำ PNG พื้นหลังโปร่งใส ขนาดกว้าง 300–500px สูง 80–120px ไม่เกิน 500KB
       </div>
       <div style="display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap">
         <div>
-          <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:6px">ลายเซ็นปัจจุบัน</div>
-          <div id="sig-current-preview" style="width:180px;height:70px;border:1px dashed var(--border-md);border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;background:var(--bg)">
-            ${s.signatureUrl
-              ? `<img src="${esc(s.signatureUrl)}" style="max-width:170px;max-height:62px;object-fit:contain">`
-              : `<span style="font-size:11px;color:var(--text-3)">ยังไม่มีลายเซ็น</span>`}
+          <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:6px">ลายเซ็นปัจจุบัน (${esc(currentUser())})</div>
+          <div id="sig-current-preview" style="width:200px;height:80px;border:1px dashed var(--border-md);border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;background:var(--bg)">
+            <span style="font-size:11px;color:var(--text-3)">กำลังโหลด...</span>
           </div>
         </div>
         <div style="flex:1;min-width:220px">
-          <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:6px">อัปโหลดใหม่</div>
+          <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:6px">อัปโหลดลายเซ็นใหม่</div>
           <input type="file" id="sig-upload-input" accept="image/png,image/jpeg,image/jpg"
             style="font-size:12px;color:var(--text-2);margin-bottom:8px"
             onchange="handleSignatureUpload(this)">
           <div id="sig-upload-preview" style="margin-top:6px"></div>
           <div style="display:flex;gap:8px;margin-top:10px">
-            <button class="btn-primary" onclick="saveSignature()" style="font-size:12px">💾 บันทึกลายเซ็น</button>
-            ${s.signatureUrl
-              ? `<button class="btn-sm" style="color:var(--red);font-size:12px" onclick="deleteSignature()">✕ ลบลายเซ็น</button>`
-              : ''}
-          </div>
-          <div style="font-size:10px;color:var(--text-3);margin-top:6px">
-            ขนาดแนะนำ: กว้าง 300–500px · สูง 80–120px · PNG พื้นหลังโปร่งใส · ไม่เกิน 200KB
+            <button class="btn-primary" onclick="saveMySignature()" style="font-size:12px">💾 บันทึกลายเซ็น</button>
+            <button class="btn-sm" id="sig-delete-btn" style="color:var(--red);font-size:12px;display:none" onclick="deleteMySignature()">✕ ลบลายเซ็น</button>
           </div>
         </div>
       </div>
@@ -346,6 +340,7 @@ function applySettingsToCreateForm(type) {
 async function initSettings() {
   const s = await loadSettingsAsync();
   refreshProjectDropdowns(s.projects);
+  _loadSignaturePreview(); // load current user signature preview async
   return s;
 }
 
@@ -357,7 +352,7 @@ function handleSignatureUpload(input) {
   const preview = document.getElementById('sig-upload-preview');
   if (!file) { _pendingSignatureDataUrl = null; if(preview) preview.innerHTML = ''; return; }
   if (file.size > 500 * 1024) {
-    if(preview) { preview.innerHTML = '<span style="font-size:11px;color:var(--red)">⚠ ไฟล์ใหญ่เกิน 200KB — โปรดบีบอัดก่อน</span>'; }
+    if(preview) { preview.innerHTML = '<span style="font-size:11px;color:var(--red)">⚠ ไฟล์ใหญ่เกิน 500KB — โปรดบีบอัดก่อน</span>'; }
     input.value = '';
     _pendingSignatureDataUrl = null;
     return;
@@ -376,26 +371,102 @@ function handleSignatureUpload(input) {
   reader.readAsDataURL(file);
 }
 
-async function saveSignature() {
+// Load current user's signature into the preview after render
+function _loadSignaturePreview() {
+  const box = document.getElementById('sig-current-preview');
+  const delBtn = document.getElementById('sig-delete-btn');
+  if (!box) return;
+  loadUserSignatureAsync(currentUser()).then(dataUrl => {
+    if (dataUrl) {
+      box.innerHTML = `<img src="${dataUrl}" style="max-width:190px;max-height:72px;object-fit:contain">`;
+      if (delBtn) delBtn.style.display = '';
+    } else {
+      box.innerHTML = '<span style="font-size:11px;color:var(--text-3)">ยังไม่มีลายเซ็น</span>';
+    }
+  });
+}
+
+async function saveMySignature() {
   if (!_pendingSignatureDataUrl) { alert('กรุณาเลือกไฟล์ลายเซ็นก่อน'); return; }
-  const s = loadSettings();
-  s.signatureUrl = _pendingSignatureDataUrl;
-  await saveSettingsAsync(s);
+  await saveUserSignatureAsync(currentUser(), _pendingSignatureDataUrl);
+  // Also update cache
+  _sigCache[currentUser()] = _pendingSignatureDataUrl;
   _pendingSignatureDataUrl = null;
   alert('✓ บันทึกลายเซ็นเรียบร้อย');
   renderSettings();
 }
 
-async function deleteSignature() {
-  if (!confirm('ลบลายเซ็นออกจากระบบ?')) return;
-  const s = loadSettings();
-  delete s.signatureUrl;
-  await saveSettingsAsync(s);
+async function deleteMySignature() {
+  if (!confirm('ลบลายเซ็นของ ' + currentUser() + ' ออกจากระบบ?')) return;
+  await deleteUserSignatureAsync(currentUser());
+  _sigCache[currentUser()] = null;
   alert('✓ ลบลายเซ็นเรียบร้อย');
   renderSettings();
 }
 
+// Keep old functions as aliases (backward compat)
+async function saveSignature() { return saveMySignature(); }
+async function deleteSignature() { return deleteMySignature(); }
+
 // Helper: get current user's signature URL (used by PDF generation in future)
 function getCurrentSignatureUrl() {
   return loadSettings().signatureUrl || null;
+}
+
+// ── Per-user signature (keyed by user name) ──────────────────────
+function _sigKey(name) {
+  return 'sig-' + (name || currentUser()).trim();
+}
+
+async function loadUserSignatureAsync(name) {
+  const key = _sigKey(name);
+  if (await checkSupa()) {
+    try {
+      const rows = await supaFetch('settings', 'GET', null, `?id=eq.${encodeURIComponent(key)}`);
+      if (rows && rows.length) return rows[0].data?.signatureDataUrl || null;
+    } catch(e) {}
+  }
+  // Fallback: localStorage
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) return JSON.parse(raw)?.signatureDataUrl || null;
+  } catch(e) {}
+  return null;
+}
+
+async function saveUserSignatureAsync(name, dataUrl) {
+  const key = _sigKey(name);
+  // localStorage cache
+  try { localStorage.setItem(key, JSON.stringify({ signatureDataUrl: dataUrl })); } catch(e) {}
+  // Supabase
+  if (await checkSupa()) {
+    try {
+      await supaFetch('settings', 'POST',
+        { id: key, data: { signatureDataUrl: dataUrl }, updated_at: new Date().toISOString() },
+        '?on_conflict=id');
+    } catch(e) { console.warn('Signature save failed', e.message); }
+  }
+}
+
+async function deleteUserSignatureAsync(name) {
+  const key = _sigKey(name);
+  try { localStorage.removeItem(key); } catch(e) {}
+  if (await checkSupa()) {
+    try { await supaFetch('settings', 'DELETE', null, `?id=eq.${encodeURIComponent(key)}`); } catch(e) {}
+  }
+}
+
+// Cache for signature data URLs (loaded at PDF time)
+const _sigCache = {};
+
+async function _preloadSignatures(approvers) {
+  const names = [...new Set((approvers||[]).map(a => a.name).filter(Boolean))];
+  await Promise.all(names.map(async name => {
+    if (_sigCache[name] !== undefined) return;
+    _sigCache[name] = await loadUserSignatureAsync(name);
+  }));
+}
+
+function getSignatureFromCache(name) {
+  return _sigCache[name] || null;
 }
