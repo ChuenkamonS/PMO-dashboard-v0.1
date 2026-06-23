@@ -419,8 +419,9 @@ function getCurrentSignatureUrl() {
 
 // ── Per-user signature (keyed by user name) ──────────────────────
 function _sigKey(name) {
-  // Use URL-safe key: replace spaces and special chars with underscores
-  return 'sig-' + (name || currentUser()).trim().replace(/[^a-zA-Z0-9ก-๙._-]/g, '_');
+  // Use the exact name as key — spaces are fine in localStorage and Supabase data field
+  // We handle URL encoding separately in the fetch query
+  return 'sig-' + (name || currentUser()).trim();
 }
 
 async function loadUserSignatureAsync(name) {
@@ -433,13 +434,13 @@ async function loadUserSignatureAsync(name) {
       if (parsed?.signatureDataUrl) return parsed.signatureDataUrl;
     }
   } catch(e) {}
-  // Fallback: Supabase
+  // Fallback: Supabase — encode key for URL safety
   if (await checkSupa()) {
     try {
-      const rows = await supaFetch('settings', 'GET', null, `?id=eq.${encodeURIComponent(key)}`);
+      const rows = await supaFetch('settings', 'GET', null,
+        `?id=eq.${encodeURIComponent(key)}`);
       if (rows && rows.length) {
         const dataUrl = rows[0].data?.signatureDataUrl || null;
-        // Write back to localStorage cache
         if (dataUrl) {
           try { localStorage.setItem(key, JSON.stringify({ signatureDataUrl: dataUrl })); } catch(e) {}
         }
