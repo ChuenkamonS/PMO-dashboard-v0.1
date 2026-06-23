@@ -90,7 +90,11 @@ function deepMerge(base, override) {
 
 // ── Render Settings Page ──
 function renderSettings() {
-  loadSettingsAsync().then(renderSettingsUI);
+  loadSettingsAsync().then(s => {
+    renderSettingsUI(s);
+    // Load signature preview async AFTER DOM is rendered
+    setTimeout(_loadSignaturePreview, 50);
+  });
 }
 
 function renderSettingsUI(s) {
@@ -415,42 +419,57 @@ function getCurrentSignatureUrl() {
 
 // ── Per-user signature (keyed by user name) ──────────────────────
 function _sigKey(name) {
-  return 'sig-' + (name || currentUser()).trim();
+  // Use URL-safe key: replace spaces and special chars with underscores
+  return 'sig-' + (name || currentUser()).trim().replace(/[^a-zA-Z0-9ก-๙._-]/g, '_');
 }
 
 async function loadUserSignatureAsync(name) {
   const key = _sigKey(name);
+  // Try localStorage first (fastest, no network)
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed?.signatureDataUrl) return parsed.signatureDataUrl;
+    }
+  } catch(e) {}
+  // Fallback: Supabase
   if (await checkSupa()) {
     try {
       const rows = await supaFetch('settings', 'GET', null, `?id=eq.${encodeURIComponent(key)}`);
-      if (rows && rows.length) return rows[0].data?.signatureDataUrl || null;
+      if (rows && rows.length) {
+        const dataUrl = rows[0].data?.signatureDataUrl || null;
+        // Write back to localStorage cache
+        if (dataUrl) {
+          try { localStorage.setItem(key, JSON.stringify({ signatureDataUrl: dataUrl })); } catch(e) {}
+        }
+        return dataUrl;
+      }
     } catch(e) {}
   }
-  // Fallback: localStorage
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw) return JSON.parse(raw)?.signatureDataUrl || null;
-  } catch(e) {}
   return null;
 }
 
 async function saveUserSignatureAsync(name, dataUrl) {
   const key = _sigKey(name);
-  // localStorage cache
+  // 1. localStorage cache first (always works, instant)
   try { localStorage.setItem(key, JSON.stringify({ signatureDataUrl: dataUrl })); } catch(e) {}
-  // Supabase
+  // 2. Invalidate in-memory cache so PDF uses new signature immediately
+  if (typeof _sigCache !== 'undefined') _sigCache[name] = dataUrl;
+  // 3. Supabase (async — fire and forget but log errors)
   if (await checkSupa()) {
     try {
       await supaFetch('settings', 'POST',
         { id: key, data: { signatureDataUrl: dataUrl }, updated_at: new Date().toISOString() },
         '?on_conflict=id');
-    } catch(e) { console.warn('Signature save failed', e.message); }
+    } catch(e) { console.warn('Signature save to Supabase failed:', e.message); }
   }
 }
 
 async function deleteUserSignatureAsync(name) {
   const key = _sigKey(name);
   try { localStorage.removeItem(key); } catch(e) {}
+  if (typeof _sigCache !== 'undefined') _sigCache[name] = null;
   if (await checkSupa()) {
     try { await supaFetch('settings', 'DELETE', null, `?id=eq.${encodeURIComponent(key)}`); } catch(e) {}
   }
