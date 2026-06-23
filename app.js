@@ -44,7 +44,8 @@ function memoToDb(m) {
     pmo_override_by: m.pmoOverrideBy || null,
     fx_rate: m.fxRate || null,
     sections: m.sections || [], sl_items: m.slItems || [], audit_log: m.auditLog || [],
-    budget_source: m.budgetSource || null,
+    budget_source:  m.budgetSource  || null,
+    budget_pool_id: m.budgetPoolId  || null,
     // INT fields
     int_activity:  m.intActivity  || null,
     int_date:      m.intDate      || null,
@@ -93,7 +94,8 @@ function dbToMemo(r) {
     depEnd:       r.dep_end       || null,
     depEmpCount:  r.dep_emp_count || null,
     fxRate: r.fx_rate, sections: r.sections || [], slItems: r.sl_items || [], auditLog: r.audit_log || [],
-    budgetSource: r.budget_source || null,
+    budgetSource:  r.budget_source   || null,
+    budgetPoolId:  r.budget_pool_id  || null,
     pmoEvidenceUrl:      r.pmo_evidence_url      || null,   // available after ALTER TABLE
     approvalEvidenceUrl: r.approval_evidence_url || null,   // available after ALTER TABLE
     submittedAt: r.submitted_at, approvedAt: r.approved_at, rejectedAt: r.rejected_at,
