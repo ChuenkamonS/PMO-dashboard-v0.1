@@ -401,6 +401,105 @@ function renderDeviceSummaries(devices) {
 }
 
 // ── Main render ──
+// ── Device Bulk Import / Template ──────────────────────────────
+function downloadDeviceTemplate() {
+  const headers = ['name','brand','type','platform','serial','asset_tag',
+    'owner','project','condition','status','warranty','note'];
+  const example = ['MacBook Pro 14"','Apple','laptop','mac',
+    'C02XL0MCJG5M','ORB-2024-001',
+    'สมชาย ใจดี','Geo9','new','in-use','2027-03-01',''];
+  _downloadCSV('Device_Template', headers, [example]);
+}
+
+async function importDeviceBulk(file) {
+  if (!file) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv,.xlsx,.xls';
+    input.onchange = e => importDeviceBulk(e.target.files[0]);
+    input.click();
+    return;
+  }
+
+  let rows = [];
+  try {
+    if (file.name.endsWith('.csv')) {
+      const text = await file.text();
+      const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim());
+      const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g,'').trim());
+      rows = lines.slice(1).map(line => {
+        const vals = line.match(/(".*?"|[^,]+|(?<=,)(?=,)|(?<=,)$|^(?=,))/g) || [];
+        const obj = {};
+        headers.forEach((h, i) => { obj[h] = (vals[i]||'').replace(/^"|"$/g,'').trim(); });
+        return obj;
+      });
+    } else if (typeof XLSX !== 'undefined') {
+      const buf = await file.arrayBuffer();
+      const wb  = XLSX.read(buf, { type:'array' });
+      const ws  = wb.Sheets[wb.SheetNames[0]];
+      rows      = XLSX.utils.sheet_to_json(ws, { defval:'' });
+    } else {
+      alert('กรุณาใช้ไฟล์ CSV (ไม่พบ SheetJS สำหรับ Excel)'); return;
+    }
+  } catch(e) { alert('อ่านไฟล์ไม่ได้: ' + e.message); return; }
+
+  if (!rows.length) { alert('ไม่พบข้อมูลในไฟล์'); return; }
+
+  const get = (row, ...keys) => {
+    for (const k of keys) {
+      const found = Object.keys(row).find(rk => rk.toLowerCase().replace(/[\s_]/g,'') === k.toLowerCase().replace(/[\s_]/g,''));
+      if (found && row[found] !== '') return String(row[found]).trim();
+    }
+    return '';
+  };
+
+  const valid = [], errors = [];
+  rows.forEach((row, i) => {
+    const name = get(row,'name','devicename','brandmodel','model');
+    if (!name) { errors.push('Row ' + (i+2) + ': ไม่มีชื่ออุปกรณ์'); return; }
+    valid.push({
+      id:           'dev_bulk_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+      name,
+      brand:        get(row,'brand','manufacturer'),
+      type:         get(row,'type','devicetype') || 'other',
+      platform:     get(row,'platform','os') || 'other',
+      serial:       get(row,'serial','serialnumber','sn'),
+      assetTag:     get(row,'asset_tag','assettag','assetno'),
+      owner:        get(row,'owner','assignee','user'),
+      project:      get(row,'project'),
+      condition:    get(row,'condition') || 'good',
+      status:       get(row,'status') || 'in-use',
+      warranty:     get(row,'warranty'),
+      note:         get(row,'note','remark'),
+      source:       'bulk-import',
+      createdAt:    new Date().toISOString(),
+      updatedAt:    new Date().toISOString(),
+    });
+  });
+
+  if (errors.length) {
+    alert('พบข้อผิดพลาด ' + errors.length + ' รายการ:\n' + errors.slice(0,5).join('\n'));
+    if (!valid.length) return;
+    if (!confirm('มีข้อมูลที่ถูกต้อง ' + valid.length + ' รายการ — ต้องการ import ต่อไหม?')) return;
+  } else {
+    if (!confirm('พบข้อมูล ' + valid.length + ' อุปกรณ์ — ยืนยัน import?')) return;
+  }
+
+  const existing = loadDevices();
+  // Deduplicate by serial number if present
+  const merged = [...existing];
+  valid.forEach(d => {
+    if (d.serial && existing.find(e => e.serial === d.serial)) return;
+    merged.push(d);
+  });
+  storeDevices(merged);
+  valid.forEach(d => {
+    if (typeof saveDeviceAsync === 'function') saveDeviceAsync(d).catch(e => console.warn('Device bulk sync failed', e));
+  });
+  renderDevice();
+  alert('✓ Import อุปกรณ์สำเร็จ — เพิ่ม ' + valid.length + ' รายการ (ซ้ำ serial: ข้ามแล้ว)');
+}
+
 function renderDevice() {
   // Load fresh from Supabase then render
   loadDevicesAsync().then(() => _renderDeviceTable()).catch(() => _renderDeviceTable());
@@ -648,38 +747,36 @@ function deleteDevice(id) {
 }
 
 // ── Export CSV ──
+function exportDeviceCSV() { exportDeviceCsv(); } // alias
 function exportDeviceCsv() {
   const devices = loadDevices();
   if(!devices.length) { alert('ไม่มีข้อมูลสำหรับ Export'); return; }
-  const headers = ['PBX Number','OS','Type','Brand / Model','QTY','Asset IT','Asset ACC','Serial','Assignee','Position','Project','Received date','QA Owner','Updated Date','Remark','OS version','Status','Condition','Warranty','Memo Ref'];
+  const headers = ['PBX Number','OS','Type','Brand / Model','QTY','Asset IT','Asset ACC',
+    'Serial','Assignee','Position','Project','Received date','QA Owner',
+    'Updated Date','Remark','OS version','Status','Condition','Warranty','Memo Ref'];
   const rows = devices.map(d => [
-    d.pbxNumber||'',
-    PLATFORM_LABEL[d.platform||'other']||d.platform||'',
-    TYPE_LABEL[d.type||'other']||d.type||'',
-    d.name||'',
-    d.qty||1,
-    d.assetTag||'',
-    d.assetAcc||'',
-    d.serial||'',
-    d.owner||'',
-    d.position||'',
-    d.project||'',
-    d.assignedDate||'',
-    d.qaOwner||'',
-    d.updatedAt ? d.updatedAt.slice(0,10) : '',
-    d.note||'',
-    d.osVersion||'',
-    d.status||'',
-    d.condition||'',
-    d.warranty||'',
-    d.memoRef||''
+    d.pbxNumber||'', PLATFORM_LABEL[d.platform||'other']||d.platform||'',
+    TYPE_LABEL[d.type||'other']||d.type||'', d.name||'', d.qty||1,
+    d.assetTag||'', d.assetAcc||'', d.serial||'', d.owner||'', d.position||'',
+    d.project||'', d.assignedDate||'', d.qaOwner||'',
+    d.updatedAt ? d.updatedAt.slice(0,10) : '', d.note||'', d.osVersion||'',
+    d.status||'', d.condition||'', d.warranty||'', d.memoRef||''
   ]);
-  const csv = [headers,...rows].map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
-  const blob = new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8;'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href=url;
-  a.download = `devices-${new Date().toISOString().slice(0,10)}.csv`;
-  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  _downloadCSV('Device_Registry', headers, rows);
+}
+
+function exportPurchaseOrdersCSV() {
+  const pos = loadPurchaseOrders();
+  if(!pos.length) { alert('ไม่มีข้อมูล Purchase Orders'); return; }
+  const headers = ['PO ID','Memo No','โครงการ','ชื่อรายการ','จำนวนที่สั่ง','จำนวนที่รับ',
+    'คงเหลือ','สถานะ','หมายเหตุ','วันที่สร้าง','วันที่อัปเดต'];
+  const rows = pos.map(p => [
+    p.id, p.memoNo, p.project, p.itemName,
+    p.orderedQty, p.arrivedQty, (p.orderedQty - p.arrivedQty),
+    p.status, p.note||'',
+    p.createdAt?.slice(0,10), p.updatedAt?.slice(0,10)
+  ]);
+  _downloadCSV('Purchase_Orders', headers, rows);
 }
 
 document.addEventListener('click', e => {
@@ -809,11 +906,12 @@ function uploadDevicePhoto(id, input) {
 // ══════════════════════════════════════════
 
 function switchDevTab(tab, btn) {
-  document.querySelectorAll('.dev-tab-btn').forEach(b => {
-    const on = b === btn;
-    b.style.borderBottomColor = on ? '#185FA5' : 'transparent';
-    b.style.color = on ? '#185FA5' : 'var(--text-2)';
-    b.style.fontWeight = on ? '500' : '400';
+  document.querySelectorAll('.dev-tab-btn, #view-device .tab-btn').forEach(b => {
+    const on = b === btn || b.dataset.tab === tab;
+    b.classList.toggle('active', on);
+    b.style.borderBottomColor = '';
+    b.style.color = '';
+    b.style.fontWeight = '';
   });
   document.getElementById('dev-panel-registry').style.display = tab === 'registry' ? '' : 'none';
   document.getElementById('dev-panel-orders').style.display   = tab === 'orders'   ? '' : 'none';
