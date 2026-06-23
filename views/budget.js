@@ -2193,8 +2193,8 @@ function showPoolMemos(poolId) {
 // PMO ROLE HELPER — replace body when user system is ready
 // ══════════════════════════════════════════════════════════════════
 function isPMO() {
-  // TODO: connect to user role system when ready
-  return true;
+  const role = document.getElementById('sb-urole')?.textContent?.trim() || '';
+  return role === 'PMO';
 }
 
 // ══════════════════════════════════════════════════════════════════
