@@ -755,17 +755,37 @@ svg.icon { display: inline-block; vertical-align: middle; }
 .sidebar.collapsed .sb-sub,
 .sidebar.collapsed .sb-uname,
 .sidebar.collapsed .sb-urole,
-.sidebar.collapsed .sb-badge,
 .sidebar.collapsed .sb-label,
 .sidebar.collapsed .sb-item-label { display: none; }
-.sidebar.collapsed .sb-item { justify-content: center; padding: 7px; gap: 0; overflow: hidden; }
+/* Hide badges when collapsed */
+.sidebar.collapsed .sb-badge { display: none; }
+/* Icon-only items */
+.sidebar.collapsed .sb-item {
+  justify-content: center;
+  padding: 8px 0;
+  gap: 0;
+  overflow: hidden;
+  width: 100%;
+}
+.sidebar.collapsed .sb-item svg {
+  opacity: .7;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+}
+.sidebar.collapsed .sb-item:hover svg { opacity: 1; }
+/* Hide sub-items entirely */
 .sidebar.collapsed .sb-sub-item { display: none; }
-.sidebar.collapsed .sb-item svg { opacity: 1; flex-shrink: 0; }
-.sidebar.collapsed .sb-user { justify-content: center; padding: 7px; }
+/* User section */
+.sidebar.collapsed .sb-user { justify-content: center; padding: 8px 0; }
 .sidebar.collapsed .sb-avatar { margin: 0; }
-.sidebar.collapsed .sb-logo { justify-content: center; padding: 12px 0; }
-.sidebar.collapsed .sb-logo .sb-dot { margin: 0; }
-.sidebar.collapsed .sb-nav { padding: 10px 4px; }
+/* Logo area */
+.sidebar.collapsed .sb-logo { justify-content: center; padding: 12px 0; gap: 0; }
+.sidebar.collapsed .sb-logo .sb-dot { margin: 0; flex-shrink: 0; }
+/* Nav padding */
+.sidebar.collapsed .sb-nav { padding: 8px 0; }
+/* Toggle arrow flips when collapsed */
+.sidebar.collapsed .sb-toggle svg { transform: rotate(180deg); }
 /* Toggle button */
 .sb-toggle {
   position: absolute;
@@ -783,7 +803,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
 }
 .sb-toggle:hover { background: var(--bg); color: var(--text); }
 .sb-toggle svg { width: 12px; height: 12px; transition: transform .2s; }
-.sidebar.collapsed .sb-toggle svg { transform: rotate(180deg); }
 .sb-logo { position: relative; }
 
 /* ── FILTER ROW CONSISTENCY ── */
