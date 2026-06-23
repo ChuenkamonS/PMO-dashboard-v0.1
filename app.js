@@ -853,21 +853,41 @@ async function downloadMemoPdf(data) {
       } catch(e) { clearTimeout(t); if(i===retries) throw e; await new Promise(r=>setTimeout(r,2000)); }
     }
   }
+  // ── Show loading indicator ────────────────────────────────────────
+  const loadingEl = document.createElement('div');
+  loadingEl.id = 'pdf-loading-overlay';
+  loadingEl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px';
+  loadingEl.innerHTML = '<div style="background:#fff;border-radius:12px;padding:28px 36px;text-align:center;font-family:\'IBM Plex Sans Thai\',sans-serif">'
+    + '<div style="font-size:15px;font-weight:600;color:#185FA5;margin-bottom:8px">⏳ กำลังสร้าง PDF...</div>'
+    + '<div id="pdf-loading-msg" style="font-size:12px;color:#666">กรุณารอสักครู่</div>'
+    + '</div>';
+  document.body.appendChild(loadingEl);
+  const setMsg = msg => { const el = document.getElementById('pdf-loading-msg'); if(el) el.textContent = msg; };
+
   try {
     const html = stage.firstElementChild?.outerHTML || stage.innerHTML;
+    setMsg('กำลังติดต่อ PDF server...');
+    console.log('[PDF] Sending to server, html length:', html.length, 'filename:', filename);
     const resp = await fetchWithRetry('https://memo-pdf-server.onrender.com/generate-pdf', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ html, filename, logoBase64: LOGO_B64 })
     });
     if(!resp.ok) throw new Error('Server '+resp.status);
+    setMsg('กำลัง download...');
     const blob = await resp.blob();
+    console.log('[PDF] Received blob, size:', blob.size, 'bytes');
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href=url; a.download=filename; a.click();
     URL.revokeObjectURL(url);
+    console.log('[PDF] Download triggered:', filename);
   } catch(err) {
-    console.warn('PDF server failed, fallback to print', err);
+    console.warn('[PDF] Server failed, fallback to print:', err.message);
+    setMsg('Server ไม่ตอบสนอง — เปิด Print dialog แทน');
+    await new Promise(r => setTimeout(r, 800));
     document.body.classList.add('printing-pdf');
     try { window.print(); } finally { document.body.classList.remove('printing-pdf'); }
+  } finally {
+    loadingEl.remove();
   }
 }
 function openMemoPdf(memoNo) {
