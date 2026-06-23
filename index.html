@@ -2292,7 +2292,9 @@ function switchAccount(name, role, initials) {
   document.getElementById('sb-urole').textContent = role;
   document.getElementById('sb-avatar').textContent = initials;
   document.getElementById('account-menu').style.display = 'none';
+  // Re-render current view so PMO-gated features show/hide correctly
   renderPendingMemos();
+  if (typeof renderHistoryMemos === 'function') renderHistoryMemos();
 }
 document.addEventListener('click', e => {
   if(!document.getElementById('sb-user-btn')?.contains(e.target))
