@@ -341,13 +341,18 @@ function _buildMemoDetailContent(memo, mode) {
     </div>` : '';
 
   // ── Rejection / Cancellation note ──
-  const noteHtml = memo.rejectionReason
+  // Only show when memo is actually rejected or cancelled — not on completed memos
+  // that may have stale rejectionReason from a previous cancel/override cycle
+  const isTerminalNegative = memo.status === 'rejected' || memo.status === 'cancelled';
+  const noteText = memo.rejectionReason || memo.cancellationReason;
+  const noteLabel = memo.status === 'cancelled' ? 'เหตุผลที่ยกเลิก' : 'เหตุผลที่ reject';
+  const noteHtml = (isTerminalNegative && noteText)
     ? `<div style="background:var(--red-50,var(--color-background-danger));
         border:0.5px solid var(--color-border-danger);
         border-radius:var(--r-sm,var(--border-radius-md));
         padding:8px 12px;margin-top:12px;font-size:12px;
         color:var(--red-800,var(--color-text-danger))">
-        <strong>เหตุผลที่ reject:</strong> ${esc(memo.rejectionReason)}</div>`
+        <strong>${noteLabel}:</strong> ${esc(noteText)}</div>`
     : '';
 
   // ── เรียน / เหตุผล block ──
