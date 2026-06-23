@@ -780,14 +780,13 @@ svg.icon { display: inline-block; vertical-align: middle; }
 .sidebar.collapsed .sb-user { justify-content: center; padding: 8px 0; }
 .sidebar.collapsed .sb-avatar { margin: 0; }
 /* Logo area */
-.sidebar.collapsed .sb-logo { justify-content: center; padding: 12px 0; gap: 0; }
+.sidebar.collapsed .sb-logo { justify-content: center; padding: 10px 0; gap: 0; flex-direction: column; align-items: center; }
 .sidebar.collapsed .sb-logo .sb-dot { margin: 0; flex-shrink: 0; }
+.sidebar.collapsed .sb-toggle { margin-left: 0; margin-top: 4px; }
 /* Nav padding */
 .sidebar.collapsed .sb-nav { padding: 8px 0; }
 /* Toggle arrow flips when collapsed */
 .sidebar.collapsed .sb-toggle svg { transform: rotate(180deg); }
-/* Toggle button repositions to right edge of collapsed sidebar */
-.sidebar.collapsed .sb-toggle { right: -11px; }
 /* Hide user info text and chevron in footer */
 .sidebar.collapsed .sb-user-info { display: none; }
 .sidebar.collapsed .sb-chevron { display: none; }
@@ -795,24 +794,20 @@ svg.icon { display: inline-block; vertical-align: middle; }
 .sidebar.collapsed .sb-user { padding: 8px 0; gap: 0; justify-content: center; }
 /* Toggle button */
 .sb-toggle {
-  position: absolute;
-  top: 12px;
-  right: 8px;
-  width: 22px; height: 22px;
-  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  border-radius: var(--r-sm);
   background: transparent;
   border: 1px solid var(--border);
   cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
   color: var(--text-3);
-  z-index: 10;
-  transition: background .12s, border-color .12s;
+  flex-shrink: 0;
+  transition: background .12s;
+  margin-left: auto;
 }
-.sb-toggle:hover { background: var(--bg); color: var(--text); border-color: var(--border-md); }
-.sb-toggle svg { width: 11px; height: 11px; transition: transform .2s; }
-.sidebar.collapsed .sb-toggle { right: 50%; transform: translateX(50%); top: 12px; }
-.sb-logo { position: relative; }
-
+.sb-toggle:hover { background: var(--bg); color: var(--text); }
+.sb-toggle svg { width: 12px; height: 12px; transition: transform .2s; }
+.sidebar.collapsed .sb-toggle { margin-left: 0; margin-top: 4px; }
 /* ── FILTER ROW CONSISTENCY ── */
 .filter-row select,
 .filter-row input[type="text"],
