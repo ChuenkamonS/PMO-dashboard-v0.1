@@ -786,6 +786,13 @@ svg.icon { display: inline-block; vertical-align: middle; }
 .sidebar.collapsed .sb-nav { padding: 8px 0; }
 /* Toggle arrow flips when collapsed */
 .sidebar.collapsed .sb-toggle svg { transform: rotate(180deg); }
+/* Toggle button repositions to right edge of collapsed sidebar */
+.sidebar.collapsed .sb-toggle { right: -11px; }
+/* Hide user info text and chevron in footer */
+.sidebar.collapsed .sb-user-info { display: none; }
+.sidebar.collapsed .sb-chevron { display: none; }
+.sidebar.collapsed .sb-footer { padding: 8px 0; }
+.sidebar.collapsed .sb-user { padding: 8px 0; gap: 0; justify-content: center; }
 /* Toggle button */
 .sb-toggle {
   position: absolute;
@@ -914,11 +921,11 @@ svg.icon { display: inline-block; vertical-align: middle; }
     <div class="sb-footer">
       <div id="sb-user-btn" class="sb-user" onclick="toggleAccountMenu()" style="cursor:pointer;position:relative">
         <div class="sb-avatar" id="sb-avatar">CK</div>
-        <div style="flex:1">
+        <div class="sb-user-info" style="flex:1">
           <div class="sb-uname" id="sb-uname">Chuen K.</div>
           <div class="sb-urole" id="sb-urole">PMO</div>
         </div>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;color:var(--text-3)"><polyline points="6 9 12 15 18 9"/></svg>
+        <span class="sb-chevron"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;color:var(--text-3)"><polyline points="6 9 12 15 18 9"/></svg></span>
       </div>
       <div id="account-menu" style="display:none;position:absolute;bottom:56px;left:8px;right:8px;background:var(--surface);border:1px solid var(--border-md);border-radius:var(--r);box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:100;overflow:hidden">
         <div style="padding:6px 10px;font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)">Switch Account</div>
