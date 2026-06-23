@@ -61,9 +61,8 @@ function memoToDb(m) {
     dep_start:     m.depStart     || null,
     dep_end:       m.depEnd       || null,
     dep_emp_count: m.depEmpCount  || null,
-    // pmo_evidence_url and approval_evidence_url stored locally only until
-    // Supabase columns are added via: ALTER TABLE memos ADD COLUMN IF NOT EXISTS
-    // pmo_evidence_url TEXT, ADD COLUMN IF NOT EXISTS approval_evidence_url TEXT;
+    pmo_evidence_url:      m.pmoEvidenceUrl      || null,
+    approval_evidence_url: m.approvalEvidenceUrl || null,
     submitted_at: m.submittedAt || null,
     approved_at: m.approvedAt || null, rejected_at: m.rejectedAt || null,
     created_at: m.createdAt || new Date().toISOString(),
