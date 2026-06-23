@@ -692,10 +692,14 @@ function renderMemoPdf(data) {
         const revName  = data.reviewerName  && data.reviewerName  !== '-' ? data.reviewerName  : '';
         const revTitle = data.reviewerTitle && data.reviewerTitle !== '-' ? data.reviewerTitle : 'ผู้จัดการโครงการ';
         if(revName) {
-          arr.unshift({ name: revName, title: revTitle, status: 'pending' });
+          // Use the actual status from approvers if the reviewer is already in the list
+          const revEntry = (data.approvers||[]).find(a => a.name === revName);
+          arr.unshift({ name: revName, title: revTitle,
+            status: revEntry?.status || 'pending',
+            approvedAt: revEntry?.approvedAt || null });
         } else if(arr.length === 1) {
-          // duplicate as reviewer if no reviewer info
-          arr.unshift({ name: arr[0].name, title: 'ผู้จัดการโครงการ', status: 'pending' });
+          // Duplicate as reviewer — copy full entry including status
+          arr.unshift({ ...arr[0], title: 'ผู้จัดการโครงการ' });
         } else {
           arr = [
             { name: data.reviewerName||'-', title: data.reviewerTitle||'ผู้จัดการโครงการ', status:'pending' },
@@ -795,8 +799,21 @@ async function downloadMemoPdf(data) {
   data = _normalisePdfData(data);
 
   // ── Preload signatures for all approvers ─────────────────────────
+  // Also include legacy reviewerName/approverName fields used in PDF arr construction
   if (typeof _preloadSignatures === 'function') {
-    await _preloadSignatures(data.approvers || []);
+    const approversList = [...(data.approvers || [])];
+    // Add legacy reviewer/approver if they have names not already in list
+    if (data.reviewerName && data.reviewerName !== '-') {
+      if (!approversList.find(a => a.name === data.reviewerName)) {
+        approversList.push({ name: data.reviewerName, status: 'pending' });
+      }
+    }
+    if (data.approverName && data.approverName !== '-') {
+      if (!approversList.find(a => a.name === data.approverName)) {
+        approversList.push({ name: data.approverName, status: 'pending' });
+      }
+    }
+    await _preloadSignatures(approversList);
   }
 
   const stage = document.getElementById('pdf-stage');
