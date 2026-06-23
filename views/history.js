@@ -943,6 +943,10 @@ function buildBudgetSourceBadge(memo) {
 function openBudgetTagModal(memoNo) {
   const memo = getHistoryMemos().find(m => m.memoNo === memoNo);
   if (!memo) return;
+  if (typeof isPMO === 'function' && !isPMO()) {
+    alert('Tag Budget สำหรับ PMO เท่านั้น');
+    return;
+  }
   if (memo.status !== 'completed') {
     alert('Tag Budget ได้เฉพาะ Memo ที่อนุมัติแล้วเท่านั้น');
     return;
