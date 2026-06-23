@@ -614,6 +614,17 @@ function confirmPmoOverride(memoNo) {
   };
   if (newApprovers) extra.approvers = newApprovers;
 
+  // Clear stale rejection/cancellation fields when overriding to a positive state
+  // so they don't show up as "reject reason" on a completed memo
+  if (newStatus === 'completed' || newStatus === 'pending' || newStatus === 'pending_a2') {
+    extra.rejectionReason    = null;
+    extra.cancellationReason = null;
+    extra.rejectedBy         = null;
+    extra.cancelledBy        = null;
+    extra.cancelledAt        = null;
+    extra.rejectedAt         = null;
+  }
+
   updateMemoStatusAsync(memoNo, newStatus, extra);
 
   document.getElementById('pmo-override-modal')?.remove();
