@@ -185,13 +185,30 @@ function renderSettingsUI(s) {
     <!-- Signature Upload -->
     <div class="card" style="padding:20px;margin-bottom:14px">
       <div style="font-size:13px;font-weight:700;margin-bottom:6px;color:var(--blue)">✍️ ลายเซ็นของฉัน</div>
-      <div style="font-size:12px;color:var(--text-3);margin-bottom:14px">
-        ลายเซ็นนี้จะถูกประทับในเอกสาร PDF เมื่อ <strong>${esc(currentUser())}</strong> เป็นผู้อนุมัติ
-        — แนะนำ PNG พื้นหลังโปร่งใส ขนาดกว้าง 300–500px สูง 80–120px ไม่เกิน 500KB
+
+      <!-- ชื่อในระบบ Memo — critical field -->
+      <div style="background:var(--amber-50,#fffbeb);border:1px solid var(--amber,#d97706);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px">
+        <div style="font-size:12px;font-weight:600;color:var(--amber,#d97706);margin-bottom:4px">⚠️ ชื่อในระบบ Memo (สำคัญมาก)</div>
+        <div style="font-size:11px;color:var(--text-3);margin-bottom:8px">ต้องตรงกับชื่อที่กรอกในช่อง Approver ตอนสร้าง Memo ทุกตัวอักษร เช่น "นาย สมชาย ใจดี"</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="text" id="sig-memo-name"
+            placeholder="เช่น นาย สมชาย ใจดี"
+            value="${esc(loadSettings().sigMemoName || '')}"
+            style="flex:1;min-width:180px;font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+          <button class="btn-sm" onclick="saveSigMemoName()" style="font-size:12px;white-space:nowrap">💾 บันทึกชื่อ</button>
+        </div>
+        <div style="font-size:11px;margin-top:6px">
+          ${loadSettings().sigMemoName
+            ? `<span style="color:var(--green,#16a34a)">✓ ชื่อที่ใช้: <strong>${esc(loadSettings().sigMemoName)}</strong></span>`
+            : `<span style="color:var(--red,#dc2626)">❌ ยังไม่ได้ตั้งชื่อ — signature จะไม่ปรากฏใน PDF</span>`}
+        </div>
       </div>
+
+      <!-- Signature image -->
+      <div style="font-size:11px;color:var(--text-3);margin-bottom:10px">แนะนำ PNG พื้นหลังโปร่งใส · กว้าง 300–500px · สูง 80–120px · ไม่เกิน 500KB</div>
       <div style="display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap">
         <div>
-          <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:6px">ลายเซ็นปัจจุบัน (${esc(currentUser())})</div>
+          <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:6px">ลายเซ็นปัจจุบัน</div>
           <div id="sig-current-preview" style="width:200px;height:80px;border:1px dashed var(--border-md);border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;background:var(--bg)">
             <span style="font-size:11px;color:var(--text-3)">กำลังโหลด...</span>
           </div>
@@ -208,7 +225,7 @@ function renderSettingsUI(s) {
           </div>
         </div>
       </div>
-    </div>
+    </div>    </div>
   </div>`;
 }
 
@@ -377,10 +394,13 @@ function handleSignatureUpload(input) {
 
 // Load current user's signature into the preview after render
 function _loadSignaturePreview() {
-  const box = document.getElementById('sig-current-preview');
+  const box    = document.getElementById('sig-current-preview');
   const delBtn = document.getElementById('sig-delete-btn');
   if (!box) return;
-  loadUserSignatureAsync(currentUser()).then(dataUrl => {
+  // Use sigMemoName if set, otherwise fallback to currentUser()
+  const s = loadSettings();
+  const lookupName = s.sigMemoName?.trim() || currentUser();
+  loadUserSignatureAsync(lookupName).then(dataUrl => {
     if (dataUrl) {
       box.innerHTML = `<img src="${dataUrl}" style="max-width:190px;max-height:72px;object-fit:contain">`;
       if (delBtn) delBtn.style.display = '';
@@ -390,13 +410,37 @@ function _loadSignaturePreview() {
   });
 }
 
+async function saveSigMemoName() {
+  const nameEl = document.getElementById('sig-memo-name');
+  const name = nameEl?.value?.trim();
+  if (!name) { alert('กรุณาระบุชื่อก่อน'); return; }
+  const s = loadSettings();
+  s.sigMemoName = name;
+  await saveSettingsAsync(s);
+  alert('✓ บันทึกชื่อ "' + name + '" แล้ว — ลายเซ็นจะปรากฏเมื่อชื่อนี้เป็น Approver ใน PDF');
+  renderSettings();
+}
+
 async function saveMySignature() {
   if (!_pendingSignatureDataUrl) { alert('กรุณาเลือกไฟล์ลายเซ็นก่อน'); return; }
-  await saveUserSignatureAsync(currentUser(), _pendingSignatureDataUrl);
-  // Also update cache
-  _sigCache[currentUser()] = _pendingSignatureDataUrl;
+  const s = loadSettings();
+  const memoName = s.sigMemoName?.trim();
+  if (!memoName) {
+    alert('กรุณาตั้ง "ชื่อในระบบ Memo" ก่อนบันทึกลายเซ็น\n\nชื่อต้องตรงกับชื่อที่กรอกในช่อง Approver ตอนสร้าง Memo');
+    return;
+  }
+  // Save under BOTH sidebar name (for _loadSignaturePreview) and memoName (for PDF matching)
+  await saveUserSignatureAsync(memoName, _pendingSignatureDataUrl);
+  if (memoName !== currentUser()) {
+    await saveUserSignatureAsync(currentUser(), _pendingSignatureDataUrl);
+  }
+  // Update cache for both
+  if (typeof _sigCache !== 'undefined') {
+    _sigCache[memoName]      = _pendingSignatureDataUrl;
+    _sigCache[currentUser()] = _pendingSignatureDataUrl;
+  }
   _pendingSignatureDataUrl = null;
-  alert('✓ บันทึกลายเซ็นเรียบร้อย');
+  alert('✓ บันทึกลายเซ็นสำหรับ "' + memoName + '" เรียบร้อย');
   renderSettings();
 }
 
