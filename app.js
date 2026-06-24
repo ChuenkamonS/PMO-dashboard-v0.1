@@ -865,43 +865,24 @@ async function downloadMemoPdf(data) {
   const setMsg = msg => { const el = document.getElementById('pdf-loading-msg'); if(el) el.textContent = msg; };
 
   try {
-    setMsg('กำลังสร้าง PDF...');
-
-    // ── Option A: html2pdf.js (in-browser, no server needed) ─────────
-    if (typeof html2pdf !== 'undefined') {
-      const element = stage.firstElementChild || stage;
-      const opt = {
-        margin:       [10, 10, 10, 10],
-        filename:     filename,
-        image:        { type:'jpeg', quality:0.98 },
-        html2canvas:  { scale:2, useCORS:true, logging:false },
-        jsPDF:        { unit:'mm', format:'a4', orientation:'portrait' },
-        pagebreak:    { mode:['avoid-all','css','legacy'] },
-      };
-      await html2pdf().set(opt).from(element).save();
-      console.log('[PDF] Generated via html2pdf.js:', filename);
-
-    // ── Option B: Render PDF server (fallback) ───────────────────────
-    } else {
-      setMsg('กำลังติดต่อ PDF server...');
-      const html = stage.firstElementChild?.outerHTML || stage.innerHTML;
-      console.log('[PDF] Sending to server, html length:', html.length);
-      const resp = await fetchWithRetry('https://memo-pdf-server.onrender.com/generate-pdf', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ html, filename, logoBase64: LOGO_B64 })
-      });
-      if(!resp.ok) throw new Error('Server '+resp.status);
-      setMsg('กำลัง download...');
-      const blob = await resp.blob();
-      console.log('[PDF] Received blob, size:', blob.size, 'bytes');
-      const url = URL.createObjectURL(blob);
-      const a   = document.createElement('a'); a.href=url; a.download=filename; a.click();
-      URL.revokeObjectURL(url);
-      console.log('[PDF] Download triggered:', filename);
-    }
+    setMsg('กำลังติดต่อ PDF server...');
+    const html = stage.firstElementChild?.outerHTML || stage.innerHTML;
+    console.log('[PDF] Sending to server, html length:', html.length, 'filename:', filename);
+    const resp = await fetchWithRetry('https://memo-pdf-server.onrender.com/generate-pdf', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ html, filename, logoBase64: LOGO_B64 })
+    });
+    if(!resp.ok) throw new Error('Server '+resp.status);
+    setMsg('กำลัง download...');
+    const blob = await resp.blob();
+    console.log('[PDF] Received blob, size:', blob.size, 'bytes');
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a'); a.href=url; a.download=filename; a.click();
+    URL.revokeObjectURL(url);
+    console.log('[PDF] Download triggered:', filename);
   } catch(err) {
-    console.warn('[PDF] Failed, fallback to print:', err.message);
-    setMsg('ไม่สามารถสร้าง PDF — เปิด Print dialog แทน');
+    console.warn('[PDF] Server failed, fallback to print:', err.message);
+    setMsg('Server ไม่ตอบสนอง — เปิด Print dialog แทน');
     await new Promise(r => setTimeout(r, 800));
     document.body.classList.add('printing-pdf');
     try { window.print(); } finally { document.body.classList.remove('printing-pdf'); }
