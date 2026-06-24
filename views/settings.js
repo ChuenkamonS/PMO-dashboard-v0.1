@@ -189,12 +189,30 @@ function renderSettingsUI(s) {
       <!-- ชื่อในระบบ Memo — critical field -->
       <div style="background:var(--amber-50,#fffbeb);border:1px solid var(--amber,#d97706);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px">
         <div style="font-size:12px;font-weight:600;color:var(--amber,#d97706);margin-bottom:4px">⚠️ ชื่อในระบบ Memo (สำคัญมาก)</div>
-        <div style="font-size:11px;color:var(--text-3);margin-bottom:8px">ต้องตรงกับชื่อที่กรอกในช่อง Approver ตอนสร้าง Memo ทุกตัวอักษร เช่น "นาย สมชาย ใจดี"</div>
+        <div style="font-size:11px;color:var(--text-3);margin-bottom:8px">เลือกหรือพิมพ์ชื่อที่ใช้ในช่อง Approver ตอนสร้าง Memo — ต้องตรงทุกตัวอักษร</div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <input type="text" id="sig-memo-name"
-            placeholder="เช่น นาย สมชาย ใจดี"
+          <input type="text" id="sig-memo-name" list="sig-memo-name-list"
+            placeholder="พิมพ์หรือเลือกชื่อ..."
             value="${esc(loadSettings().sigMemoName || '')}"
             style="flex:1;min-width:180px;font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+          <datalist id="sig-memo-name-list">
+            ${(() => {
+              const names = new Set();
+              // From default settings
+              const s2 = loadSettings();
+              if (s2.defaultReviewer?.name) names.add(s2.defaultReviewer.name);
+              if (s2.defaultApprover?.name) names.add(s2.defaultApprover.name);
+              // From all memo approvers in history
+              if (typeof loadMemos === 'function') {
+                loadMemos().forEach(m => {
+                  (m.approvers || []).forEach(a => { if (a.name && a.name !== '-') names.add(a.name); });
+                  if (m.reviewerName && m.reviewerName !== '-') names.add(m.reviewerName);
+                  if (m.approverName && m.approverName !== '-') names.add(m.approverName);
+                });
+              }
+              return [...names].sort().map(n => `<option value="${esc(n)}">`).join('');
+            })()}
+          </datalist>
           <button class="btn-sm" onclick="saveSigMemoName()" style="font-size:12px;white-space:nowrap">💾 บันทึกชื่อ</button>
         </div>
         <div style="font-size:11px;margin-top:6px">
