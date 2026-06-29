@@ -396,19 +396,30 @@ function confirmReject() {
   const user  = currentUser();
   // rejected_revision = sent back for edit (not final rejection)
   // requester can re-submit without creating a new memo
+  const now = new Date().toISOString();
   targets.forEach(memoNo => {
+    const idx = memos.findIndex(m=>m.memoNo===memoNo);
+    if(idx<0) return;
     appendAuditLog(memos, memoNo, `Rejected — ส่งกลับแก้ไข by ${user}`, full, {
-      statusBefore: memos.find(m=>m.memoNo===memoNo)?.status,
+      statusBefore: memos[idx].status,
       statusAfter:  'rejected_revision',
     });
+    // Update status IN MEMORY before storeMemos so localStorage is immediately correct
+    memos[idx] = { ...memos[idx],
+      status:          'rejected_revision',
+      rejectionReason: full,
+      rejectedBy:      user,
+      rejectedAt:      now,
+      updatedAt:       now,
+    };
   });
   storeMemos(memos);
   targets.forEach(memoNo => {
-    const updatedAuditLog = memos.find(m => m.memoNo === memoNo)?.auditLog || [];
+    const updatedAuditLog = memos.find(m=>m.memoNo===memoNo)?.auditLog || [];
     updateMemoStatusAsync(memoNo, 'rejected_revision', {
       rejectionReason: full,
       rejectedBy:      user,
-      rejectedAt:      new Date().toISOString(),
+      rejectedAt:      now,
       auditLog:        updatedAuditLog,
     });
   });
