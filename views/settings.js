@@ -432,6 +432,9 @@ const MEMO_TYPE_LABELS_AUTH = {sl:'SL',hw:'HW',int:'INT',ent:'ENT',dep:'DEP'};
 async function renderAuthorityTable() {
   const container = document.getElementById('st-authority-list');
   if(!container) return;
+  container.innerHTML = '<div style="color:var(--text-3);font-size:11px">กำลังโหลด...</div>';
+  // Always reload fresh from Supabase when opening settings
+  _authorityCache = null;
   await loadAuthorityAsync();
   const rows = _authorityCache||[];
   // Group by title
