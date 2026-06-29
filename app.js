@@ -234,7 +234,8 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   // completed and rejected memos cannot be changed except by PMO override
   const isPmoOverride = extra.pmoOverrideNote || extra.pmoOverrideBy;
   const isTerminal    = memo.status === 'completed' || memo.status === 'rejected' || memo.status === 'cancelled';
-  if (isTerminal && !isPmoOverride) return memo; // silently return current state
+  // rejected_revision is NOT terminal — it's a soft reject that allows re-submission
+  if (isTerminal && !isPmoOverride) return memo;
 
   // ── Approver order enforcement ──
   // Prevent A2 from approving if A1 hasn't approved yet
@@ -272,13 +273,25 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
     updated.cancelledAt = extra.cancelledAt || now;
   } else if (status === 'rejected') {
     updated.rejectedAt = now;
-    // Mark current pending approver as rejected
     const pendingIdx = approvers.findIndex(a => !a.status || a.status === 'pending');
     if (pendingIdx >= 0) {
       updated.approvers = approvers.map((a, i) =>
         i === pendingIdx ? { ...a, status: 'rejected', rejectedAt: now, rejectedBy: extra.rejectedBy || currentUser() } : a
       );
     }
+  } else if (status === 'rejected_revision') {
+    // Soft reject — send back for revision, do NOT mark approvers as rejected
+    // keep approvers as-is so re-submit can reset them cleanly
+    updated.rejectedAt = now;
+  } else if (status === 'pending' && extra.resubmittedAt) {
+    // Re-submit after rejected_revision — reset all approver statuses to pending
+    updated.approvers = approvers.map(a => ({
+      ...a, status: 'pending', approvedAt: null, approvedBy: null,
+      rejectedAt: null, rejectedBy: null,
+    }));
+    updated.rejectionReason = null;
+    updated.rejectedBy      = null;
+    updated.rejectedAt      = null;
   }
 
   // Sync to Supabase
