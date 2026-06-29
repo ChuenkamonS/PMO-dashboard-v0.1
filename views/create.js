@@ -390,7 +390,9 @@ function collectMemoData() {
     const titleSel = row.querySelector('.appr-title-sel');
     const titleOth = row.querySelector('.appr-title-other');
     const name  = nameSel?.value === 'other' ? (nameOth?.value.trim() || '') : (nameSel?.value || '');
-    const title = titleSel?.value === 'other' ? (titleOth?.value.trim() || '') : (titleSel?.value || '');
+    const title = titleSel?.value === 'other' ? (titleOth?.value.trim() || '') :
+                  titleSel?.value ? titleSel.value :
+                  (titleOth?.value.trim() || titleSel?.dataset?.autofill || '');
     return { name, title, status: 'pending', approvedAt: null, approvedBy: null };
   }).filter(a => a.name);
 
@@ -535,6 +537,10 @@ function validateMemo(data) {
   else {
     if(!data.approvers[0]?.name || data.approvers[0].name === '-') missing.push('ชื่อ Reviewer (A1)');
     if(!data.approvers[0]?.title || data.approvers[0].title === '-') missing.push('ตำแหน่ง Reviewer (A1)');
+    if(!data.approvers[1]?.name || data.approvers[1].name === '-') missing.push('ชื่อ Final Approver (A2)');
+    // A1 ≠ A2 check
+    if(data.approvers[0]?.name && data.approvers[1]?.name && data.approvers[0].name === data.approvers[1].name)
+      missing.push('Reviewer (A1) กับ Final Approver (A2) ต้องไม่ใช่คนเดียวกัน');
   }
   if(!val('#f-signdate')) missing.push('วันที่ลงนาม');
 
@@ -744,19 +750,24 @@ function toggleReviewerTitleOther() {
   const el  = document.getElementById('f-reviewer-title-other');
   if(el) el.style.display = sel?.value === 'other' ? 'block' : 'none';
 }
-// ── Dynamic Approver Rows ──
-const APPROVER_NAMES  = ['นาย นวพล งามวรโรจน์สกุล', 'นาย ปกรณ์ เจียมสกุลทิพย์'];
-const APPROVER_TITLES = ['ผู้อำนวยการโครงการ', 'ประธานเจ้าหน้าที่บริหาร', 'ผู้อำนวยการ'];
-
+// ── Dynamic Approver Rows — fetch from user_profiles ──
+// Build name options from _userProfilesCache (loaded at init from Supabase)
 function _approverNameOpts(selected = '') {
-  return `<option value="">— เลือก —</option>` +
-    APPROVER_NAMES.map(n => `<option ${n === selected ? 'selected' : ''}>${esc(n)}</option>`).join('') +
-    `<option value="other" ${selected === 'other' ? 'selected' : ''}>อื่นๆ (กรอกเอง)</option>`;
+  const approvers = typeof getApprovers === 'function' ? getApprovers() : [];
+  const opts = approvers.length
+    ? approvers.map(u => `<option value="${esc(u.full_name)}" data-title="${esc(u.title)}" ${u.full_name===selected?'selected':''}>${esc(u.full_name)}</option>`).join('')
+    : `<option value="นาย นวพล งามวรโรจน์สกุล" ${selected==='นาย นวพล งามวรโรจน์สกุล'?'selected':''}>นาย นวพล งามวรโรจน์สกุล</option>
+       <option value="นาย ปกรณ์ เจียมสกุลทิพย์" ${selected==='นาย ปกรณ์ เจียมสกุลทิพย์'?'selected':''}>นาย ปกรณ์ เจียมสกุลทิพย์</option>`;
+  return `<option value="">— เลือกชื่อ Approver —</option>` + opts;
 }
 function _approverTitleOpts(selected = '') {
-  return `<option value="">— เลือก —</option>` +
-    APPROVER_TITLES.map(t => `<option ${t === selected ? 'selected' : ''}>${esc(t)}</option>`).join('') +
-    `<option value="other" ${selected === 'other' ? 'selected' : ''}>อื่นๆ (กรอกเอง)</option>`;
+  // Build title options from unique titles in user_profiles
+  const approvers = typeof getApprovers === 'function' ? getApprovers() : [];
+  const titles = approvers.length
+    ? [...new Set(approvers.map(u=>u.title).filter(Boolean))]
+    : ['ผู้อำนวยการโครงการ','ประธานเจ้าหน้าที่บริหาร','ผู้อำนวยการ'];
+  return `<option value="">— ตำแหน่ง —</option>` +
+    titles.map(t=>`<option value="${esc(t)}" ${t===selected?'selected':''}>${esc(t)}</option>`).join('');
 }
 
 function initApproverRows() {
@@ -766,6 +777,18 @@ function initApproverRows() {
   _appendApproverRow(true);   // A1 — Reviewer
   _appendApproverRow(false);  // A2 — Final Approver
   _updateApproverUI();
+}
+// Rebuild all approver dropdowns after user profiles are loaded
+function refreshApproverDropdowns() {
+  document.querySelectorAll('#approver-rows-form .appr-form-row').forEach(row => {
+    const nameSel  = row.querySelector('.appr-name-sel');
+    const titleSel = row.querySelector('.appr-title-sel');
+    if(!nameSel) return;
+    const curName  = nameSel.value;
+    const curTitle = titleSel?.value||'';
+    nameSel.innerHTML  = _approverNameOpts(curName);
+    if(titleSel) titleSel.innerHTML = _approverTitleOpts(curTitle);
+  });
 }
 
 function addApproverFormRow() {
@@ -836,11 +859,72 @@ function onApproverNameChange(sel) {
   const row   = sel.closest('.appr-form-row');
   const other = row?.querySelector('.appr-name-other');
   if (other) other.style.display = sel.value === 'other' ? '' : 'none';
+  // Auto-fill title from user_profiles when name is selected
+  if(sel.value && sel.value !== 'other') {
+    const user = typeof findUserByName === 'function' ? findUserByName(sel.value) : null;
+    if(user) {
+      const titleSel = row?.querySelector('.appr-title-sel');
+      if(titleSel) {
+        // Try to match existing option, otherwise set value directly
+        const opt = [...titleSel.options].find(o=>o.value===user.title);
+        if(opt) titleSel.value = user.title;
+        else { titleSel.value=''; }
+        // Store auto-filled title as data attribute for read-back
+        titleSel.dataset.autofill = user.title;
+        // Also update the hidden input if any
+        const titleOth = row?.querySelector('.appr-title-other');
+        if(titleOth && titleSel.value==='') { titleOth.style.display=''; titleOth.value=user.title; }
+      }
+      // Show authority warning
+      _updateApproverAuthorityHint(row, sel.value, user.title);
+    }
+  }
 }
 function onApproverTitleChange(sel) {
   const row   = sel.closest('.appr-form-row');
   const other = row?.querySelector('.appr-title-other');
   if (other) other.style.display = sel.value === 'other' ? '' : 'none';
+  // Update authority hint when title changes manually
+  const nameSel = row?.querySelector('.appr-name-sel');
+  const name = nameSel?.value||'';
+  _updateApproverAuthorityHint(row, name, sel.value);
+}
+
+// Show authority limit hint per approver row
+function _updateApproverAuthorityHint(row, name, title) {
+  if(!row) return;
+  let hint = row.querySelector('.appr-authority-hint');
+  if(!hint) {
+    hint = document.createElement('div');
+    hint.className = 'appr-authority-hint';
+    hint.style.cssText = 'font-size:10px;margin-top:5px;padding:4px 8px;border-radius:4px';
+    row.appendChild(hint);
+  }
+  if(!title) { hint.style.display='none'; return; }
+  const rowIdx = [...document.querySelectorAll('#approver-rows-form .appr-form-row')].indexOf(row);
+  if(rowIdx === 0) { hint.style.display='none'; return; } // A1 reviewer — no authority check needed
+  // Get current memo total for warning
+  const totalEl = document.getElementById('sl-total')||document.getElementById('hw-total')||
+                  document.getElementById('int-total')||document.getElementById('ent-total')||
+                  document.getElementById('dep-total');
+  const totalText = totalEl?.textContent?.replace(/[฿,]/g,'')||'0';
+  const total = parseFloat(totalText)||0;
+  const limit = typeof getAuthorityLimit==='function' ? getAuthorityLimit(title, selectedType||'sl') : 0;
+  if(limit===0 && selectedType==='int') {
+    hint.style.cssText='font-size:10px;margin-top:5px;padding:4px 8px;border-radius:4px;background:#E6F1FB;color:#185FA5';
+    hint.style.display='';
+    hint.textContent=`ℹ ${title} — INT memo ไม่ระบุวงเงินใน Policy`;
+  } else if(limit>0 && total>limit) {
+    hint.style.cssText='font-size:10px;margin-top:5px;padding:4px 8px;border-radius:4px;background:#FCEBEB;color:#A32D2D';
+    hint.style.display='';
+    hint.textContent=`⚠ วงเงินของ ${title}: ${limit.toLocaleString('th-TH')} ฿ — ยอด Memo (${total.toLocaleString('th-TH')} ฿) เกิน · ยัง submit ได้ แต่ Approver อาจไม่อนุมัติ`;
+  } else if(limit>0) {
+    hint.style.cssText='font-size:10px;margin-top:5px;padding:4px 8px;border-radius:4px;background:#EAF3DE;color:#27500A';
+    hint.style.display='';
+    hint.textContent=`✓ วงเงินของ ${title}: ${limit.toLocaleString('th-TH')} ฿`;
+  } else {
+    hint.style.display='none';
+  }
 }
 
 // Keep backward compat for old toggle functions referenced elsewhere
