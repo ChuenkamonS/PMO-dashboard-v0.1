@@ -241,6 +241,7 @@ function buildPendingRow(memo) {
     actionBtns = `
       <button class="btn-approve" data-action="approve" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px" title="Approve">✓</button>
       <button class="btn-reject"  data-action="reject"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px" title="Reject">✕</button>
+      <button class="btn-sm"      data-action="cancel"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px;color:var(--red)" title="Cancel">Cancel</button>
       <button class="btn-sm"      data-action="detail"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px">View</button>`;
   } else if (!isOwner && canAct) {
     // Approver (not own memo, their turn) — Approve + Reject + View
@@ -471,8 +472,7 @@ function openDetailModal(memoNo) {
   const canApprove = isPending && canCurrentUserActOnMemo(memo) && !_isPMO;
   // PMO can always approve as override
   const canApproveAsPMO = isPending && _isPMO && !isOwn;  // PMO cannot approve own memo
-  // canCancel: pending memo AND current user IS the requester OR draft owner
-  const canCancel  = isPending && isOwn;
+  const canCancel  = isPending && (isOwn || _isPMO);
 
   const acts = document.getElementById('detail-actions');
   acts.innerHTML = `
@@ -832,21 +832,26 @@ function saveBudgetSettings() {
   });
 }
 
-// ── Cancel Memo (by requester) ──
+// ── Cancel Memo (requester or PMO) ──
 function cancelMemo(memoNo) {
   const memo = loadMemos().find(m => m.memoNo === memoNo);
   if(!memo) return;
-  if (!isMemoRequester(memo) || !['pending','pending_a2','pending_a3'].includes(memo.status)) {
-    alert('ยกเลิกได้เฉพาะ Memo ที่คุณเป็นผู้ขอและยังอยู่ระหว่างอนุมัติ');
+  const isRequester = isMemoRequester(memo);
+  const isPmoUser = typeof isPMO === 'function' && isPMO();
+  if ((!isRequester && !isPmoUser) || !['pending','pending_a2','pending_a3'].includes(memo.status)) {
+    alert('ยกเลิกได้เฉพาะผู้ขอหรือ PMO และ Memo ต้องอยู่ระหว่างอนุมัติ');
     return;
   }
-  if(!confirm(`ยกเลิก Memo "${memoNo}"?\nหลังจากยกเลิกแล้วจะไม่สามารถกู้คืนได้`)) return;
+  const reason = prompt(`เหตุผลที่ยกเลิก Memo "${memoNo}":`);
+  if(!reason?.trim()) return;
+  if(!confirm(`ยืนยันยกเลิก Memo "${memoNo}"?\nหลังจากยกเลิกแล้วจะไม่สามารถกู้คืนได้`)) return;
   const user = currentUser();
   const memos = loadMemos();
-  appendAuditLog(memos, memoNo, `Cancelled by ${user}`, 'ยกเลิกโดยผู้ขอ');
+  const actorType = isPmoUser && !isRequester ? 'PMO' : 'Requester';
+  appendAuditLog(memos, memoNo, `Cancelled by ${user} (${actorType})`, reason.trim());
   storeMemos(memos);
   updateMemoStatusAsync(memoNo, 'cancelled', {
-    cancellationReason: 'ยกเลิกโดยผู้ขอ',
+    cancellationReason: reason.trim(),
     cancelledBy:  user,
     cancelledAt:  new Date().toISOString(),
   }).then(() => {

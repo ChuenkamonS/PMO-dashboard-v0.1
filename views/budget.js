@@ -26,10 +26,172 @@ function switchSLNav(panel, btn) {
 // ─────────────────────────────────────────
 
 // ── Constants ──
-const BGT_TYPE_COLORS = { sl:'#185FA5', hw:'#3B6D11', int:'#854F0B', ent:'#3C3489', dep:'#A32D2D' };
-const BGT_TYPE_LABELS = { sl:'Software License', hw:'Hardware', int:'Team Activity', ent:'Client Expense', dep:'Deployment' };
+const BGT_TYPE_COLORS = { sl:'#185FA5', hw:'#3B6D11', int:'#854F0B', ent:'#3C3489', dep:'#A32D2D', infra:'#0F6E56', other:'#5F5E5A' };
+const BGT_TYPE_LABELS = { sl:'Software License', hw:'Hardware', int:'Team Activity', ent:'Client Expense', dep:'Deployment', infra:'Infrastructure', other:'Other' };
 const BGT_PROJ_COLORS = ['#185FA5','#3B6D11','#854F0B','#3C3489','#A32D2D','#5F5E5A','#0F6E56','#8B4513'];
 const INFRA_KEY = 'orbit-pmo-infra-v1';
+const MANUAL_EXPENSE_KEY = 'orbit-pmo-manual-expenses-v1';
+
+let _manualExpenseCache = null;
+
+function manualExpenseFromDb(r) {
+  return {
+    id: r.id,
+    entryKind: r.entry_kind || 'historical',
+    referenceNo: r.reference_no || '',
+    project: r.project || '',
+    budgetPoolId: r.budget_pool_id || null,
+    expenseType: r.expense_type || 'other',
+    description: r.description || '',
+    frequency: r.frequency || 'one_time',
+    expenseDate: r.expense_date || null,
+    startMonth: r.start_month || null,
+    endMonth: r.end_month || null,
+    quantity: Number(r.quantity) || 1,
+    unitCost: Number(r.unit_cost) || 0,
+    amount: Number(r.amount) || 0,
+    notes: r.notes || '',
+    createdBy: r.created_by || '',
+    updatedBy: r.updated_by || '',
+    voidedAt: r.voided_at || null,
+    voidedBy: r.voided_by || '',
+    voidReason: r.void_reason || '',
+    createdAt: r.created_at || null,
+    updatedAt: r.updated_at || null,
+  };
+}
+
+function manualExpenseToDb(e) {
+  return {
+    id: e.id,
+    entry_kind: e.entryKind || 'historical',
+    reference_no: e.referenceNo || null,
+    project: e.project,
+    budget_pool_id: e.budgetPoolId || null,
+    expense_type: e.expenseType,
+    description: e.description,
+    frequency: e.frequency || 'one_time',
+    expense_date: e.frequency === 'one_time' ? e.expenseDate : null,
+    start_month: e.frequency === 'monthly' ? e.startMonth : null,
+    end_month: e.frequency === 'monthly' ? e.endMonth : null,
+    quantity: Number(e.quantity) || 1,
+    unit_cost: Number(e.unitCost) || 0,
+    amount: Number(e.amount) || 0,
+    notes: e.notes || null,
+    created_by: e.createdBy || null,
+    updated_by: e.updatedBy || null,
+    voided_at: e.voidedAt || null,
+    voided_by: e.voidedBy || null,
+    void_reason: e.voidReason || null,
+    created_at: e.createdAt || new Date().toISOString(),
+    updated_at: e.updatedAt || new Date().toISOString(),
+  };
+}
+
+function loadManualExpenses() {
+  if (_manualExpenseCache !== null) return _manualExpenseCache;
+  try {
+    const rows = JSON.parse(localStorage.getItem(MANUAL_EXPENSE_KEY) || '[]');
+    _manualExpenseCache = Array.isArray(rows) ? rows : [];
+  } catch(e) { _manualExpenseCache = []; }
+  return _manualExpenseCache;
+}
+
+function storeManualExpenses(rows) {
+  _manualExpenseCache = Array.isArray(rows) ? rows : [];
+  try { localStorage.setItem(MANUAL_EXPENSE_KEY, JSON.stringify(_manualExpenseCache)); } catch(e) {}
+}
+
+async function loadManualExpensesAsync() {
+  if (await checkSupa()) {
+    try {
+      const rows = await supaFetch('budget_manual_expenses', 'GET', null, '?order=created_at.desc');
+      storeManualExpenses((rows || []).map(manualExpenseFromDb));
+      return _manualExpenseCache;
+    } catch(e) { console.warn('Manual expenses load failed, using local backup', e.message); }
+  }
+  return loadManualExpenses();
+}
+
+async function saveManualExpenseAsync(expense) {
+  const now = new Date().toISOString();
+  const rows = [...loadManualExpenses()];
+  const idx = rows.findIndex(e => e.id === expense.id);
+  const saved = {
+    ...expense,
+    createdAt: idx >= 0 ? rows[idx].createdAt : (expense.createdAt || now),
+    updatedAt: now,
+  };
+  if (idx >= 0) rows[idx] = saved; else rows.unshift(saved);
+  storeManualExpenses(rows);
+  if (await checkSupa()) {
+    await supaFetch('budget_manual_expenses', 'POST', manualExpenseToDb(saved), '?on_conflict=id');
+  }
+  return saved;
+}
+
+async function voidManualExpenseAsync(id, reason) {
+  const rows = [...loadManualExpenses()];
+  const idx = rows.findIndex(e => e.id === id);
+  if (idx < 0) throw new Error('ไม่พบรายการ');
+  const now = new Date().toISOString();
+  const updated = {
+    ...rows[idx],
+    voidedAt: now,
+    voidedBy: currentUser(),
+    voidReason: reason,
+    updatedBy: currentUser(),
+    updatedAt: now,
+  };
+  rows[idx] = updated;
+  storeManualExpenses(rows);
+  if (await checkSupa()) {
+    await supaFetch('budget_manual_expenses', 'PATCH', {
+      voided_at: now,
+      voided_by: updated.voidedBy,
+      void_reason: reason,
+      updated_by: updated.updatedBy,
+      updated_at: now,
+    }, '?id=eq.' + encodeURIComponent(id));
+  }
+  return updated;
+}
+
+function activeManualExpenses() {
+  return loadManualExpenses().filter(e => !e.voidedAt);
+}
+
+function manualExpenseOccurrences(expense) {
+  if (!expense || expense.voidedAt) return [];
+  if (expense.frequency !== 'monthly') {
+    return expense.expenseDate
+      ? [{ month: String(expense.expenseDate).slice(0, 7), amount: Number(expense.amount) || 0 }]
+      : [];
+  }
+  if (!expense.startMonth || !expense.endMonth || expense.startMonth > expense.endMonth) return [];
+  const result = [];
+  let [year, month] = expense.startMonth.split('-').map(Number);
+  for (let guard = 0; guard < 240; guard++) {
+    const key = `${year}-${String(month).padStart(2, '0')}`;
+    if (key > expense.endMonth) break;
+    result.push({ month: key, amount: Number(expense.amount) || 0 });
+    month += 1;
+    if (month > 12) { month = 1; year += 1; }
+  }
+  return result;
+}
+
+function manualExpenseAmountInRange(expense, fromMonth, toMonth) {
+  return manualExpenseOccurrences(expense)
+    .filter(o => (!fromMonth || o.month >= fromMonth) && (!toMonth || o.month <= toMonth))
+    .reduce((sum, o) => sum + o.amount, 0);
+}
+
+function manualExpenseMonthValue(expense, month) {
+  return manualExpenseOccurrences(expense)
+    .filter(o => o.month === month)
+    .reduce((sum, o) => sum + o.amount, 0);
+}
 
 // ── Infra Storage ──
 // NEW structure: array of entry objects
@@ -193,20 +355,33 @@ function switchBudgetTab(tab, btn) {
 // ── Main entry ──
 // ── Export Budget CSVs ──────────────────────────────────────────
 
-function exportActualSpendCSV() {
-  const approved = loadMemos().filter(m => m.status === 'completed');
-  if (!approved.length) { alert('ไม่มีข้อมูล'); return; }
-  const headers = ['Memo No','ประเภท','โครงการ','Budget Source','วงเงิน','วันที่อนุมัติ',
-    'ผู้ขอ','ผู้อนุมัติ','หัวเรื่อง'];
-  const rows = approved.map(m => [
-    m.memoNo, m.type?.toUpperCase(),
-    m.project,
-    m.budgetSource || m.project || '',
-    m.total,
-    m.approvedAt?.slice(0,10)||'',
-    m.requesterName||'', m.approvedBy||m.approvers?.find(a=>a.status==='approved')?.name||'',
-    m.subject||''
-  ]);
+async function exportActualSpendCSV() {
+  await loadManualExpensesAsync();
+  const fromVal = document.getElementById('as-from')?.value || '';
+  const toVal = document.getElementById('as-to')?.value || '';
+  const projVal = document.getElementById('as-project')?.value || 'all';
+  const typeVal = document.getElementById('as-type')?.value || 'all';
+  const sourceVal = document.getElementById('as-source')?.value || 'all';
+  const headers = ['Source','Reference','ประเภท','โครงการ','วงเงิน','ช่วงเวลา','ผู้บันทึก','รายละเอียด'];
+  const rows = [];
+  if (sourceVal !== 'manual') {
+    loadMemos().filter(m => memoStatusKey(m) === 'completed').forEach(m => {
+      const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
+      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      const project = m.budgetSource || m.project || '(ไม่ระบุ)';
+      if ((fromVal && key < fromVal) || (toVal && key > toVal) || (projVal !== 'all' && project !== projVal) || (typeVal !== 'all' && m.type !== typeVal)) return;
+      rows.push(['Memo',m.memoNo,m.type?.toUpperCase(),project,Number(m.total)||0,key,m.requesterName||'',m.subject||'']);
+    });
+  }
+  if (sourceVal !== 'memo') {
+    activeManualExpenses().forEach(e => {
+      const amount = manualExpenseAmountInRange(e, fromVal, toVal);
+      if (!amount || (projVal !== 'all' && e.project !== projVal) || (typeVal !== 'all' && e.expenseType !== typeVal)) return;
+      const period = e.frequency === 'monthly' ? `${e.startMonth} to ${e.endMonth}` : e.expenseDate;
+      rows.push(['Historical',e.referenceNo||e.id,e.expenseType.toUpperCase(),e.project,amount,period,e.createdBy||'',e.description]);
+    });
+  }
+  if (!rows.length) { alert('ไม่มีข้อมูล'); return; }
   _downloadCSV('Actual_Spend', headers, rows);
 }
 
@@ -244,8 +419,7 @@ function exportBudgetPoolsCSV() {
 }
 
 function renderBudget() {
-  // Sync SL budgets from Supabase on first load, then render
-  loadSLBudgetsAsync().then(d => {
+  Promise.all([loadSLBudgetsAsync(), loadManualExpensesAsync()]).then(([d]) => {
     if (d && Object.keys(d).length) {
       try { localStorage.setItem(SLINF_BUDGET_KEY, JSON.stringify(d)); } catch(e) {}
     }
@@ -312,7 +486,10 @@ function _ovInitState() {
   if (_ov.initialized) return;
   _ov.initialized = true;
   const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
-  const projKeys  = [...new Set(approved.map(m => m.project || '(ไม่ระบุ)'))].sort();
+  const projKeys  = [...new Set([
+    ...approved.map(m => m.project || '(ไม่ระบุ)'),
+    ...activeManualExpenses().filter(e => ['sl','hw','int','ent','dep'].includes(e.expenseType)).map(e => e.project || '(ไม่ระบุ)'),
+  ])].sort();
   _ov.activeProjKeys = new Set(projKeys);
   _ov.activeTypeKeys = new Set(['sl','hw','int','ent','dep']);
   _ovApplyPresetIdxs(12);
@@ -402,7 +579,10 @@ function ovToggleType(k) {
 // ── Chips ──
 function _ovRenderChips() {
   const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
-  const projKeys = [...new Set(approved.map(m => m.project || '(ไม่ระบุ)'))].sort();
+  const projKeys = [...new Set([
+    ...approved.map(m => m.project || '(ไม่ระบุ)'),
+    ...activeManualExpenses().filter(e => ['sl','hw','int','ent','dep'].includes(e.expenseType)).map(e => e.project || '(ไม่ระบุ)'),
+  ])].sort();
   const typeKeys = ['sl','hw','int','ent','dep'];
   const chip = (label, on, onclick) =>
     `<span onclick="${onclick}" style="display:inline-flex;align-items:center;font-size:11px;padding:4px 11px;border-radius:20px;cursor:pointer;user-select:none;margin-bottom:3px;transition:all 0.12s;border:0.5px solid ${on ? 'transparent' : 'var(--border)'};background:${on ? 'var(--blue)' : 'transparent'};color:${on ? '#fff' : 'var(--text-2)'}">${label}</span>`;
@@ -455,6 +635,10 @@ function _ovUpdateKPIs() {
       });
   }
 
+  activeManualExpenses()
+    .filter(e => typeArr.includes(e.expenseType) && projArr.includes(e.project || '(ไม่ระบุ)'))
+    .forEach(e => { total += manualExpenseAmountInRange(e, fromKey, toKey); });
+
   // ── Budget from SL settings (SL only — no budget for other types yet) ──
   const currentYear  = String(new Date().getFullYear() + 543);
   const slBudgets    = loadSLBudgets()?.[currentYear] || {};
@@ -496,6 +680,9 @@ function _ovUpdateKPIs() {
         if (k >= ytdStart && k <= ytdEnd) ytdTotal += Number(m.total) || 0;
       });
   }
+  activeManualExpenses()
+    .filter(e => typeArr.includes(e.expenseType) && projArr.includes(e.project || '(ไม่ระบุ)'))
+    .forEach(e => { ytdTotal += manualExpenseAmountInRange(e, ytdStart, ytdEnd); });
   const forecastTotal = ytdTotal + smoothMonthlyRate * monthsLeft;
 
   const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
@@ -551,18 +738,28 @@ function _ovRenderChart() {
       label: BGT_TYPE_LABELS[tk] || tk.toUpperCase(),
       backgroundColor: OV_TYPE_COLORS[tk],
       borderRadius: 3, borderSkipped: false,
-      data: months.map(m => approved
-        .filter(memo => projKeys.includes(memo.project || '(ไม่ระบุ)') && memo.type === tk)
-        .reduce((s, memo) => s + getVal(memo, m.key), 0)),
+      data: months.map(m =>
+        approved
+          .filter(memo => projKeys.includes(memo.project || '(ไม่ระบุ)') && memo.type === tk)
+          .reduce((s, memo) => s + getVal(memo, m.key), 0)
+        + activeManualExpenses()
+          .filter(e => projKeys.includes(e.project || '(ไม่ระบุ)') && e.expenseType === tk)
+          .reduce((s, e) => s + manualExpenseMonthValue(e, m.key), 0)
+      ),
     }));
   } else {
     datasets = projKeys.map((pk, pi) => ({
       label: pk,
       backgroundColor: OV_PROJ_COLORS[pi % OV_PROJ_COLORS.length],
       borderRadius: 3, borderSkipped: false,
-      data: months.map(m => approved
-        .filter(memo => (memo.project || '(ไม่ระบุ)') === pk && typeKeys.includes(memo.type))
-        .reduce((s, memo) => s + getVal(memo, m.key), 0)),
+      data: months.map(m =>
+        approved
+          .filter(memo => (memo.project || '(ไม่ระบุ)') === pk && typeKeys.includes(memo.type))
+          .reduce((s, memo) => s + getVal(memo, m.key), 0)
+        + activeManualExpenses()
+          .filter(e => (e.project || '(ไม่ระบุ)') === pk && typeKeys.includes(e.expenseType))
+          .reduce((s, e) => s + manualExpenseMonthValue(e, m.key), 0)
+      ),
     }));
   }
 
@@ -658,7 +855,10 @@ function _ovRenderBvA() {
 
   // Render BvA project chips
   const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
-  const allProjKeys = [...new Set(approved.map(m => m.project || '(ไม่ระบุ)'))].sort();
+  const allProjKeys = [...new Set([
+    ...approved.map(m => m.project || '(ไม่ระบุ)'),
+    ...activeManualExpenses().map(e => e.project || '(ไม่ระบุ)'),
+  ])].sort();
   const bvaChips = document.getElementById('ov-bva-proj-chips');
   if (bvaChips) {
     bvaChips.innerHTML = allProjKeys.map(k => {
@@ -685,6 +885,10 @@ function _ovRenderBvA() {
         const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
         if (k >= fromKey && k <= toKey) actual += Number(m.total) || 0;
       });
+
+    activeManualExpenses()
+      .filter(e => (e.project || '(ไม่ระบุ)') === proj)
+      .forEach(e => { actual += manualExpenseAmountInRange(e, fromKey, toKey); });
 
     const annualBgt = slBudgets[proj] || 0;
     const budget    = annualBgt > 0 ? (annualBgt / 12) * numMonths : null;
@@ -1725,22 +1929,207 @@ function _renderSpendBreakdown() {
 // ══════════════════════════════════════════
 // TAB: ACTUAL SPEND
 // ══════════════════════════════════════════
-function renderActualSpend() {
+function openManualExpenseModal(editId = null) {
+  if (!isPMO()) { alert('เฉพาะ PMO เท่านั้นที่เพิ่มหรือแก้ไข Historical Expense ได้'); return; }
+  const expense = editId ? loadManualExpenses().find(e => e.id === editId) : null;
+  if (expense?.voidedAt) { alert('รายการที่ void แล้วแก้ไขไม่ได้'); return; }
+  document.getElementById('manual-expense-modal')?.remove();
+
+  const settingsProjects = typeof loadSettings === 'function' ? (loadSettings()?.projects || []) : [];
+  const projects = [...new Set([
+    ...settingsProjects,
+    ...loadMemos().map(m => m.project),
+    ...loadBudgetPools().map(p => p.project),
+    ...loadManualExpenses().map(e => e.project),
+  ].filter(Boolean))].sort();
+  const pools = loadBudgetPools();
+  const today = new Date().toISOString().slice(0, 10);
+  const g = (key, fallback = '') => expense?.[key] ?? fallback;
+
+  const modal = document.createElement('div');
+  modal.id = 'manual-expense-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:400;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML = `
+    <div class="card" style="width:680px;max-width:96vw;max-height:92vh;overflow-y:auto;padding:22px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div>
+          <div style="font-size:15px;font-weight:700">${expense ? 'Edit' : 'Add'} Historical Expense</div>
+          <div style="font-size:11px;color:var(--text-3)">ใช้สำหรับ Memo หรือค่าใช้จ่ายก่อนเริ่มใช้งานระบบ</div>
+        </div>
+        <button class="btn-sm" onclick="document.getElementById('manual-expense-modal').remove()">✕</button>
+      </div>
+      <input type="hidden" id="me-id" value="${esc(g('id'))}">
+      <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg"><label>ประเภทการบันทึก *</label>
+          <select id="me-kind" class="ri">
+            <option value="historical" ${g('entryKind','historical')==='historical'?'selected':''}>Historical</option>
+            <option value="adjustment" ${g('entryKind')==='adjustment'?'selected':''}>Adjustment</option>
+            <option value="other" ${g('entryKind')==='other'?'selected':''}>Other</option>
+          </select>
+        </div>
+        <div class="fg"><label>เลข Memo / Reference เดิม</label>
+          <input id="me-reference" class="ri" value="${esc(g('referenceNo'))}" placeholder="เช่น OLD-SL-2025-001">
+        </div>
+        <div class="fg"><label>Project *</label>
+          <select id="me-project" class="ri">
+            <option value="">— เลือก —</option>
+            ${projects.map(p=>`<option value="${esc(p)}" ${g('project')===p?'selected':''}>${esc(p)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="fg"><label>Budget Pool</label>
+          <select id="me-pool" class="ri">
+            <option value="">— Auto / ไม่ระบุ —</option>
+            ${pools.map(p=>`<option value="${esc(p.id)}" ${g('budgetPoolId')===p.id?'selected':''}>${esc(p.project)} · ${esc(p.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="fg"><label>Expense Type *</label>
+          <select id="me-type" class="ri">
+            ${[['sl','Software License'],['hw','Hardware'],['int','Team Activity'],['ent','Client Expense'],['dep','Deployment'],['infra','Infrastructure'],['other','Other']].map(([v,l])=>`<option value="${v}" ${g('expenseType','sl')===v?'selected':''}>${l}</option>`).join('')}
+          </select>
+        </div>
+        <div class="fg"><label>รายการ *</label>
+          <input id="me-description" class="ri" value="${esc(g('description'))}" placeholder="ชื่อ Software / อุปกรณ์ / รายการ">
+        </div>
+        <div class="fg"><label>รูปแบบค่าใช้จ่าย *</label>
+          <select id="me-frequency" class="ri" onchange="toggleManualExpenseSchedule()">
+            <option value="one_time" ${g('frequency','one_time')==='one_time'?'selected':''}>One-time</option>
+            <option value="monthly" ${g('frequency')==='monthly'?'selected':''}>Monthly</option>
+          </select>
+        </div>
+        <div class="fg" id="me-date-wrap"><label>Expense Date *</label>
+          <input id="me-date" class="ri" type="date" value="${esc(g('expenseDate',today))}">
+        </div>
+        <div class="fg" id="me-start-wrap"><label>Start Month *</label>
+          <input id="me-start" class="ri" type="month" value="${esc(g('startMonth'))}">
+        </div>
+        <div class="fg" id="me-end-wrap"><label>End Month *</label>
+          <input id="me-end" class="ri" type="month" value="${esc(g('endMonth'))}">
+        </div>
+        <div class="fg"><label>Quantity *</label>
+          <input id="me-qty" class="ri" type="number" min="0.01" step="0.01" value="${g('quantity',1)}" oninput="manualExpenseRecalculate()">
+        </div>
+        <div class="fg"><label>Unit Cost (THB) *</label>
+          <input id="me-unit-cost" class="ri" type="number" min="0" step="0.01" value="${g('unitCost',0)}" oninput="manualExpenseRecalculate()">
+        </div>
+      </div>
+      <div style="margin-top:10px;padding:10px 12px;background:var(--blue-50);border-radius:var(--r-sm);display:flex;justify-content:space-between">
+        <span id="me-amount-label" style="font-size:12px;color:var(--blue-800)">Amount</span>
+        <strong id="me-amount" style="color:var(--blue)">${money(g('amount',0))}</strong>
+      </div>
+      <div class="fg" style="margin-top:10px"><label>Notes</label>
+        <textarea id="me-notes" class="ri" rows="2" placeholder="เหตุผลหรือรายละเอียดเพิ่มเติม">${esc(g('notes'))}</textarea>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button class="btn-ghost" onclick="document.getElementById('manual-expense-modal').remove()">Cancel</button>
+        <button class="btn-primary" onclick="saveManualExpenseFromModal()">💾 Save Historical Expense</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  toggleManualExpenseSchedule();
+  manualExpenseRecalculate();
+}
+
+function toggleManualExpenseSchedule() {
+  const monthly = document.getElementById('me-frequency')?.value === 'monthly';
+  const dateWrap = document.getElementById('me-date-wrap');
+  const startWrap = document.getElementById('me-start-wrap');
+  const endWrap = document.getElementById('me-end-wrap');
+  if (dateWrap) dateWrap.style.display = monthly ? 'none' : '';
+  if (startWrap) startWrap.style.display = monthly ? '' : 'none';
+  if (endWrap) endWrap.style.display = monthly ? '' : 'none';
+  manualExpenseRecalculate();
+}
+
+function manualExpenseRecalculate() {
+  const qty = Number(document.getElementById('me-qty')?.value) || 0;
+  const unitCost = Number(document.getElementById('me-unit-cost')?.value) || 0;
+  const amount = qty * unitCost;
+  const monthly = document.getElementById('me-frequency')?.value === 'monthly';
+  const amountEl = document.getElementById('me-amount');
+  const labelEl = document.getElementById('me-amount-label');
+  if (amountEl) amountEl.textContent = money(amount);
+  if (labelEl) labelEl.textContent = monthly ? 'Amount per month' : 'Total amount';
+  return amount;
+}
+
+async function saveManualExpenseFromModal() {
+  if (!isPMO()) { alert('เฉพาะ PMO เท่านั้นที่บันทึกรายการได้'); return; }
+  const get = id => document.getElementById(id)?.value?.trim() || '';
+  const id = get('me-id') || `manual-${Date.now().toString(36).toUpperCase()}`;
+  const frequency = get('me-frequency') || 'one_time';
+  const referenceNo = get('me-reference');
+  const amount = manualExpenseRecalculate();
+  const existing = loadManualExpenses().find(e => e.id === id);
+  const expense = {
+    ...existing,
+    id,
+    entryKind: get('me-kind') || 'historical',
+    referenceNo,
+    project: get('me-project'),
+    budgetPoolId: get('me-pool') || null,
+    expenseType: get('me-type') || 'other',
+    description: get('me-description'),
+    frequency,
+    expenseDate: frequency === 'one_time' ? get('me-date') : null,
+    startMonth: frequency === 'monthly' ? get('me-start') : null,
+    endMonth: frequency === 'monthly' ? get('me-end') : null,
+    quantity: Number(get('me-qty')) || 0,
+    unitCost: Number(get('me-unit-cost')) || 0,
+    amount,
+    notes: get('me-notes'),
+    createdBy: existing?.createdBy || currentUser(),
+    updatedBy: currentUser(),
+  };
+  if (!expense.project || !expense.description) { alert('กรุณากรอก Project และรายการ'); return; }
+  if (!(expense.quantity > 0) || !(expense.unitCost >= 0) || !(expense.amount > 0)) { alert('Quantity และ Unit Cost ต้องมากกว่า 0'); return; }
+  if (frequency === 'one_time' && !expense.expenseDate) { alert('กรุณาระบุ Expense Date'); return; }
+  if (frequency === 'monthly' && (!expense.startMonth || !expense.endMonth || expense.startMonth > expense.endMonth)) {
+    alert('กรุณาระบุ Start/End Month ให้ถูกต้อง'); return;
+  }
+  const duplicate = activeManualExpenses().find(e => e.id !== id && referenceNo && e.referenceNo === referenceNo && e.description.toLowerCase() === expense.description.toLowerCase());
+  if (duplicate && !confirm(`พบ Reference และรายการคล้ายกันแล้ว: ${duplicate.referenceNo}\nต้องการบันทึกต่อหรือไม่?`)) return;
+  try {
+    await saveManualExpenseAsync(expense);
+    document.getElementById('manual-expense-modal')?.remove();
+    await renderActualSpend();
+  } catch(e) { alert('บันทึกไม่สำเร็จ: ' + e.message); }
+}
+
+async function voidManualExpense(id) {
+  if (!isPMO()) { alert('เฉพาะ PMO เท่านั้นที่ void รายการได้'); return; }
+  const reason = prompt('เหตุผลที่ void รายการนี้:');
+  if (!reason?.trim()) return;
+  if (!confirm('ยืนยันการ void รายการนี้? รายการจะถูกเก็บไว้ใน audit history แต่ไม่นับรวมยอด')) return;
+  try {
+    await voidManualExpenseAsync(id, reason.trim());
+    document.getElementById('actual-manual-panel')?.remove();
+    await renderActualSpend();
+  } catch(e) { alert('Void ไม่สำเร็จ: ' + e.message); }
+}
+
+async function renderActualSpend() {
+  await loadManualExpensesAsync();
   const fromVal   = document.getElementById('as-from')?.value || '';
   const toVal     = document.getElementById('as-to')?.value   || '';
   const projVal   = document.getElementById('as-project')?.value || 'all';
   const typeVal   = document.getElementById('as-type')?.value   || 'all';
+  const sourceVal = document.getElementById('as-source')?.value || 'all';
   const container = document.getElementById('as-content');
   if (!container) return;
+  const addButton = document.getElementById('as-add-manual');
+  if (addButton) addButton.style.display = isPMO() ? '' : 'none';
 
   const projSel = document.getElementById('as-project');
-  if (projSel && projSel.options.length <= 1) {
-    // Include both original project and any PMO-overridden budgetSource values
-    const projs = [...new Set(loadMemos()
-      .filter(m => memoStatusKey(m) === 'completed')
-      .map(m => m.budgetSource || m.project || '(ไม่ระบุ)')
-    )].sort();
+  if (projSel) {
+    const current = projSel.value;
+    const projs = [...new Set([
+      ...loadMemos().filter(m => memoStatusKey(m) === 'completed').map(m => m.budgetSource || m.project || '(ไม่ระบุ)'),
+      ...activeManualExpenses().map(e => e.project || '(ไม่ระบุ)'),
+    ])].sort();
+    projSel.innerHTML = '<option value="all">ทุกโปรเจค</option>';
     projs.forEach(p => { const o = document.createElement('option'); o.value = o.textContent = p; projSel.appendChild(o); });
+    projSel.value = projs.includes(current) ? current : 'all';
   }
 
   const labelEl = document.getElementById('as-period-label');
@@ -1756,31 +2145,49 @@ function renderActualSpend() {
   }
   if (projVal !== 'all') approved = approved.filter(m => (m.budgetSource || m.project || '(ไม่ระบุ)') === projVal);
   if (typeVal !== 'all') approved = approved.filter(m => m.type === typeVal);
+  if (sourceVal === 'manual') approved = [];
 
-  if (!approved.length) {
+  let manual = activeManualExpenses().filter(e => manualExpenseAmountInRange(e, fromVal, toVal) > 0);
+  if (projVal !== 'all') manual = manual.filter(e => (e.project || '(ไม่ระบุ)') === projVal);
+  if (typeVal !== 'all') manual = manual.filter(e => e.expenseType === typeVal);
+  if (sourceVal === 'memo') manual = [];
+
+  if (!approved.length && !manual.length) {
     container.innerHTML = `<div class="card" style="padding:32px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูลในช่วงที่เลือก</div>`;
     return;
   }
 
   const byProj = {};
   approved.forEach(m => {
-    // Use budgetSource if PMO tagged it, otherwise fall back to memo.project
     const p = m.budgetSource || m.project || '(ไม่ระบุ)';
     const t = m.type    || 'other';
     if (!byProj[p])    byProj[p] = {};
-    if (!byProj[p][t]) byProj[p][t] = { total: 0, memos: [] };
-    byProj[p][t].total += Number(m.total) || 0;
-    byProj[p][t].memos.push(m);
+    const key = `${t}|memo`;
+    if (!byProj[p][key]) byProj[p][key] = { type:t, source:'memo', total:0, memos:[], manual:[] };
+    byProj[p][key].total += Number(m.total) || 0;
+    byProj[p][key].memos.push(m);
+  });
+  manual.forEach(e => {
+    const p = e.project || '(ไม่ระบุ)';
+    const t = e.expenseType || 'other';
+    if (!byProj[p]) byProj[p] = {};
+    const key = `${t}|manual`;
+    if (!byProj[p][key]) byProj[p][key] = { type:t, source:'manual', total:0, memos:[], manual:[] };
+    byProj[p][key].total += manualExpenseAmountInRange(e, fromVal, toVal);
+    byProj[p][key].manual.push(e);
   });
 
-  const grandTotal = approved.reduce((s, m) => s + (Number(m.total) || 0), 0);
+  const memoTotal = approved.reduce((s, m) => s + (Number(m.total) || 0), 0);
+  const manualTotal = manual.reduce((s, e) => s + manualExpenseAmountInRange(e, fromVal, toVal), 0);
+  const grandTotal = memoTotal + manualTotal;
   const tdS = 'padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px';
 
   container.innerHTML = `
-    <div style="margin-bottom:12px">
+    <div style="margin-bottom:12px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
       <span style="font-size:13px;font-weight:600;color:var(--text)">Total: </span>
       <span style="font-size:13px;font-weight:600;color:var(--blue)">${money(Math.round(grandTotal))}</span>
-      <span style="font-size:11px;color:var(--text-3);margin-left:8px">${approved.length} memos</span>
+      <span style="font-size:11px;color:var(--text-3)"><strong style="color:var(--blue)">Memo</strong> ${money(Math.round(memoTotal))} · ${approved.length} รายการ</span>
+      <span style="font-size:11px;color:var(--text-3)"><strong style="color:var(--amber)">Historical</strong> ${money(Math.round(manualTotal))} · ${manual.length} รายการ</span>
     </div>
     ${Object.entries(byProj)
       .sort((a,b) => Object.values(b[1]).reduce((s,v)=>s+v.total,0) - Object.values(a[1]).reduce((s,v)=>s+v.total,0))
@@ -1795,17 +2202,24 @@ function renderActualSpend() {
             <table class="hist-table">
               <thead><tr>
                 <th style="${tdS};text-align:left">Type</th>
+                <th style="${tdS};text-align:left">Source</th>
                 <th style="${tdS};text-align:right">Amount</th>
-                <th style="${tdS};text-align:right">Memos</th>
+                <th style="${tdS};text-align:right">รายการ</th>
                 <th style="${tdS};text-align:right">% ของ project</th>
               </tr></thead>
               <tbody>
-                ${Object.entries(types).sort((a,b) => b[1].total - a[1].total).map(([type, data]) => {
+                ${Object.values(types).sort((a,b) => b.total - a.total).map(data => {
+                  const type = data.type;
                   const memoNosAttr = data.memos.map(m=>m.memoNo).join(',');
-                  return `<tr style="cursor:pointer" onclick="showActualMemos('${esc(proj)}','${esc(type)}','${esc(memoNosAttr)}')">
+                  const action = data.source === 'memo'
+                    ? `showActualMemos('${esc(proj)}','${esc(type)}','${esc(memoNosAttr)}')`
+                    : `showManualExpenses('${esc(proj)}','${esc(type)}')`;
+                  const count = data.source === 'memo' ? data.memos.length : data.manual.length;
+                  return `<tr style="cursor:pointer" onclick="${action}">
                     <td style="${tdS}"><span style="font-size:11px;padding:2px 8px;border-radius:4px;background:var(--bg);color:var(--text-2)">${BGT_TYPE_LABELS[type] || type}</span></td>
+                    <td style="${tdS}"><span style="font-size:10px;padding:2px 7px;border-radius:4px;background:${data.source==='memo'?'var(--blue-50)':'var(--amber-50)'};color:${data.source==='memo'?'var(--blue)':'var(--amber)'}">${data.source==='memo'?'Memo':'Historical'}</span></td>
                     <td style="${tdS};text-align:right;font-weight:500">${money(Math.round(data.total))}</td>
-                    <td style="${tdS};text-align:right;color:var(--blue)">${data.memos.length} <span style="font-size:10px;color:var(--text-3)">ดูรายการ →</span></td>
+                    <td style="${tdS};text-align:right;color:var(--blue)">${count} <span style="font-size:10px;color:var(--text-3)">ดูรายการ →</span></td>
                     <td style="${tdS};text-align:right;color:var(--text-2)">${projTotal > 0 ? Math.round(data.total/projTotal*100) : 0}%</td>
                   </tr>`;
                 }).join('')}
@@ -1856,6 +2270,54 @@ function showActualMemos(proj, type, memoNosStr) {
             <td colspan="3" style="${tdS};font-weight:600">Total</td>
             <td style="${tdS};text-align:right;font-weight:700;color:var(--blue)">${money(Math.round(total))}</td>
           </tr>
+        </tbody>
+      </table>
+    </div>`;
+  document.body.appendChild(panel);
+  panel.addEventListener('click', e => { if (e.target === panel) panel.remove(); });
+}
+
+function showManualExpenses(proj, type) {
+  const rows = activeManualExpenses().filter(e => e.project === proj && e.expenseType === type);
+  const total = rows.reduce((sum, e) => sum + manualExpenseAmountInRange(e), 0);
+  document.getElementById('actual-manual-panel')?.remove();
+  const panel = document.createElement('div');
+  panel.id = 'actual-manual-panel';
+  panel.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;display:flex;align-items:center;justify-content:center';
+  const tdS = 'padding:7px 10px;border-bottom:1px solid var(--border);font-size:12px';
+  panel.innerHTML = `
+    <div class="card" style="width:780px;max-width:96vw;max-height:86vh;overflow:auto;padding:0">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--surface);z-index:1">
+        <div>
+          <div style="font-size:14px;font-weight:600">${esc(proj)} · ${BGT_TYPE_LABELS[type] || type} · Historical</div>
+          <div style="font-size:11px;color:var(--text-3)">${rows.length} รายการ · ${money(Math.round(total))}</div>
+        </div>
+        <button class="btn-sm" onclick="document.getElementById('actual-manual-panel').remove()">✕</button>
+      </div>
+      <table class="hist-table">
+        <thead><tr>
+          <th style="${tdS};text-align:left">Reference</th>
+          <th style="${tdS};text-align:left">รายการ</th>
+          <th style="${tdS};text-align:left">ช่วงเวลา</th>
+          <th style="${tdS};text-align:right">Amount</th>
+          <th style="${tdS};text-align:center">Actions</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(e => {
+            const schedule = e.frequency === 'monthly' ? `${e.startMonth} → ${e.endMonth}` : (e.expenseDate || '—');
+            const amount = manualExpenseAmountInRange(e);
+            return `<tr>
+              <td style="${tdS};color:var(--amber);font-weight:500">${esc(e.referenceNo || 'Manual')}</td>
+              <td style="${tdS}">${esc(e.description)}${e.notes ? `<div style="font-size:10px;color:var(--text-3)">${esc(e.notes)}</div>` : ''}</td>
+              <td style="${tdS};color:var(--text-3)">${esc(schedule)}</td>
+              <td style="${tdS};text-align:right;font-weight:500">${money(Math.round(amount))}</td>
+              <td style="${tdS};text-align:center;white-space:nowrap">
+                ${isPMO() ? `<button class="btn-sm" onclick="document.getElementById('actual-manual-panel').remove();openManualExpenseModal('${esc(e.id)}')">✎</button>
+                <button class="btn-sm" style="color:var(--red);margin-left:4px" onclick="voidManualExpense('${esc(e.id)}')">Void</button>` : '<span style="font-size:10px;color:var(--text-3)">View only</span>'}
+              </td>
+            </tr>`;
+          }).join('')}
+          <tr style="background:var(--bg)"><td colspan="3" style="${tdS};font-weight:600">Total</td><td style="${tdS};text-align:right;font-weight:700;color:var(--amber)">${money(Math.round(total))}</td><td style="${tdS}"></td></tr>
         </tbody>
       </table>
     </div>`;
@@ -1997,8 +2459,19 @@ function getPoolMemos(pool, approvedMemos, allPools) {
 
 // Get actual spend for a pool
 function getPoolActual(pool, approvedMemos, allPools) {
-  return getPoolMemos(pool, approvedMemos, allPools)
+  const memoActual = getPoolMemos(pool, approvedMemos, allPools)
     .reduce((s, m) => s + (Number(m.total) || 0), 0);
+  const manualActual = activeManualExpenses()
+    .filter(e => {
+      if (e.budgetPoolId) return e.budgetPoolId === pool.id;
+      if (e.project !== pool.project) return false;
+      const types = Array.isArray(pool.memoTypes) ? pool.memoTypes : [];
+      return !types.length || types.includes(e.expenseType);
+    })
+    .reduce((sum, e) => sum + manualExpenseOccurrences(e)
+      .filter(o => (!pool.startMonth || o.month >= pool.startMonth) && (!pool.endMonth || o.month <= pool.endMonth))
+      .reduce((s, o) => s + o.amount, 0), 0);
+  return memoActual + manualActual;
 }
 
 // ══════════════════════════════════════════

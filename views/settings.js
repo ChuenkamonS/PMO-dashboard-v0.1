@@ -93,15 +93,13 @@ function renderSettings() {
   loadSettingsAsync().then(s => {
     renderSettingsUI(s);
     setTimeout(_loadSignaturePreview, 50);
-    // Load PMO-only tables after DOM is ready
-    if(typeof isPMO==='function' && isPMO()) {
-      setTimeout(()=>{ renderUsersTable(); renderAuthorityTable(); }, 100);
-    }
+    setTimeout(()=>{ renderUsersTable(); renderAuthorityTable(); }, 100);
   });
 }
 
 function renderSettingsUI(s) {
   const TYPE_LABELS = { sl:'Software License (SL)', hw:'Hardware (HW)', int:'Team Activity (INT)', ent:'Client Expense (ENT)', dep:'Deployment (DEP)' };
+  const canEdit = typeof isPMO === 'function' && isPMO();
 
   document.getElementById('view-settings').innerHTML = `
   <div style="max-width:900px;margin:0 auto">
@@ -119,19 +117,18 @@ function renderSettingsUI(s) {
         <input id="st-company-addr" class="ri" value="${esc(s.company.address)}"></div>
     </div>
 
-    <!-- User Management (PMO only) -->
-    ${typeof isPMO === 'function' && isPMO() ? `
+    <!-- User Management -->
     <div class="card" style="padding:20px;margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-        <div style="font-size:13px;font-weight:700;color:var(--blue)">👥 จัดการ Users & Approvers <span style="font-size:10px;background:#FCEBEB;color:#A32D2D;padding:2px 7px;border-radius:4px;font-weight:400">PMO Only</span></div>
-        <button class="btn-sm" onclick="openAddUserModal()" style="font-size:11px">+ เพิ่มผู้ใช้</button>
+        <div style="font-size:13px;font-weight:700;color:var(--blue)">👥 Users & Approvers <span style="font-size:10px;background:${canEdit?'#FCEBEB':'var(--gray-50)'};color:${canEdit?'#A32D2D':'var(--text-3)'};padding:2px 7px;border-radius:4px;font-weight:400">${canEdit?'PMO Edit':'View Only'}</span></div>
+        ${canEdit ? '<button class="btn-sm" onclick="openAddUserModal()" style="font-size:11px">+ เพิ่มผู้ใช้</button>' : ''}
       </div>
       <div id="st-users-list" style="font-size:12px">
         <div style="color:var(--text-3);font-size:11px">กำลังโหลด...</div>
       </div>
     </div>
 
-    <!-- Authority Limits (PMO only) -->
+    <!-- Authority Limits -->
     <div class="card" style="padding:20px;margin-bottom:14px">
       <div style="font-size:13px;font-weight:700;margin-bottom:14px;color:var(--blue)">💰 วงเงินอนุมัติ (Authority Limits) <span style="font-size:10px;background:#FCEBEB;color:#A32D2D;padding:2px 7px;border-radius:4px;font-weight:400">PMO Only</span></div>
       <div style="font-size:11px;color:var(--text-3);margin-bottom:10px">วงเงินที่ระบุใน PDF Memo ดึงจากตารางนี้ · แก้ไขแล้วกด "บันทึก Authority" เพื่อ update Supabase</div>
@@ -142,7 +139,6 @@ function renderSettingsUI(s) {
         <button class="btn-primary" onclick="saveAuthorityLimits()" style="font-size:12px">💾 บันทึก Authority</button>
       </div>
     </div>
-    ` : ''}
 
     <!-- Default Reviewer / Approver -->
     <div class="card" style="padding:20px;margin-bottom:14px">
@@ -273,6 +269,10 @@ function renderSettingsUI(s) {
       </div>
     </div>    </div>
   </div>`;
+  if (!canEdit) {
+    document.querySelectorAll('#view-settings input, #view-settings select, #view-settings textarea, #view-settings button')
+      .forEach(el => { el.disabled = true; });
+  }
 }
 
 // ── Actions ──
@@ -285,6 +285,7 @@ function renderSettingsUI(s) {
 async function renderUsersTable() {
   const container = document.getElementById('st-users-list');
   if(!container) return;
+  const canEdit = typeof isPMO === 'function' && isPMO();
   await loadUserProfilesAsync();
   const users = _userProfilesCache || [];
   if(!users.length){ container.innerHTML='<div style="color:var(--text-3)">ยังไม่มีผู้ใช้</div>'; return; }
@@ -306,21 +307,21 @@ async function renderUsersTable() {
             <td style="padding:7px 10px;border-bottom:1px solid var(--border)">${esc(u.full_name)}</td>
             <td style="padding:7px 10px;border-bottom:1px solid var(--border)">${esc(u.title||'')}</td>
             <td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:center">
-              <input type="checkbox" data-uid="${u.id}" data-field="can_review" ${(u.can_review??u.is_approver)?'checked':''} onchange="toggleUserField(this)">
+              <input type="checkbox" data-uid="${u.id}" data-field="can_review" ${(u.can_review??u.is_approver)?'checked':''} onchange="toggleUserField(this)" ${canEdit?'':'disabled'}>
             </td>
             <td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:center">
-              <input type="checkbox" data-uid="${u.id}" data-field="can_approve" ${(u.can_approve??u.is_approver)?'checked':''} onchange="toggleUserField(this)">
+              <input type="checkbox" data-uid="${u.id}" data-field="can_approve" ${(u.can_approve??u.is_approver)?'checked':''} onchange="toggleUserField(this)" ${canEdit?'':'disabled'}>
             </td>
             <td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:center">
-              <input type="checkbox" data-uid="${u.id}" data-field="is_pmo" ${u.is_pmo?'checked':''} onchange="toggleUserField(this)">
+              <input type="checkbox" data-uid="${u.id}" data-field="is_pmo" ${u.is_pmo?'checked':''} onchange="toggleUserField(this)" ${canEdit?'':'disabled'}>
             </td>
             <td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:center">
-              <input type="checkbox" data-uid="${u.id}" data-field="is_active" ${u.is_active!==false?'checked':''} onchange="toggleUserField(this)">
+              <input type="checkbox" data-uid="${u.id}" data-field="is_active" ${u.is_active!==false?'checked':''} onchange="toggleUserField(this)" ${canEdit?'':'disabled'}>
             </td>
             <td style="padding:7px 10px;border-bottom:1px solid var(--border);color:var(--text-3)">${esc(u.email||'')}</td>
             <td style="padding:7px 10px;border-bottom:1px solid var(--border)">
-              <button class="btn-sm" onclick="openEditUserModal(${u.id})" style="font-size:11px;padding:2px 8px">✎</button>
-              <button class="btn-sm" onclick="deleteUser(${u.id},'${esc(u.full_name)}')" style="font-size:11px;padding:2px 6px;color:var(--red);margin-left:4px">✕</button>
+              ${canEdit ? `<button class="btn-sm" onclick="openEditUserModal(${u.id})" style="font-size:11px;padding:2px 8px">✎</button>
+              ${u.is_active!==false ? `<button class="btn-sm" onclick="deactivateUser(${u.id},'${esc(u.full_name)}')" style="font-size:11px;padding:2px 6px;color:var(--red);margin-left:4px">Deactivate</button>` : ''}` : '<span style="font-size:10px;color:var(--text-3)">View only</span>'}
             </td>
           </tr>`).join('')}
       </tbody>
@@ -328,6 +329,7 @@ async function renderUsersTable() {
 }
 
 async function toggleUserField(cb) {
+  if (!(typeof isPMO === 'function' && isPMO())) { cb.checked = !cb.checked; alert('View only — เฉพาะ PMO เท่านั้นที่แก้ไขได้'); return; }
   const uid   = Number(cb.dataset.uid);
   const field = cb.dataset.field;
   const val   = cb.checked;
@@ -340,9 +342,11 @@ async function toggleUserField(cb) {
 }
 
 function openAddUserModal() {
+  if (!(typeof isPMO === 'function' && isPMO())) { alert('เฉพาะ PMO เท่านั้นที่เพิ่มผู้ใช้ได้'); return; }
   _openUserModal(null);
 }
 function openEditUserModal(uid) {
+  if (!(typeof isPMO === 'function' && isPMO())) { alert('เฉพาะ PMO เท่านั้นที่แก้ไขผู้ใช้ได้'); return; }
   const u = (_userProfilesCache||[]).find(u=>u.id===uid);
   _openUserModal(u);
 }
@@ -398,6 +402,7 @@ function _openUserModal(user) {
 }
 
 async function saveUserFromModal(uid) {
+  if (!(typeof isPMO === 'function' && isPMO())) { alert('เฉพาะ PMO เท่านั้นที่บันทึกผู้ใช้ได้'); return; }
   const fullName = document.getElementById('um-fullname')?.value.trim();
   const title    = document.getElementById('um-title')?.value.trim();
   if(!fullName||!title){ alert('กรุณากรอกชื่อ-นามสกุล และตำแหน่ง'); return; }
@@ -430,17 +435,17 @@ async function saveUserFromModal(uid) {
   } catch(e){ alert('บันทึกไม่สำเร็จ: '+e.message); }
 }
 
-async function deleteUser(uid, name) {
-  if(!confirm(`ลบผู้ใช้ "${name}" ออกจากระบบ?
-Memo ที่สร้างไว้แล้วจะไม่ได้รับผลกระทบ`)) return;
+async function deactivateUser(uid, name) {
+  if (!(typeof isPMO === 'function' && isPMO())) { alert('เฉพาะ PMO เท่านั้นที่ deactivate ผู้ใช้ได้'); return; }
+  if(!confirm(`Deactivate ผู้ใช้ "${name}"?\nผู้ใช้นี้จะหายจาก Approver dropdown แต่ข้อมูลเดิมจะยังอยู่`)) return;
   try {
-    await supaFetch('user_profiles','DELETE',null,`?id=eq.${uid}`);
+    await supaFetch('user_profiles','PATCH',{is_active:false,updated_at:new Date().toISOString()},`?id=eq.${uid}`);
     _userProfilesCache = null;
     await loadUserProfilesAsync();
     renderUsersTable();
     if(typeof refreshApproverDropdowns==='function') refreshApproverDropdowns();
-    alert('✓ ลบผู้ใช้เรียบร้อย');
-  } catch(e){ alert('ลบไม่สำเร็จ: '+e.message); }
+    alert('✓ Deactivate ผู้ใช้เรียบร้อย');
+  } catch(e){ alert('Deactivate ไม่สำเร็จ: '+e.message); }
 }
 
 // ── Authority Limits UI ────────────────────────────────────────
@@ -450,6 +455,7 @@ const MEMO_TYPE_LABELS_AUTH = {sl:'SL',hw:'HW',int:'INT',ent:'ENT',dep:'DEP'};
 async function renderAuthorityTable() {
   const container = document.getElementById('st-authority-list');
   if(!container) return;
+  const canEdit = typeof isPMO === 'function' && isPMO();
   container.innerHTML = '<div style="color:var(--text-3);font-size:11px">กำลังโหลด...</div>';
   // Always reload fresh from Supabase when opening settings
   _authorityCache = null;
@@ -475,6 +481,7 @@ async function renderAuthorityTable() {
                 <input type="number" class="ri auth-limit-input" data-title="${esc(title)}" data-type="${t}"
                   value="${byTitle[title][t]||0}" min="0"
                   style="font-size:11px;padding:3px 6px;text-align:right;width:80px"
+                  ${canEdit?'':'disabled'}
                   ${t==='int'?'title="INT ไม่ใช้ authority limit — ค่า 0 คือ N/A"':''}>
               </td>`).join('')}
           </tr>`).join('')}
@@ -484,6 +491,7 @@ async function renderAuthorityTable() {
 }
 
 async function saveAuthorityLimits() {
+  if (!(typeof isPMO === 'function' && isPMO())) { alert('View only — เฉพาะ PMO เท่านั้นที่แก้ไขได้'); return; }
   const inputs = document.querySelectorAll('.auth-limit-input');
   if(!inputs.length){ alert('ไม่พบข้อมูล'); return; }
   const updates = Array.from(inputs).map(inp=>({
@@ -532,6 +540,7 @@ function removeSettingsRow(btn, listId) {
 }
 
 async function saveSettings() {
+  if (!(typeof isPMO === 'function' && isPMO())) { alert('View only — เฉพาะ PMO เท่านั้นที่แก้ไขได้'); return; }
   const g = id => document.getElementById(id)?.value?.trim()||'';
   const getInputs = (containerId, cls) =>
     Array.from(document.querySelectorAll(`#${containerId} .${cls}`))
@@ -681,6 +690,7 @@ function _loadSignaturePreview() {
 }
 
 async function saveSigMemoName() {
+  if (!(typeof isPMO === 'function' && isPMO())) { alert('View only — เฉพาะ PMO เท่านั้นที่แก้ไขได้'); return; }
   const nameEl = document.getElementById('sig-memo-name');
   const name = nameEl?.value?.trim();
   if (!name) { alert('กรุณาระบุชื่อก่อน'); return; }
@@ -692,6 +702,7 @@ async function saveSigMemoName() {
 }
 
 async function saveMySignature() {
+  if (!(typeof isPMO === 'function' && isPMO())) { alert('View only — เฉพาะ PMO เท่านั้นที่แก้ไขได้'); return; }
   if (!_pendingSignatureDataUrl) { alert('กรุณาเลือกไฟล์ลายเซ็นก่อน'); return; }
   const s = loadSettings();
   const memoName = s.sigMemoName?.trim();
@@ -715,6 +726,7 @@ async function saveMySignature() {
 }
 
 async function deleteMySignature() {
+  if (!(typeof isPMO === 'function' && isPMO())) { alert('View only — เฉพาะ PMO เท่านั้นที่แก้ไขได้'); return; }
   if (!confirm('ลบลายเซ็นของ ' + currentUser() + ' ออกจากระบบ?')) return;
   await deleteUserSignatureAsync(currentUser());
   _sigCache[currentUser()] = null;
