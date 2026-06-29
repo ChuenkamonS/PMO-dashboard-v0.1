@@ -92,8 +92,11 @@ function deepMerge(base, override) {
 function renderSettings() {
   loadSettingsAsync().then(s => {
     renderSettingsUI(s);
-    // Load signature preview async AFTER DOM is rendered
     setTimeout(_loadSignaturePreview, 50);
+    // Load PMO-only tables after DOM is ready
+    if(typeof isPMO==='function' && isPMO()) {
+      setTimeout(()=>{ renderUsersTable(); renderAuthorityTable(); }, 100);
+    }
   });
 }
 
@@ -115,6 +118,31 @@ function renderSettingsUI(s) {
       <div class="fg" style="margin-top:10px"><label>ที่อยู่</label>
         <input id="st-company-addr" class="ri" value="${esc(s.company.address)}"></div>
     </div>
+
+    <!-- User Management (PMO only) -->
+    ${typeof isPMO === 'function' && isPMO() ? `
+    <div class="card" style="padding:20px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:700;color:var(--blue)">👥 จัดการ Users & Approvers <span style="font-size:10px;background:#FCEBEB;color:#A32D2D;padding:2px 7px;border-radius:4px;font-weight:400">PMO Only</span></div>
+        <button class="btn-sm" onclick="openAddUserModal()" style="font-size:11px">+ เพิ่มผู้ใช้</button>
+      </div>
+      <div id="st-users-list" style="font-size:12px">
+        <div style="color:var(--text-3);font-size:11px">กำลังโหลด...</div>
+      </div>
+    </div>
+
+    <!-- Authority Limits (PMO only) -->
+    <div class="card" style="padding:20px;margin-bottom:14px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:14px;color:var(--blue)">💰 วงเงินอนุมัติ (Authority Limits) <span style="font-size:10px;background:#FCEBEB;color:#A32D2D;padding:2px 7px;border-radius:4px;font-weight:400">PMO Only</span></div>
+      <div style="font-size:11px;color:var(--text-3);margin-bottom:10px">วงเงินที่ระบุใน PDF Memo ดึงจากตารางนี้ · แก้ไขแล้วกด "บันทึก Authority" เพื่อ update Supabase</div>
+      <div id="st-authority-list">
+        <div style="color:var(--text-3);font-size:11px">กำลังโหลด...</div>
+      </div>
+      <div style="text-align:right;margin-top:12px">
+        <button class="btn-primary" onclick="saveAuthorityLimits()" style="font-size:12px">💾 บันทึก Authority</button>
+      </div>
+    </div>
+    ` : ''}
 
     <!-- Default Reviewer / Approver -->
     <div class="card" style="padding:20px;margin-bottom:14px">
@@ -248,6 +276,209 @@ function renderSettingsUI(s) {
 }
 
 // ── Actions ──
+
+// ══════════════════════════════════════════════════════════════════
+// USER MANAGEMENT (PMO only) — reads/writes user_profiles in Supabase
+// ══════════════════════════════════════════════════════════════════
+
+// Load and render users table in settings
+async function renderUsersTable() {
+  const container = document.getElementById('st-users-list');
+  if(!container) return;
+  await loadUserProfilesAsync();
+  const users = _userProfilesCache || [];
+  if(!users.length){ container.innerHTML='<div style="color:var(--text-3)">ยังไม่มีผู้ใช้</div>'; return; }
+  container.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:var(--bg)">
+        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid var(--border)">ชื่อ-นามสกุล</th>
+        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid var(--border)">ตำแหน่ง</th>
+        <th style="padding:6px 10px;text-align:center;border-bottom:1px solid var(--border)">Approver</th>
+        <th style="padding:6px 10px;text-align:center;border-bottom:1px solid var(--border)">PMO</th>
+        <th style="padding:6px 10px;border-bottom:1px solid var(--border)">Email</th>
+        <th style="padding:6px 10px;border-bottom:1px solid var(--border)"></th>
+      </tr></thead>
+      <tbody>
+        ${users.map((u,i)=>`
+          <tr style="${i%2===0?'':'background:var(--bg)'}">
+            <td style="padding:7px 10px;border-bottom:1px solid var(--border)">${esc(u.full_name)}</td>
+            <td style="padding:7px 10px;border-bottom:1px solid var(--border)">${esc(u.title||'')}</td>
+            <td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:center">
+              <input type="checkbox" data-uid="${u.id}" data-field="is_approver" ${u.is_approver?'checked':''} onchange="toggleUserField(this)">
+            </td>
+            <td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:center">
+              <input type="checkbox" data-uid="${u.id}" data-field="is_pmo" ${u.is_pmo?'checked':''} onchange="toggleUserField(this)">
+            </td>
+            <td style="padding:7px 10px;border-bottom:1px solid var(--border);color:var(--text-3)">${esc(u.email||'')}</td>
+            <td style="padding:7px 10px;border-bottom:1px solid var(--border)">
+              <button class="btn-sm" onclick="openEditUserModal(${u.id})" style="font-size:11px;padding:2px 8px">✎</button>
+              <button class="btn-sm" onclick="deleteUser(${u.id},'${esc(u.full_name)}')" style="font-size:11px;padding:2px 6px;color:var(--red);margin-left:4px">✕</button>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+async function toggleUserField(cb) {
+  const uid   = Number(cb.dataset.uid);
+  const field = cb.dataset.field;
+  const val   = cb.checked;
+  try {
+    await supaFetch('user_profiles','PATCH',{[field]:val},`?id=eq.${uid}`);
+    // Update cache
+    if(_userProfilesCache){ const u=_userProfilesCache.find(u=>u.id===uid); if(u) u[field]=val; }
+    refreshApproverDropdowns && refreshApproverDropdowns();
+  } catch(e){ alert('บันทึกไม่สำเร็จ: '+e.message); cb.checked=!val; }
+}
+
+function openAddUserModal() {
+  _openUserModal(null);
+}
+function openEditUserModal(uid) {
+  const u = (_userProfilesCache||[]).find(u=>u.id===uid);
+  _openUserModal(u);
+}
+function _openUserModal(user) {
+  const existing = document.getElementById('user-edit-modal');
+  if(existing) existing.remove();
+  const modal = document.createElement('div');
+  modal.id = 'user-edit-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:400;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML = `
+    <div class="card" style="width:480px;max-width:95vw;padding:24px;max-height:90vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <span style="font-size:15px;font-weight:600">${user?'แก้ไขผู้ใช้':'เพิ่มผู้ใช้ใหม่'}</span>
+        <button class="btn-sm" onclick="document.getElementById('user-edit-modal').remove()">✕</button>
+      </div>
+      <div class="fg" style="margin-bottom:10px">
+        <label style="font-size:11px;font-weight:600">ชื่อ-นามสกุลเต็ม (ภาษาไทย) *</label>
+        <input id="um-fullname" class="ri" style="margin-top:4px" value="${esc(user?.full_name||'')}" placeholder="เช่น นาย สมชาย ใจดี">
+      </div>
+      <div class="fg" style="margin-bottom:10px">
+        <label style="font-size:11px;font-weight:600">ตำแหน่ง *</label>
+        <input id="um-title" class="ri" style="margin-top:4px" value="${esc(user?.title||'')}" placeholder="เช่น ผู้อำนวยการโครงการ">
+      </div>
+      <div class="fg" style="margin-bottom:10px">
+        <label style="font-size:11px;font-weight:600">ชื่อแทน / Alias (คั่นด้วย |)</label>
+        <input id="um-aliases" class="ri" style="margin-top:4px" value="${esc((user?.name_aliases||[]).join(' | '))}" placeholder="เช่น สมชาย | Somchai">
+      </div>
+      <div class="fg" style="margin-bottom:10px">
+        <label style="font-size:11px;font-weight:600">Email</label>
+        <input id="um-email" class="ri" type="email" style="margin-top:4px" value="${esc(user?.email||'')}" placeholder="name@orbitdigital.co.th">
+      </div>
+      <div style="display:flex;gap:20px;margin-bottom:16px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="um-is-approver" ${user?.is_approver?'checked':''}> เป็น Approver
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="um-is-pmo" ${user?.is_pmo?'checked':''}> เป็น PMO
+        </label>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px">
+        <button class="btn-ghost" onclick="document.getElementById('user-edit-modal').remove()">ยกเลิก</button>
+        <button class="btn-primary" onclick="saveUserFromModal(${user?.id||'null'})">💾 บันทึก</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e=>{ if(e.target===modal) modal.remove(); });
+}
+
+async function saveUserFromModal(uid) {
+  const fullName = document.getElementById('um-fullname')?.value.trim();
+  const title    = document.getElementById('um-title')?.value.trim();
+  if(!fullName||!title){ alert('กรุณากรอกชื่อ-นามสกุล และตำแหน่ง'); return; }
+  const aliasRaw = document.getElementById('um-aliases')?.value.trim();
+  const aliases  = aliasRaw ? aliasRaw.split('|').map(s=>s.trim()).filter(Boolean) : [];
+  const payload  = {
+    full_name:   fullName, title,
+    name_aliases: aliases,
+    email:       document.getElementById('um-email')?.value.trim()||null,
+    is_approver: document.getElementById('um-is-approver')?.checked||false,
+    is_pmo:      document.getElementById('um-is-pmo')?.checked||false,
+    updated_at:  new Date().toISOString(),
+  };
+  try {
+    if(uid) {
+      await supaFetch('user_profiles','PATCH',payload,`?id=eq.${uid}`);
+    } else {
+      await supaFetch('user_profiles','POST',payload,'?on_conflict=full_name');
+    }
+    _userProfilesCache = null; // bust cache
+    await loadUserProfilesAsync();
+    document.getElementById('user-edit-modal')?.remove();
+    renderUsersTable();
+    if(typeof refreshApproverDropdowns==='function') refreshApproverDropdowns();
+    alert('✓ บันทึกผู้ใช้เรียบร้อย');
+  } catch(e){ alert('บันทึกไม่สำเร็จ: '+e.message); }
+}
+
+async function deleteUser(uid, name) {
+  if(!confirm(`ลบผู้ใช้ "${name}" ออกจากระบบ?
+Memo ที่สร้างไว้แล้วจะไม่ได้รับผลกระทบ`)) return;
+  try {
+    await supaFetch('user_profiles','DELETE',null,`?id=eq.${uid}`);
+    _userProfilesCache = null;
+    await loadUserProfilesAsync();
+    renderUsersTable();
+    if(typeof refreshApproverDropdowns==='function') refreshApproverDropdowns();
+    alert('✓ ลบผู้ใช้เรียบร้อย');
+  } catch(e){ alert('ลบไม่สำเร็จ: '+e.message); }
+}
+
+// ── Authority Limits UI ────────────────────────────────────────
+const MEMO_TYPES_AUTHORITY = ['sl','hw','int','ent','dep'];
+const MEMO_TYPE_LABELS_AUTH = {sl:'SL',hw:'HW',int:'INT',ent:'ENT',dep:'DEP'};
+
+async function renderAuthorityTable() {
+  const container = document.getElementById('st-authority-list');
+  if(!container) return;
+  await loadAuthorityAsync();
+  const rows = _authorityCache||[];
+  // Group by title
+  const byTitle = {};
+  rows.forEach(r=>{ if(!byTitle[r.title]) byTitle[r.title]={}; byTitle[r.title][r.memo_type]=Number(r.limit_thb)||0; });
+  const titles = Object.keys(byTitle);
+  if(!titles.length){ container.innerHTML='<div style="color:var(--text-3)">ยังไม่มีข้อมูล authority limits</div>'; return; }
+  container.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:11px">
+      <thead><tr style="background:var(--bg)">
+        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid var(--border)">ตำแหน่ง</th>
+        ${MEMO_TYPES_AUTHORITY.map(t=>`<th style="padding:6px 8px;text-align:center;border-bottom:1px solid var(--border)">${MEMO_TYPE_LABELS_AUTH[t]}</th>`).join('')}
+      </tr></thead>
+      <tbody>
+        ${titles.map((title,i)=>`
+          <tr style="${i%2===0?'':'background:var(--bg)'}">
+            <td style="padding:6px 10px;border-bottom:1px solid var(--border);font-weight:500">${esc(title)}</td>
+            ${MEMO_TYPES_AUTHORITY.map(t=>`
+              <td style="padding:4px 6px;border-bottom:1px solid var(--border)">
+                <input type="number" class="ri auth-limit-input" data-title="${esc(title)}" data-type="${t}"
+                  value="${byTitle[title][t]||0}" min="0"
+                  style="font-size:11px;padding:3px 6px;text-align:right;width:80px"
+                  ${t==='int'?'title="INT ไม่ใช้ authority limit — ค่า 0 คือ N/A"':''}>
+              </td>`).join('')}
+          </tr>`).join('')}
+      </tbody>
+    </table>
+    <div style="font-size:10px;color:var(--text-3);margin-top:8px">0 = ตำแหน่งนี้ไม่มีสิทธิ์อนุมัติ type นั้น · INT = ไม่ระบุวงเงินใน Policy</div>`;
+}
+
+async function saveAuthorityLimits() {
+  const inputs = document.querySelectorAll('.auth-limit-input');
+  if(!inputs.length){ alert('ไม่พบข้อมูล'); return; }
+  const updates = Array.from(inputs).map(inp=>({
+    title:     inp.dataset.title,
+    memo_type: inp.dataset.type,
+    limit_thb: Number(inp.value)||0,
+  }));
+  try {
+    // Upsert each row
+    await Promise.all(updates.map(u=>supaFetch('authority_limits','POST',u,'?on_conflict=title,memo_type')));
+    _authorityCache = null;
+    await loadAuthorityAsync();
+    alert('✓ บันทึก Authority Limits เรียบร้อย');
+  } catch(e){ alert('บันทึกไม่สำเร็จ: '+e.message); }
+}
+
 function addSettingsProject() {
   const list = document.getElementById('st-projects-list');
   const idx = list.querySelectorAll('.st-row').length;
