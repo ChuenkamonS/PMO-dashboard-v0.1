@@ -915,25 +915,25 @@ svg.icon { display: inline-block; vertical-align: middle; }
     </div>
 
     <div class="sb-footer">
-      <div id="sb-user-btn" class="sb-user" onclick="toggleAccountMenu()" style="cursor:pointer;position:relative">
+      <div id="sb-user-btn" class="sb-user" data-profile-id="3" data-is-pmo="true" onclick="toggleAccountMenu()" style="cursor:pointer;position:relative">
         <div class="sb-avatar" id="sb-avatar">CK</div>
         <div class="sb-user-info" style="flex:1">
-          <div class="sb-uname" id="sb-uname">Chuen K.</div>
+          <div class="sb-uname" id="sb-uname">นางสาว ชื่นกมล สารมานิตย์</div>
           <div class="sb-urole" id="sb-urole">PMO</div>
         </div>
         <span class="sb-chevron"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;color:var(--text-3)"><polyline points="6 9 12 15 18 9"/></svg></span>
       </div>
       <div id="account-menu" style="display:none;position:absolute;bottom:56px;left:8px;right:8px;background:var(--surface);border:1px solid var(--border-md);border-radius:var(--r);box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:100;overflow:hidden">
         <div style="padding:6px 10px;font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)">Switch Account</div>
-        <div onclick="switchAccount('Chuen K.','PMO','CK')" class="account-opt" style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px">
+        <div onclick="switchAccount(3,'นางสาว ชื่นกมล สารมานิตย์','PMO','CK',true)" class="account-opt" style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px">
           <div style="width:26px;height:26px;border-radius:6px;background:var(--blue-50);color:var(--blue-800);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0">CK</div>
-          <div><div style="font-weight:600;color:var(--text)">Chuen K.</div><div style="color:var(--text-3);font-size:10px">PMO · Requester</div></div>
+          <div><div style="font-weight:600;color:var(--text)">ชื่นกมล ส.</div><div style="color:var(--text-3);font-size:10px">PMO · Requester</div></div>
         </div>
-        <div onclick="switchAccount('นวพล ง.','Project Director','NW')" class="account-opt" style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px;border-top:1px solid var(--border)">
+        <div onclick="switchAccount(1,'นาย นวพล งามวรโรจน์สกุล','Project Director','NW',false)" class="account-opt" style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px;border-top:1px solid var(--border)">
           <div style="width:26px;height:26px;border-radius:6px;background:var(--green-50);color:var(--green);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0">NW</div>
           <div><div style="font-weight:600;color:var(--text)">นวพล ง.</div><div style="color:var(--text-3);font-size:10px">Project Director · Approver</div></div>
         </div>
-        <div onclick="switchAccount('ปกรณ์ จ.','CEO','PK')" class="account-opt" style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px;border-top:1px solid var(--border)">
+        <div onclick="switchAccount(2,'นาย ปกรณ์ เจียมสกุลทิพย์','CEO','PK',false)" class="account-opt" style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px;border-top:1px solid var(--border)">
           <div style="width:26px;height:26px;border-radius:6px;background:var(--amber-50);color:var(--amber);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0">PK</div>
           <div><div style="font-weight:600;color:var(--text)">ปกรณ์ จ.</div><div style="color:var(--text-3);font-size:10px">CEO · Approver</div></div>
         </div>
@@ -1058,12 +1058,13 @@ svg.icon { display: inline-block; vertical-align: middle; }
 
             <!-- SL fields -->
             <div class="fs" id="fs-sl">
-              <div class="items-hdr" style="grid-template-columns:2.5fr 1.2fr 0.8fr 0.8fr 1fr 1fr 30px">
-                <span>ชื่อ Software *</span><span>฿/เดือน *</span><span>เดือน *</span><span>จำนวน *</span><span>เริ่ม (เดือน) *</span><span>สิ้นสุด (เดือน) *</span><span></span>
+              <div class="items-hdr" style="grid-template-columns:2fr 1.2fr 1.2fr 0.8fr 0.8fr 1fr 1fr 30px">
+                <span>ชื่อ Software *</span><span>Plan</span><span>฿/เดือน *</span><span>เดือน *</span><span>จำนวน *</span><span>เริ่ม (เดือน) *</span><span>สิ้นสุด (เดือน) *</span><span></span>
               </div>
               <div id="sl-rows">
-                <div class="item-row" style="grid-template-columns:2.5fr 1.2fr 0.8fr 0.8fr 1fr 1fr 30px">
-                  <input class="ri" type="text" placeholder="GitHub Copilot">
+                <div class="item-row" style="grid-template-columns:2fr 1.2fr 1.2fr 0.8fr 0.8fr 1fr 1fr 30px">
+                  <input class="ri sl-name" type="text" placeholder="GitHub Copilot">
+                  <input class="ri sl-plan" type="text" placeholder="Pro / Business">
                   <input class="ri sl-price" type="number" placeholder="600" oninput="calcSL()">
                   <input class="ri sl-mo" type="number" value="12" oninput="calcSL()">
                   <input class="ri sl-qty" type="number" placeholder="15" oninput="calcSL()">
@@ -1219,6 +1220,8 @@ svg.icon { display: inline-block; vertical-align: middle; }
 
             <div id="approver-rows-form"></div>
 
+            <div id="self-a1-notice" style="display:none;margin:8px 0 2px;padding:9px 12px;border-radius:var(--r-sm);background:var(--blue-50);color:var(--blue-800);font-size:11px;line-height:1.55"></div>
+
             <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
               <button class="add-btn" onclick="addApproverFormRow()" id="btn-add-approver" style="margin-top:0">+ เพิ่ม Approver</button>
               <span style="font-size:11px;color:var(--text-3)" id="approver-count-label"></span>
@@ -1235,9 +1238,9 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
               Save to Draft
             </button>
-            <button class="btn-primary" onclick="generateMemoPdf()">
+            <button class="btn-primary" onclick="submitMemo()">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              Save & Generate PDF
+              Submit for Approval
             </button>
           </div>
 
@@ -2105,6 +2108,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
 <script src="views/device.js"></script>
 <script src="views/bulk_import.js"></script>
 <script src="views/resource.js"></script>
+<script src="views/settings.js"></script>
 <style>
   #resource-detail-drawer.open { transform: translateX(0); }
   .badge-purple { background:#E9D5FF; color:#6B21A8; }
@@ -2112,7 +2116,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
   .badge-yellow { background:#FEF9C3; color:#854D0E; }
   #resource-detail-drawer.open { transform: translateX(0); }
 </style>
-<script>initApp(); initSidebarState();</script>
 
 <!-- Approve Modal -->
 <div id="approve-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:300;align-items:center;justify-content:center">
@@ -2311,7 +2314,10 @@ function toggleAccountMenu() {
   const m = document.getElementById('account-menu');
   m.style.display = m.style.display === 'none' ? 'block' : 'none';
 }
-function switchAccount(name, role, initials) {
+function switchAccount(profileId, name, role, initials, isPmo) {
+  const userBtn = document.getElementById('sb-user-btn');
+  userBtn.dataset.profileId = String(profileId);
+  userBtn.dataset.isPmo = isPmo ? 'true' : 'false';
   document.getElementById('sb-uname').textContent = name;
   document.getElementById('sb-urole').textContent = role;
   document.getElementById('sb-avatar').textContent = initials;
@@ -2319,6 +2325,7 @@ function switchAccount(name, role, initials) {
   // Re-render current view so PMO-gated features show/hide correctly
   renderPendingMemos();
   if (typeof renderHistoryMemos === 'function') renderHistoryMemos();
+  if (typeof updateSelfA1Notice === 'function') updateSelfA1Notice();
 }
 document.addEventListener('click', e => {
   if(!document.getElementById('sb-user-btn')?.contains(e.target))
@@ -2356,7 +2363,6 @@ document.addEventListener('click', e => {
           </div>
         </div>
       </div>
-<script src="views/settings.js"></script>
 
       <!-- Budget Tag Modal -->
       <div id="budget-tag-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;align-items:center;justify-content:center">
@@ -2404,5 +2410,6 @@ document.addEventListener('click', e => {
   </div>
 </div>
 
+<script>initApp(); initSidebarState();</script>
 </body>
 </html>

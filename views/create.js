@@ -3,6 +3,7 @@
 // ─────────────────────────────────────────
 
 let selectedType = null;
+let _editingSourceMemoNo = null;
 const TYPE_LABELS = { sl:'Software License', hw:'Hardware', int:'Team Activity', ent:'Client Expense', dep:'Deployment' };
 const TYPE_CFG = {
   sl:  { title:'รายการ Software *', to:'ประธานเจ้าหน้าที่บริหาร', apprTitle:'ประธานเจ้าหน้าที่บริหาร',
@@ -393,7 +394,8 @@ function collectMemoData() {
     const title = titleSel?.value === 'other' ? (titleOth?.value.trim() || '') :
                   titleSel?.value ? titleSel.value :
                   (titleOth?.value.trim() || titleSel?.dataset?.autofill || '');
-    return { name, title, status: 'pending', approvedAt: null, approvedBy: null };
+    const profile = typeof findUserByName === 'function' ? findUserByName(name) : null;
+    return { profileId: profile?.id || null, name, title, status: 'pending', approvedAt: null, approvedBy: null };
   }).filter(a => a.name);
 
   // Backward compat aliases
@@ -411,7 +413,9 @@ function collectMemoData() {
     memoNo: val('#f-memo-no'), date: dateInput(val('#f-date')),
     project: val('#f-project')==='other' ? val('#f-project-other') : val('#f-project'),
     to: toVal, subject: '', reason: selectedReason(),
+    requesterProfileId: typeof currentUserProfileId === 'function' ? currentUserProfileId() : null,
     requesterName, requesterTitle,
+    sourceMemoNo: _editingSourceMemoNo,
     reviewerName: revName || '-', reviewerTitle: revTitle || '-',
     reviewerDate: dateInput(val('#f-signdate')) || TODAY,
     approverName: apprName || '-', approverTitle: apprTitle || '-',
@@ -538,9 +542,28 @@ function validateMemo(data) {
     if(!data.approvers[0]?.name || data.approvers[0].name === '-') missing.push('ชื่อ Reviewer (A1)');
     if(!data.approvers[0]?.title || data.approvers[0].title === '-') missing.push('ตำแหน่ง Reviewer (A1)');
     if(!data.approvers[1]?.name || data.approvers[1].name === '-') missing.push('ชื่อ Final Approver (A2)');
+    if(!data.approvers[1]?.title || data.approvers[1].title === '-') missing.push('ตำแหน่ง Final Approver (A2)');
     // A1 ≠ A2 check
-    if(data.approvers[0]?.name && data.approvers[1]?.name && data.approvers[0].name === data.approvers[1].name)
+    if(data.approvers[0]?.name && data.approvers[1]?.name && profileMatches(
+      data.approvers[0].profileId, data.approvers[0].name,
+      data.approvers[1].profileId, data.approvers[1].name
+    ))
       missing.push('Reviewer (A1) กับ Final Approver (A2) ต้องไม่ใช่คนเดียวกัน');
+    data.approvers.slice(1).forEach((approver, i) => {
+      if (profileMatches(approver.profileId, approver.name, data.requesterProfileId, data.requesterName)) {
+        missing.push(`Requester ต้องไม่เป็น A${i + 2} Approver`);
+      }
+    });
+    for (let i = 0; i < data.approvers.length; i++) {
+      for (let j = i + 1; j < data.approvers.length; j++) {
+        if (profileMatches(
+          data.approvers[i].profileId, data.approvers[i].name,
+          data.approvers[j].profileId, data.approvers[j].name
+        ) && !(i === 0 && j === 1)) {
+          missing.push(`A${i + 1} และ A${j + 1} ต้องเป็นคนละคน`);
+        }
+      }
+    }
   }
   if(!val('#f-signdate')) missing.push('วันที่ลงนาม');
 
@@ -633,20 +656,31 @@ function saveDraft() {
   switchPendingTab('drafts');
 }
 
-async function generateMemoPdf() {
+async function submitMemo() {
   const data = collectMemoData();
   if(!validateMemo(data)) return;
+  const a1 = data.approvers?.[0];
+  const a2 = data.approvers?.[1];
+  const selfA1 = !!a1 && profileMatches(a1.profileId, a1.name, data.requesterProfileId, data.requesterName);
+  if (selfA1 && !confirm(
+    `คุณเป็น Requester และ A1 Reviewer ของ Memo นี้\n\n` +
+    `เมื่อ Submit ระบบจะบันทึกว่า A1 Reviewed แล้ว และส่งต่อไปยัง A2: ${a2?.name || '—'} ทันที\n\n` +
+    `ต้องการ Submit ต่อหรือไม่?`
+  )) return;
   try {
-    const saved = saveMemo(data);
+    const prepared = prepareMemoForSubmission(data);
+    const saved = saveMemo(prepared);
     renderPendingMemos();
-    await downloadMemoPdf(saved);
-
-    alert(`บันทึก ${saved.memoNo} ใน Pending แล้ว และสร้าง PDF เรียบร้อย`);
+    const destination = selfA1 ? `A2: ${a2?.name || '—'}` : `A1: ${a1?.name || '—'}`;
+    alert(`✓ Submit ${saved.memoNo} แล้ว — ส่งต่อไปยัง ${destination}`);
+    swView('pending', document.querySelector('.sb-sub-item[onclick*="pending"]'), 'Pending Approval');
   } catch(e) {
     console.error(e);
     alert('เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
   }
 }
+// Backward-compatible alias for older buttons/bookmarks.
+function generateMemoPdf() { return submitMemo(); }
 function resetMemoForm() {
   if(confirm('ล้างข้อมูลที่กรอกหรือไม่?')) location.reload();
 }
@@ -752,17 +786,17 @@ function toggleReviewerTitleOther() {
 }
 // ── Dynamic Approver Rows — fetch from user_profiles ──
 // Build name options from _userProfilesCache (loaded at init from Supabase)
-function _approverNameOpts(selected = '') {
-  const approvers = typeof getApprovers === 'function' ? getApprovers() : [];
+function _approverNameOpts(selected = '', stage = 'approve') {
+  const approvers = typeof getApprovers === 'function' ? getApprovers(stage) : [];
   const opts = approvers.length
-    ? approvers.map(u => `<option value="${esc(u.full_name)}" data-title="${esc(u.title)}" ${u.full_name===selected?'selected':''}>${esc(u.full_name)}</option>`).join('')
+    ? approvers.map(u => `<option value="${esc(u.full_name)}" data-profile-id="${u.id || ''}" data-title="${esc(u.title)}" ${u.full_name===selected?'selected':''}>${esc(u.full_name)}</option>`).join('')
     : `<option value="นาย นวพล งามวรโรจน์สกุล" ${selected==='นาย นวพล งามวรโรจน์สกุล'?'selected':''}>นาย นวพล งามวรโรจน์สกุล</option>
        <option value="นาย ปกรณ์ เจียมสกุลทิพย์" ${selected==='นาย ปกรณ์ เจียมสกุลทิพย์'?'selected':''}>นาย ปกรณ์ เจียมสกุลทิพย์</option>`;
   return `<option value="">— เลือกชื่อ Approver —</option>` + opts;
 }
-function _approverTitleOpts(selected = '') {
+function _approverTitleOpts(selected = '', stage = 'approve') {
   // Build title options from unique titles in user_profiles
-  const approvers = typeof getApprovers === 'function' ? getApprovers() : [];
+  const approvers = typeof getApprovers === 'function' ? getApprovers(stage) : [];
   const titles = approvers.length
     ? [...new Set(approvers.map(u=>u.title).filter(Boolean))]
     : ['ผู้อำนวยการโครงการ','ประธานเจ้าหน้าที่บริหาร','ผู้อำนวยการ'];
@@ -780,15 +814,17 @@ function initApproverRows() {
 }
 // Rebuild all approver dropdowns after user profiles are loaded
 function refreshApproverDropdowns() {
-  document.querySelectorAll('#approver-rows-form .appr-form-row').forEach(row => {
+  document.querySelectorAll('#approver-rows-form .appr-form-row').forEach((row, index) => {
     const nameSel  = row.querySelector('.appr-name-sel');
     const titleSel = row.querySelector('.appr-title-sel');
     if(!nameSel) return;
     const curName  = nameSel.value;
     const curTitle = titleSel?.value||'';
-    nameSel.innerHTML  = _approverNameOpts(curName);
-    if(titleSel) titleSel.innerHTML = _approverTitleOpts(curTitle);
+    const stage = index === 0 ? 'review' : 'approve';
+    nameSel.innerHTML  = _approverNameOpts(curName, stage);
+    if(titleSel) titleSel.innerHTML = _approverTitleOpts(curTitle, stage);
   });
+  updateSelfA1Notice();
 }
 
 function addApproverFormRow() {
@@ -802,6 +838,7 @@ function _appendApproverRow(isFirst) {
   const container = document.getElementById('approver-rows-form');
   if (!container) return;
   const idx = container.querySelectorAll('.appr-form-row').length;
+  const stage = idx === 0 ? 'review' : 'approve';
   const label = idx === 0 ? 'A1 — Reviewer (บังคับ)' : idx === 1 ? 'A2 — Final Approver (บังคับ)' : `A${idx + 1} — Approver (optional)`;
 
   const row = document.createElement('div');
@@ -815,12 +852,12 @@ function _appendApproverRow(isFirst) {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
       <div class="fg">
         <label>ชื่อ${isFirst ? ' *' : ''}</label>
-        <select class="ri appr-name-sel" onchange="onApproverNameChange(this)" style="margin-top:3px">${_approverNameOpts()}</select>
+        <select class="ri appr-name-sel" onchange="onApproverNameChange(this)" style="margin-top:3px">${_approverNameOpts('', stage)}</select>
         <input class="ri appr-name-other" type="text" placeholder="กรอกชื่อ-นามสกุล" style="display:none;margin-top:6px">
       </div>
       <div class="fg">
         <label>ตำแหน่ง${isFirst ? ' *' : ''}</label>
-        <select class="ri appr-title-sel" onchange="onApproverTitleChange(this)" style="margin-top:3px">${_approverTitleOpts()}</select>
+        <select class="ri appr-title-sel" onchange="onApproverTitleChange(this)" style="margin-top:3px">${_approverTitleOpts('', stage)}</select>
         <input class="ri appr-title-other" type="text" placeholder="กรอกตำแหน่ง" style="display:none;margin-top:6px">
       </div>
     </div>`;
@@ -878,6 +915,22 @@ function onApproverNameChange(sel) {
       // Show authority warning
       _updateApproverAuthorityHint(row, sel.value, user.title);
     }
+  }
+  updateSelfA1Notice();
+}
+
+function updateSelfA1Notice() {
+  const notice = document.getElementById('self-a1-notice');
+  if (!notice) return;
+  const rows = document.querySelectorAll('#approver-rows-form .appr-form-row');
+  const a1Name = rows[0]?.querySelector('.appr-name-sel')?.value || '';
+  const a2Name = rows[1]?.querySelector('.appr-name-sel')?.value || '';
+  const a1Profile = typeof findUserByName === 'function' ? findUserByName(a1Name) : null;
+  const isSelf = !!a1Name && profileMatches(a1Profile?.id, a1Name);
+  notice.style.display = isSelf ? '' : 'none';
+  if (isSelf) {
+    notice.innerHTML = `<strong>คุณเป็น Requester และ A1 Reviewer</strong><br>` +
+      `เมื่อ Submit ระบบจะบันทึก A1 Reviewed และส่งต่อไปยัง A2: ${esc(a2Name || 'กรุณาเลือก A2')}`;
   }
 }
 function onApproverTitleChange(sel) {
@@ -1000,6 +1053,7 @@ function applyDraftEdit() {
     const memo = JSON.parse(raw);
     if(!memo || memo.status !== 'draft') return;
     localStorage.removeItem('orbit-pmo-edit-draft');
+    _editingSourceMemoNo = memo.sourceMemoNo || null;
 
     // Select type
     const typeBtn = document.querySelector(`.type-btn[onclick*="selectType('${memo.type}"]`) ||
@@ -1010,7 +1064,10 @@ function applyDraftEdit() {
     setTimeout(() => {
       // Store memoNo so saveDraft/submit updates instead of creates
       const memoNoEl = document.getElementById('f-memo-no');
-      if(memoNoEl) memoNoEl.value = memo.memoNo || '';
+      if(memoNoEl) {
+        memoNoEl.value = memo.memoNo || '';
+        if (!memoNoEl.value && typeof setNextMemoNo === 'function') setNextMemoNo();
+      }
 
       const projSel = document.getElementById('f-project');
       if(projSel) {
@@ -1057,6 +1114,7 @@ function applyDraftEdit() {
           else if (titleSel) { titleSel.value = 'other'; if (titleOth) { titleOth.style.display = ''; titleOth.value = a.title || ''; } }
         });
         _updateApproverUI();
+        updateSelfA1Notice();
       }
 
     }, 150);

@@ -3,7 +3,7 @@
 // Replaces localStorage for memos, licenses, devices
 // ─────────────────────────────────────────
 const SUPA_URL = 'https://wokqtivoytzgfuelgeho.supabase.co';
-const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indva3F0aXZveXR6Z2Z1ZWxnZWhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyNTU1NjIsImV4cCI6MjA5NDgzMTU2Mn0.oGoGLusBPA-P3dIDANOrqdgV9aqiAdPhVE9dGcE0H-Q';
+const SUPA_KEY = 'sb_publishable_38ZMjNiHDP4li7dJB6G2Ng_iwqp5Ty0';
 
 // ── Supabase REST helper ──
 async function supaFetch(table, method='GET', body=null, query='') {
@@ -37,9 +37,9 @@ async function loadUserProfilesAsync() {
     if(rows && rows.length){ _userProfilesCache = rows; return rows; }
   } catch(e){ console.warn('user_profiles load failed',e.message); }
   _userProfilesCache = [
-    {full_name:'นาย นวพล งามวรโรจน์สกุล',  title:'ผู้อำนวยการโครงการ',     name_aliases:['นวพล','Nawaphon'],       is_approver:true, is_pmo:true, email:'nawaphon@orbitdigital.co.th'},
-    {full_name:'นาย ปกรณ์ เจียมสกุลทิพย์', title:'ประธานเจ้าหน้าที่บริหาร', name_aliases:['ปกรณ์','CEO','Pakorn'],   is_approver:true, is_pmo:true, email:'pakorn@orbitdigital.co.th'},
-    {full_name:'นางสาว ชื่นกมล สารมานิตย์', title:'ผู้จัดการโครงการ',        name_aliases:['ชื่นกมล','Chuenkamon'],  is_approver:true, is_pmo:true, email:'somying@orbitdigital.co.th'},
+    {id:1, full_name:'นาย นวพล งามวรโรจน์สกุล',  title:'ผู้อำนวยการโครงการ',     name_aliases:['นวพล','Nawaphon'],      is_approver:true, can_review:true, can_approve:true, is_active:true, is_pmo:true, email:'nawaphon@orbitdigital.co.th'},
+    {id:2, full_name:'นาย ปกรณ์ เจียมสกุลทิพย์', title:'ประธานเจ้าหน้าที่บริหาร', name_aliases:['ปกรณ์','CEO','Pakorn'],  is_approver:true, can_review:true, can_approve:true, is_active:true, is_pmo:true, email:'pakorn@orbitdigital.co.th'},
+    {id:3, full_name:'นางสาว ชื่นกมล สารมานิตย์', title:'ผู้จัดการโครงการ',        name_aliases:['ชื่นกมล','Chuenkamon'], is_approver:true, can_review:true, can_approve:true, is_active:true, is_pmo:true, email:'somying@orbitdigital.co.th'},
   ];
   return _userProfilesCache;
 }
@@ -51,7 +51,13 @@ async function loadAuthorityAsync() {
   } catch(e){ console.warn('authority_limits load failed',e.message); }
   return null;
 }
-function getApprovers() { return (_userProfilesCache||[]).filter(u=>u.is_approver); }
+function getApprovers(stage = 'approve') {
+  return (_userProfilesCache||[]).filter(u => {
+    if (u.is_active === false) return false;
+    if (stage === 'review') return u.can_review ?? u.is_approver;
+    return u.can_approve ?? u.is_approver;
+  });
+}
 function findUserByName(name) {
   if(!name||!_userProfilesCache) return null;
   const n = name.trim();
@@ -74,12 +80,144 @@ function getAuthorityLimit(title, memoType) {
 }
 
 // isPMO — single source of truth (moved from budget.js)
+function currentUserProfileId() {
+  const raw = document.getElementById('sb-user-btn')?.dataset?.profileId;
+  const id = Number(raw);
+  return Number.isFinite(id) && id > 0 ? id : null;
+}
+function currentUserProfile() {
+  const id = currentUserProfileId();
+  if (id == null) return null;
+  return (_userProfilesCache || []).find(u => Number(u.id) === id) || null;
+}
 function isPMO() {
-  return (document.getElementById('sb-urole')?.textContent?.trim()||'')==='PMO';
+  const simulated = document.getElementById('sb-user-btn')?.dataset?.isPmo;
+  if (simulated === 'true' || simulated === 'false') return simulated === 'true';
+  const profile = currentUserProfile();
+  if (profile) return profile.is_pmo === true;
+  return (document.getElementById('sb-urole')?.textContent?.trim()||'') === 'PMO';
 }
 // currentUser — single source of truth (moved from pending.js)
 function currentUser() {
   return document.getElementById('sb-uname')?.textContent?.trim()||'';
+}
+
+function profileMatches(profileId, name, targetProfileId = currentUserProfileId(), targetName = currentUser()) {
+  if (profileId != null && targetProfileId != null) return Number(profileId) === Number(targetProfileId);
+  if (!name || !targetName) return false;
+  if (String(name).trim() === String(targetName).trim()) return true;
+  const profile = (_userProfilesCache || []).find(u => Number(u.id) === Number(targetProfileId));
+  return !!profile && (
+    profile.full_name === name ||
+    (profile.name_aliases || []).some(alias => String(alias).toLowerCase() === String(name).toLowerCase())
+  );
+}
+
+function memoCurrentStageIndex(memo) {
+  return memo?.status === 'pending_a2' ? 1 : memo?.status === 'pending_a3' ? 2 : 0;
+}
+function memoCurrentApprover(memo) {
+  return (memo?.approvers || [])[memoCurrentStageIndex(memo)] || null;
+}
+function isMemoRequester(memo) {
+  return profileMatches(memo?.requesterProfileId, memo?.requesterName);
+}
+function isMemoCurrentApprover(memo) {
+  const approver = memoCurrentApprover(memo);
+  if (!approver) return false;
+  return profileMatches(approver.profileId, approver.name);
+}
+function isMemoVisibleInPending(memo) {
+  if (!memo || !['pending','pending_a2','pending_a3'].includes(memo.status)) return false;
+  return isPMO() || isMemoRequester(memo) || isMemoCurrentApprover(memo);
+}
+function canCurrentUserActOnMemo(memo) {
+  if (!memo || !['pending','pending_a2','pending_a3'].includes(memo.status)) return false;
+  if (isMemoRequester(memo)) return false;
+  return isMemoCurrentApprover(memo) || isPMO();
+}
+
+function prepareMemoForSubmission(data, now = new Date().toISOString()) {
+  const approvers = (data.approvers || []).map(a => ({...a}));
+  const requesterProfileId = data.requesterProfileId ?? currentUserProfileId();
+  const requesterName = data.requesterName || currentUser();
+  const selfA1 = !!approvers[0] && profileMatches(
+    approvers[0].profileId,
+    approvers[0].name,
+    requesterProfileId,
+    requesterName
+  );
+  const next = selfA1 ? approvers[1] : approvers[0];
+  if (selfA1) {
+    approvers[0] = {
+      ...approvers[0],
+      status: 'approved',
+      approvedAt: now,
+      approvedBy: requesterName,
+      approvedByProfileId: requesterProfileId,
+      selfReviewed: true,
+    };
+  }
+  const status = next ? (selfA1 ? 'pending_a2' : 'pending') : 'completed';
+  const auditLog = [...(data.auditLog || [])];
+  if (selfA1) {
+    auditLog.push({
+      actor: requesterName,
+      actorProfileId: requesterProfileId,
+      action: 'A1 Self-reviewed on submission',
+      comment: 'Requester is also the A1 reviewer; routed directly to A2',
+      timestamp: now,
+      statusBefore: data.status || 'draft',
+      statusAfter: status,
+    });
+  }
+  return {
+    ...data,
+    requesterProfileId,
+    approvers,
+    auditLog,
+    status,
+    submittedAt: data.submittedAt || now,
+    selfReviewedAt: selfA1 ? now : null,
+    currentApproverProfileId: next?.profileId ?? null,
+    approvedAt: status === 'completed' ? now : null,
+  };
+}
+
+function draftFromMemo(memo, sourceMemoNo = memo?.memoNo) {
+  return {
+    ...memo,
+    id: undefined,
+    memoNo: undefined,
+    date: undefined,
+    status: 'draft',
+    sourceMemoNo,
+    createdAt: undefined,
+    updatedAt: undefined,
+    submittedAt: undefined,
+    approvedAt: undefined,
+    rejectedAt: undefined,
+    cancelledAt: undefined,
+    selfReviewedAt: undefined,
+    approvedBy: undefined,
+    rejectedBy: undefined,
+    cancelledBy: undefined,
+    approvalNote: undefined,
+    rejectionReason: undefined,
+    cancellationReason: undefined,
+    currentApproverProfileId: null,
+    auditLog: [],
+    approvers: (memo?.approvers || []).map(a => ({
+      ...a,
+      status: 'pending',
+      approvedAt: null,
+      approvedBy: null,
+      approvedByProfileId: null,
+      rejectedAt: null,
+      rejectedBy: null,
+      selfReviewed: false,
+    })),
+  };
 }
 
 // ── Memo field mapping: JS camelCase ↔ DB snake_case ──
@@ -93,11 +231,17 @@ function memoToDb(m) {
     to: m.to, date: m.date, total: Number(m.total)||0,
     amount_words: m.amountWords,
     requester_name: m.requesterName, requester_title: m.requesterTitle,
+    requester_profile_id: m.requesterProfileId || null,
+    current_approver_profile_id: m.currentApproverProfileId || null,
+    self_reviewed_at: m.selfReviewedAt || null,
+    source_memo_no: m.sourceMemoNo || null,
     reviewer_name: m.reviewerName, reviewer_title: m.reviewerTitle, reviewer_date: m.reviewerDate,
     approver_name: m.approverName, approver_title: m.approverTitle, approver_date: m.approverDate,
     approvers: m.approvers || [],
     approved_by: m.approvedBy, rejected_by: m.rejectedBy,
     approval_note: m.approvalNote, rejection_reason: m.rejectionReason,
+    cancellation_reason: m.cancellationReason || null,
+    cancelled_by: m.cancelledBy || null,
     pmo_override_note: m.pmoOverrideNote || null,
     pmo_override_by: m.pmoOverrideBy || null,
     fx_rate: m.fxRate || null,
@@ -123,6 +267,7 @@ function memoToDb(m) {
     approval_evidence_url: m.approvalEvidenceUrl || null,
     submitted_at: m.submittedAt || null,
     approved_at: m.approvedAt || null, rejected_at: m.rejectedAt || null,
+    cancelled_at: m.cancelledAt || null,
     created_at: m.createdAt || new Date().toISOString(),
     updated_at: m.updatedAt || new Date().toISOString(),
   };
@@ -134,11 +279,17 @@ function dbToMemo(r) {
     status: r.status, project: r.project, subject: r.subject, reason: r.reason,
     to: r.to, date: r.date, total: Number(r.total)||0, amountWords: r.amount_words,
     requesterName: r.requester_name, requesterTitle: r.requester_title,
+    requesterProfileId: r.requester_profile_id || null,
+    currentApproverProfileId: r.current_approver_profile_id || null,
+    selfReviewedAt: r.self_reviewed_at || null,
+    sourceMemoNo: r.source_memo_no || null,
     reviewerName: r.reviewer_name, reviewerTitle: r.reviewer_title, reviewerDate: r.reviewer_date,
     approverName: r.approver_name, approverTitle: r.approver_title, approverDate: r.approver_date,
     approvers: r.approvers || [],
     approvedBy: r.approved_by, rejectedBy: r.rejected_by,
     approvalNote: r.approval_note, rejectionReason: r.rejection_reason,
+    cancellationReason: r.cancellation_reason || null,
+    cancelledBy: r.cancelled_by || null,
     pmoOverrideNote: r.pmo_override_note || null, pmoOverrideBy: r.pmo_override_by || null,
     entClient: r.ent_client || null, entDate: r.ent_date || null,
     entTime: r.ent_time || null, entPlace: r.ent_place || null, entPeople: r.ent_people || null,
@@ -156,6 +307,7 @@ function dbToMemo(r) {
     pmoEvidenceUrl:      r.pmo_evidence_url      || null,   // available after ALTER TABLE
     approvalEvidenceUrl: r.approval_evidence_url || null,   // available after ALTER TABLE
     submittedAt: r.submitted_at, approvedAt: r.approved_at, rejectedAt: r.rejected_at,
+    cancelledAt: r.cancelled_at || null,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
@@ -234,7 +386,6 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   // completed and rejected memos cannot be changed except by PMO override
   const isPmoOverride = extra.pmoOverrideNote || extra.pmoOverrideBy;
   const isTerminal    = memo.status === 'completed' || memo.status === 'rejected' || memo.status === 'cancelled';
-  // rejected_revision is NOT terminal — it's a soft reject that allows re-submission
   if (isTerminal && !isPmoOverride) return memo;
 
   // ── Approver order enforcement ──
@@ -256,42 +407,54 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
 
     updated.approvers = approvers.map((a, i) =>
       i === approvingIdx
-        ? { ...a, status: 'approved', approvedAt: now, approvedBy: extra.approvedBy || currentUser() }
+        ? {
+            ...a,
+            status: 'approved',
+            approvedAt: now,
+            approvedBy: extra.approvedBy || currentUser(),
+            approvedByProfileId: currentUserProfileId(),
+          }
         : a
     );
 
     if (nextIdx < approvers.length && approvers[nextIdx]) {
       // Still more approvers
       updated.status = nextIdx === 1 ? 'pending_a2' : 'pending_a3';
+      updated.currentApproverProfileId = approvers[nextIdx].profileId || null;
+      updated.approvedAt = null;
     } else {
       // All done
       updated.status    = 'completed';
       updated.approvedAt = now;
+      updated.currentApproverProfileId = null;
     }
-    updated.approvedAt = now;
   } else if (status === 'cancelled') {
     updated.cancelledAt = extra.cancelledAt || now;
+    updated.currentApproverProfileId = null;
   } else if (status === 'rejected') {
     updated.rejectedAt = now;
+    updated.currentApproverProfileId = null;
     const pendingIdx = approvers.findIndex(a => !a.status || a.status === 'pending');
     if (pendingIdx >= 0) {
       updated.approvers = approvers.map((a, i) =>
-        i === pendingIdx ? { ...a, status: 'rejected', rejectedAt: now, rejectedBy: extra.rejectedBy || currentUser() } : a
+        i === pendingIdx ? {
+          ...a,
+          status: 'rejected',
+          rejectedAt: now,
+          rejectedBy: extra.rejectedBy || currentUser(),
+          rejectedByProfileId: currentUserProfileId(),
+        } : a
       );
     }
-  } else if (status === 'rejected_revision') {
-    // Soft reject — send back for revision, do NOT mark approvers as rejected
-    // keep approvers as-is so re-submit can reset them cleanly
-    updated.rejectedAt = now;
-  } else if (status === 'pending' && extra.resubmittedAt) {
-    // Re-submit after rejected_revision — reset all approver statuses to pending
-    updated.approvers = approvers.map(a => ({
-      ...a, status: 'pending', approvedAt: null, approvedBy: null,
-      rejectedAt: null, rejectedBy: null,
-    }));
-    updated.rejectionReason = null;
-    updated.rejectedBy      = null;
-    updated.rejectedAt      = null;
+  }
+
+  if (updated.status === 'completed') {
+    updated.approvedAt = updated.approvedAt || now;
+    updated.currentApproverProfileId = null;
+  } else if (['pending','pending_a2','pending_a3'].includes(updated.status)) {
+    updated.currentApproverProfileId = memoCurrentApprover(updated)?.profileId || null;
+  } else if (['rejected','cancelled'].includes(updated.status)) {
+    updated.currentApproverProfileId = null;
   }
 
   // Sync to Supabase
@@ -305,6 +468,7 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
         updated_at: now,
         approvers: updated.approvers,
         audit_log: extra.auditLog || updated.auditLog || memo.auditLog || [],
+        current_approver_profile_id: updated.currentApproverProfileId || null,
         ...Object.fromEntries(
           Object.entries(extra)
             .filter(([k]) => !PENDING_COLUMNS.has(k))
@@ -323,6 +487,9 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   const cacheIdx = _memCache.findIndex(m => m.memoNo === memoNo);
   if (cacheIdx >= 0) _memCache[cacheIdx] = updated;
   else _memCache.unshift(updated);
+  // Keep the offline backup current as well. Without this, status changes made
+  // while Supabase is unavailable disappear on the next page load.
+  storeMemos(_memCache);
 
   // Side effects on completion
   if (updated.status === 'completed') {
@@ -413,7 +580,8 @@ const HAS_LS = canUseLocalStorage();
 
 function loadMemos() {
   // Prefer in-memory cache (populated from Supabase by loadMemosAsync on app init)
-  if (_memCache && _memCache.length > 0) return _memCache;
+  // An empty array is a valid, authoritative result from Supabase.
+  if (_memCache !== null) return _memCache;
   // Offline fallback: localStorage
   if (!HAS_LS) return _memMemos;
   try { const p = JSON.parse(localStorage.getItem(MEMO_KEY)||'[]'); return Array.isArray(p)?p:[]; }
@@ -1002,7 +1170,9 @@ function initSidebarState() {
   const sb = document.querySelector('.sidebar');
   if (!sb) return;
   try {
-    if (localStorage.getItem('orbit-sb-collapsed') === '1') sb.classList.add('collapsed');
+    const savedState = localStorage.getItem('orbit-sb-collapsed');
+    const compactScreen = window.matchMedia?.('(max-width: 700px)').matches;
+    if (savedState === '1' || (savedState === null && compactScreen)) sb.classList.add('collapsed');
   } catch(e) {}
 }
 
@@ -1026,6 +1196,7 @@ function initApp() {
     typeof loadBudgetsAsync        === 'function' ? loadBudgetsAsync()        : Promise.resolve(),
     typeof loadDevicesAsync        === 'function' ? loadDevicesAsync()        : Promise.resolve(),
     typeof loadPurchaseOrdersAsync === 'function' ? loadPurchaseOrdersAsync() : Promise.resolve(),
+    typeof initSettings            === 'function' ? initSettings()            : Promise.resolve(),
   ]).then(() => {
     renderPendingMemos();
     renderHistoryMemos();

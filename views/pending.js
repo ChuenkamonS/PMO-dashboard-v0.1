@@ -51,6 +51,7 @@ function appendAuditLog(memos, memoNo, action, comment, extra = {}) {
   if(!memos[idx].auditLog) memos[idx].auditLog = [];
   memos[idx].auditLog.push({
     actor:        currentUser(),
+    actorProfileId: typeof currentUserProfileId === 'function' ? currentUserProfileId() : null,
     action,
     comment:      comment || '',
     timestamp:    new Date().toISOString(),
@@ -93,7 +94,7 @@ function renderPendingMemos() {
   populatePendingFilters();
 
   const allMemos = loadMemos();
-  const pending  = allMemos.filter(m => ['pending','pending_a2','pending_a3','rejected_revision'].includes(m.status));
+  const pending  = allMemos.filter(isMemoVisibleInPending);
 
   // Sidebar badge
   const badge = document.querySelector('#memo-sub .sb-badge');
@@ -116,7 +117,7 @@ function renderPendingMemos() {
 
 // ── Export Pending CSV ──────────────────────────────────────────
 function exportPendingCSV() {
-  const memos = loadMemos().filter(m => ['pending','pending_a2','pending_a3'].includes(m.status));
+  const memos = loadMemos().filter(isMemoVisibleInPending);
   const headers = ['เลข Memo','ประเภท','โครงการ','ผู้ขอ','ตำแหน่ง','วงเงิน','สถานะ',
     'A1 ชื่อ','A1 ตำแหน่ง','A2 ชื่อ','A2 ตำแหน่ง','A3 ชื่อ','A3 ตำแหน่ง',
     'วันที่สร้าง','วันที่อัปเดต','เหตุผล'];
@@ -136,7 +137,7 @@ function renderPendingContent() {
   if (!list) return;
 
   // Inbox = pending only
-  let memos = loadMemos().filter(m => ['pending','pending_a2','pending_a3','rejected_revision'].includes(m.status));
+  let memos = loadMemos().filter(isMemoVisibleInPending);
   if(_pendingSearch) {
     const s = _pendingSearch.toLowerCase();
     memos = memos.filter(m => (m.memoNo||'').toLowerCase().includes(s)||(m.project||'').toLowerCase().includes(s)||(m.reviewerName||'').toLowerCase().includes(s));
@@ -155,7 +156,7 @@ function renderPendingContent() {
   });
 
   if(!memos.length) {
-    list.innerHTML = `<div class="placeholder" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:38px 20px"><h3>ไม่มี Memo ที่รออนุมัติ</h3><p>สร้าง Memo แล้วกด Save & Generate PDF เพื่อให้รายการมาแสดงที่นี่</p></div>`;
+    list.innerHTML = `<div class="placeholder" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:38px 20px"><h3>ไม่มี Memo ที่รออนุมัติ</h3><p>Memo ที่คุณส่งหรือรายการที่รอคุณอนุมัติจะแสดงที่นี่</p></div>`;
     return;
   }
 
@@ -213,14 +214,12 @@ const TYPE_TEXT_PENDING  = { sl:'#0C447C', hw:'#2C2C2A', int:'#27500A', ent:'#63
 function buildPendingRow(memo) {
   const days    = pendingAge(memo);
   const amt     = Number(memo.total)||0;
-  const stage   = memo.status === 'pending_a2' ? 'Pending A2' : 'Pending A1';
-  const isOwn   = (memo.requesterName||'') === currentUser();
-  const _user   = currentUser();
+  const stage   = memo.status === 'pending_a3' ? 'Pending A3' : memo.status === 'pending_a2' ? 'Pending A2' : 'Pending A1';
+  const isOwn   = isMemoRequester(memo);
   const _isPMOUser = typeof isPMO === 'function' && isPMO();
   const _stage  = memo.status === 'pending_a2' ? 1 : memo.status === 'pending_a3' ? 2 : 0;
   const _stageApprover = (memo.approvers||[])[_stage];
-  // canAct: must be the stage approver AND not the requester (even if PMO)
-  const canAct  = !isOwn && _stageApprover && _stageApprover.name === _user && _stageApprover.status !== 'approved';
+  const canAct  = canCurrentUserActOnMemo(memo) && !_isPMOUser;
   // PMO override: can approve any memo that is NOT their own
   const canActAsPMO = !isOwn && _isPMOUser;
   const accent  = TYPE_COLOR_PENDING[memo.type] || '#888780';
@@ -229,9 +228,9 @@ function buildPendingRow(memo) {
   const typeTxt = TYPE_TEXT_PENDING[memo.type]  || '#444441';
   const waitCls = days>7?'background:#FCEBEB;color:#791F1F':days>3?'background:#FAEEDA;color:#633806':'background:#EAF3DE;color:#27500A';
   const statusCls = memo.status==='completed'?'background:#EAF3DE;color:#27500A':memo.status==='rejected'?'background:#FCEBEB;color:#791F1F':'background:#EEEDFE;color:#3C3489';
-  const statusLbl = memo.status==='completed'?'Completed':memo.status==='rejected'?'Rejected':memo.status==='rejected_revision'?'↺ รอแก้ไข':stage;
+  const statusLbl = memo.status==='completed'?'Completed':memo.status==='rejected'?'Rejected':stage;
 
-  const isPending  = memo.status === 'pending' || memo.status === 'pending_a2';
+  const isPending  = ['pending','pending_a2','pending_a3'].includes(memo.status);
   const isOwner    = isOwn;
   const _pmo       = typeof isPMO === 'function' && isPMO();
 
@@ -343,8 +342,16 @@ function confirmApprove() {
   const note    = document.getElementById('approve-note').value.trim();
   const evidenceUrl = document.getElementById('approve-evidence-url')?.value || '';
   const memos   = loadMemos();
+  const allowedTargets = targets.filter(memoNo => {
+    const memo = memos.find(m => m.memoNo === memoNo);
+    return memo && canCurrentUserActOnMemo(memo);
+  });
+  if (!allowedTargets.length) {
+    alert('คุณไม่มีสิทธิ์อนุมัติรายการที่เลือกในขั้นตอนปัจจุบัน');
+    return;
+  }
 
-  targets.forEach(memoNo => {
+  allowedTargets.forEach(memoNo => {
     const memo      = memos.find(m => m.memoNo === memoNo);
     if (!memo) return;
     const user      = currentUser();
@@ -371,7 +378,7 @@ function confirmApprove() {
   });
   storeMemos(memos);
   closeApproveModal();
-  alert(`✓ Approved ${targets.length} รายการแล้ว`);
+  alert(`✓ Approved ${allowedTargets.length} รายการแล้ว`);
 }
 
 // ── Reject Modal ──
@@ -394,19 +401,26 @@ function confirmReject() {
   const full  = reason==='Other' ? (comment||'Other') : (comment?`${reason}: ${comment}`:reason);
   const memos = loadMemos();
   const user  = currentUser();
-  // rejected_revision = sent back for edit (not final rejection)
-  // requester can re-submit without creating a new memo
   const now = new Date().toISOString();
-  targets.forEach(memoNo => {
+  const allowedTargets = targets.filter(memoNo => {
+    const memo = memos.find(m => m.memoNo === memoNo);
+    return memo && canCurrentUserActOnMemo(memo);
+  });
+  if (!allowedTargets.length) {
+    alert('คุณไม่มีสิทธิ์ Reject รายการที่เลือกในขั้นตอนปัจจุบัน');
+    return;
+  }
+  allowedTargets.forEach(memoNo => {
     const idx = memos.findIndex(m=>m.memoNo===memoNo);
     if(idx<0) return;
-    appendAuditLog(memos, memoNo, `Rejected — ส่งกลับแก้ไข by ${user}`, full, {
+    appendAuditLog(memos, memoNo, `Rejected by ${user}`, full, {
       statusBefore: memos[idx].status,
-      statusAfter:  'rejected_revision',
+      statusAfter:  'rejected',
     });
     // Update status IN MEMORY before storeMemos so localStorage is immediately correct
     memos[idx] = { ...memos[idx],
-      status:          'rejected_revision',
+      status:          'rejected',
+      currentApproverProfileId: null,
       rejectionReason: full,
       rejectedBy:      user,
       rejectedAt:      now,
@@ -414,9 +428,9 @@ function confirmReject() {
     };
   });
   storeMemos(memos);
-  targets.forEach(memoNo => {
+  allowedTargets.forEach(memoNo => {
     const updatedAuditLog = memos.find(m=>m.memoNo===memoNo)?.auditLog || [];
-    updateMemoStatusAsync(memoNo, 'rejected_revision', {
+    updateMemoStatusAsync(memoNo, 'rejected', {
       rejectionReason: full,
       rejectedBy:      user,
       rejectedAt:      now,
@@ -426,7 +440,7 @@ function confirmReject() {
   closeRejectModal();
   renderPendingMemos();
   renderHistoryMemos();
-  alert(`ส่งกลับแก้ไข ${targets.length} รายการแล้ว — ผู้ขอจะเห็นเหตุผลและสามารถแก้ไขแล้ว Re-submit ได้`);
+  alert(`✓ Rejected ${allowedTargets.length} รายการแล้ว — รายการย้ายไป History`);
 }
 
 // ── Detail Modal ──
@@ -447,14 +461,14 @@ function openDetailModal(memoNo) {
   const _st       = memo.status || '';
   const isPending = _st === 'pending' || _st === 'pending_a2' || _st === 'pending_a3';
   const isDraft   = _st === 'draft';
-  const isOwn     = (memo.requesterName || '') === currentUser();
+  const isOwn     = isMemoRequester(memo);
   const _isPMO    = typeof isPMO === 'function' && isPMO();
 
   // canApprove: pending AND current user matches current stage's approver
   const _dUser    = currentUser();
   const _dStage   = _st==='pending_a2' ? 1 : _st==='pending_a3' ? 2 : 0;
   const _dApprover = (memo.approvers||[])[_dStage];
-  const canApprove = isPending && _dApprover && _dApprover.name===_dUser && _dApprover.status!=='approved';
+  const canApprove = isPending && canCurrentUserActOnMemo(memo) && !_isPMO;
   // PMO can always approve as override
   const canApproveAsPMO = isPending && _isPMO && !isOwn;  // PMO cannot approve own memo
   // canCancel: pending memo AND current user IS the requester OR draft owner
@@ -468,9 +482,6 @@ function openDetailModal(memoNo) {
     ` : ''}
     ${canCancel ? `
       <button class="btn-sm" style="color:var(--red)" onclick="closeDetailModal();cancelMemo('${_no}')">✕ Cancel</button>
-    ` : ''}
-    ${memo.status === 'rejected_revision' && isOwn ? `
-      <button class="btn-primary" onclick="closeDetailModal();resubmitMemo('${_no}')" style="background:var(--amber,#d97706);border-color:var(--amber,#d97706)">↺ Re-submit (แก้ไขแล้ว)</button>
     ` : ''}
     ${isDraft ? `
       <button class="btn-sm" style="color:var(--blue)" onclick="closeDetailModal();if(typeof editDraft==='function')editDraft('${_no}')">✎ Edit Draft</button>
@@ -821,46 +832,14 @@ function saveBudgetSettings() {
   });
 }
 
-// ── backward compat ──
-
-
-// ── Re-submit after rejection (no new memo needed) ──
-function resubmitMemo(memoNo) {
-  const memos = loadMemos();
-  const memo  = memos.find(m=>m.memoNo===memoNo);
-  if(!memo) return;
-  if(memo.status !== 'rejected_revision') { alert('Memo นี้ไม่ได้อยู่ในสถานะรอแก้ไข'); return; }
-  if(!confirm(`Re-submit Memo "${memoNo}"?
-ระบบจะรีเซ็ต Approval กลับต้น — Approver ทุกคนต้อง approve ใหม่`)) return;
-  const user = currentUser();
-  // Reset all approvers to pending
-  const resetApprovers = (memo.approvers||[]).map(a=>({...a, status:'pending', approvedAt:null, approvedBy:null}));
-  appendAuditLog(memos, memoNo, `Re-submitted by ${user}`, 'แก้ไขและส่งใหม่', {
-    statusBefore: 'rejected_revision', statusAfter: 'pending',
-  });
-  const idx = memos.findIndex(m=>m.memoNo===memoNo);
-  memos[idx] = {...memo, approvers:resetApprovers, status:'pending',
-    rejectionReason:null, rejectedBy:null, rejectedAt:null,
-    resubmittedAt:new Date().toISOString(), resubmittedBy:user,
-    updatedAt:new Date().toISOString()};
-  storeMemos(memos);
-  const resubTime = new Date().toISOString();
-  updateMemoStatusAsync(memoNo, 'pending', {
-    approvers:      resetApprovers,
-    rejectionReason:null, rejectedBy:null, rejectedAt:null,
-    resubmittedAt:  resubTime,   // signals updateMemoStatusAsync to reset approvers
-    resubmittedBy:  user,
-    auditLog:       memos[idx].auditLog,
-  });
-  closeDetailModal();
-  renderPendingMemos();
-  renderHistoryMemos();
-  alert(`✓ Re-submitted "${memoNo}" เรียบร้อย — Approver จะเห็น memo ใน Pending inbox`);
-}
 // ── Cancel Memo (by requester) ──
 function cancelMemo(memoNo) {
   const memo = loadMemos().find(m => m.memoNo === memoNo);
   if(!memo) return;
+  if (!isMemoRequester(memo) || !['pending','pending_a2','pending_a3'].includes(memo.status)) {
+    alert('ยกเลิกได้เฉพาะ Memo ที่คุณเป็นผู้ขอและยังอยู่ระหว่างอนุมัติ');
+    return;
+  }
   if(!confirm(`ยกเลิก Memo "${memoNo}"?\nหลังจากยกเลิกแล้วจะไม่สามารถกู้คืนได้`)) return;
   const user = currentUser();
   const memos = loadMemos();

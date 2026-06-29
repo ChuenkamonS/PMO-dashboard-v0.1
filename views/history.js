@@ -660,9 +660,9 @@ function openHistoryDetail(memoNo) {
   const isRejected  = _st === 'rejected';
   const isCancelled = _st === 'cancelled';
   const isDraft     = _st === 'draft';
-  const isOwn       = (memo.requesterName || '') === (typeof currentUser === 'function' ? currentUser() : '');
-  const canApprove  = isPending && !isOwn; // approver, not own memo
-  const canCancel   = isPending && isOwn;  // own pending memo
+  const isOwn       = typeof isMemoRequester === 'function' ? isMemoRequester(memo) : false;
+  const canApprove  = isPending && typeof canCurrentUserActOnMemo === 'function' && canCurrentUserActOnMemo(memo);
+  const canCancel   = isPending && isOwn;
 
   acts.innerHTML = `
     ${canApprove ? `
@@ -675,7 +675,10 @@ function openHistoryDetail(memoNo) {
     ${!isDraft ? `
       <button class="btn-sm" type="button" onclick="if(typeof downloadMemoPdf==='function'){downloadMemoPdf(loadMemos().find(m=>m.memoNo==='${_no}'))}" style="color:var(--blue)">⬇ Download PDF</button>
     ` : ''}
-    ${(isCompleted||isRejected||isCancelled||isPending) && !isDraft ? `
+    ${isRejected ? `
+      <button class="btn-sm" type="button" onclick="closeDetailModal();reeditRejectedMemo('${_no}')">✎ Re-edit as New Draft</button>
+    ` : ''}
+    ${(isCompleted||isCancelled||isPending) && !isDraft ? `
       <button class="btn-sm" type="button" onclick="closeDetailModal();duplicateMemo('${_no}')">⊕ Duplicate</button>
     ` : ''}
     ${isDraft ? `
@@ -777,6 +780,10 @@ function histActionButtons(memo) {
       <button type="button" class="btn-sm hist-act-btn" data-hist-action="draft-delete"
         data-memo="${no}" title="ลบ Draft" style="color:var(--red);padding:3px 7px;font-size:11px">✕</button>
     ` : ''}
+    ${isRejected ? `
+      <button type="button" class="btn-sm hist-act-btn" data-hist-action="reedit-rejected"
+        data-memo="${no}" title="Re-edit as New Draft" style="color:var(--blue);padding:3px 7px;font-size:11px">✎</button>
+    ` : ''}
   </div>`;
 }
 
@@ -795,6 +802,7 @@ function handleHistoryTableClick(e) {
     else if (action === 'draft-delete') {
       if (typeof deleteDraft === 'function') deleteDraft(memoNo);
     }
+    else if (action === 'reedit-rejected') reeditRejectedMemo(memoNo);
     else if (action === 'duplicate') duplicateMemo(memoNo);
     return;
   }
@@ -879,19 +887,19 @@ function duplicateMemo(memoNo) {
   if (!memo) return;
   if (!confirm(`Duplicate "${memoNo}" เป็น Draft ใหม่?`)) return;
   try {
-    localStorage.setItem('orbit-pmo-edit-draft', JSON.stringify({
-      ...memo,
-      id: undefined, memoNo: undefined, // will be regenerated
-      date: undefined,                   // date must be re-selected
-      status: 'draft',
-      createdAt: undefined, updatedAt: undefined,
-      approvedAt: undefined, rejectedAt: undefined, cancelledAt: undefined,
-      approvedBy: undefined, rejectedBy: undefined, cancelledBy: undefined,
-      approvalNote: undefined, rejectionReason: undefined,
-      auditLog: [],
-      approvers: (memo.approvers||[]).map(a => ({...a, status:'pending', approvedAt:null, approvedBy:null, rejectedAt:null, rejectedBy:null})),
-    }));
+    localStorage.setItem('orbit-pmo-edit-draft', JSON.stringify(draftFromMemo(memo)));
   } catch(e) {}
+  swView('create', document.querySelector('.sb-sub-item[onclick*="create"]'), 'Create Memo');
+  setTimeout(() => { if (typeof applyDraftEdit === 'function') applyDraftEdit(); }, 100);
+}
+
+function reeditRejectedMemo(memoNo) {
+  const memo = loadMemos().find(m => m.memoNo === memoNo);
+  if (!memo || memo.status !== 'rejected') return;
+  if (!confirm(`เปิด Memo "${memoNo}" เพื่อ Re-edit เป็น Draft ใหม่?\nMemo ที่ถูก Reject จะยังคงอยู่ใน History`)) return;
+  try {
+    localStorage.setItem('orbit-pmo-edit-draft', JSON.stringify(draftFromMemo(memo, memoNo)));
+  } catch(e) { return; }
   swView('create', document.querySelector('.sb-sub-item[onclick*="create"]'), 'Create Memo');
   setTimeout(() => { if (typeof applyDraftEdit === 'function') applyDraftEdit(); }, 100);
 }

@@ -293,8 +293,10 @@ async function renderUsersTable() {
       <thead><tr style="background:var(--bg)">
         <th style="padding:6px 10px;text-align:left;border-bottom:1px solid var(--border)">ชื่อ-นามสกุล</th>
         <th style="padding:6px 10px;text-align:left;border-bottom:1px solid var(--border)">ตำแหน่ง</th>
-        <th style="padding:6px 10px;text-align:center;border-bottom:1px solid var(--border)">Approver</th>
+        <th style="padding:6px 10px;text-align:center;border-bottom:1px solid var(--border)">A1 Review</th>
+        <th style="padding:6px 10px;text-align:center;border-bottom:1px solid var(--border)">A2/A3 Approve</th>
         <th style="padding:6px 10px;text-align:center;border-bottom:1px solid var(--border)">PMO</th>
+        <th style="padding:6px 10px;text-align:center;border-bottom:1px solid var(--border)">Active</th>
         <th style="padding:6px 10px;border-bottom:1px solid var(--border)">Email</th>
         <th style="padding:6px 10px;border-bottom:1px solid var(--border)"></th>
       </tr></thead>
@@ -304,10 +306,16 @@ async function renderUsersTable() {
             <td style="padding:7px 10px;border-bottom:1px solid var(--border)">${esc(u.full_name)}</td>
             <td style="padding:7px 10px;border-bottom:1px solid var(--border)">${esc(u.title||'')}</td>
             <td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:center">
-              <input type="checkbox" data-uid="${u.id}" data-field="is_approver" ${u.is_approver?'checked':''} onchange="toggleUserField(this)">
+              <input type="checkbox" data-uid="${u.id}" data-field="can_review" ${(u.can_review??u.is_approver)?'checked':''} onchange="toggleUserField(this)">
+            </td>
+            <td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:center">
+              <input type="checkbox" data-uid="${u.id}" data-field="can_approve" ${(u.can_approve??u.is_approver)?'checked':''} onchange="toggleUserField(this)">
             </td>
             <td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:center">
               <input type="checkbox" data-uid="${u.id}" data-field="is_pmo" ${u.is_pmo?'checked':''} onchange="toggleUserField(this)">
+            </td>
+            <td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:center">
+              <input type="checkbox" data-uid="${u.id}" data-field="is_active" ${u.is_active!==false?'checked':''} onchange="toggleUserField(this)">
             </td>
             <td style="padding:7px 10px;border-bottom:1px solid var(--border);color:var(--text-3)">${esc(u.email||'')}</td>
             <td style="padding:7px 10px;border-bottom:1px solid var(--border)">
@@ -366,12 +374,18 @@ function _openUserModal(user) {
         <label style="font-size:11px;font-weight:600">Email</label>
         <input id="um-email" class="ri" type="email" style="margin-top:4px" value="${esc(user?.email||'')}" placeholder="name@orbitdigital.co.th">
       </div>
-      <div style="display:flex;gap:20px;margin-bottom:16px">
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px">
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
-          <input type="checkbox" id="um-is-approver" ${user?.is_approver?'checked':''}> เป็น Approver
+          <input type="checkbox" id="um-can-review" ${(user?.can_review??user?.is_approver)?'checked':''}> เป็น A1 Reviewer
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="um-can-approve" ${(user?.can_approve??user?.is_approver)?'checked':''}> เป็น A2/A3 Approver
         </label>
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
           <input type="checkbox" id="um-is-pmo" ${user?.is_pmo?'checked':''}> เป็น PMO
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="um-is-active" ${user?.is_active!==false?'checked':''}> Active
         </label>
       </div>
       <div style="display:flex;justify-content:flex-end;gap:10px">
@@ -393,8 +407,12 @@ async function saveUserFromModal(uid) {
     full_name:   fullName, title,
     name_aliases: aliases,
     email:       document.getElementById('um-email')?.value.trim()||null,
-    is_approver: document.getElementById('um-is-approver')?.checked||false,
+    can_review:  document.getElementById('um-can-review')?.checked||false,
+    can_approve: document.getElementById('um-can-approve')?.checked||false,
+    is_approver: (document.getElementById('um-can-review')?.checked||false) ||
+                 (document.getElementById('um-can-approve')?.checked||false),
     is_pmo:      document.getElementById('um-is-pmo')?.checked||false,
+    is_active:   document.getElementById('um-is-active')?.checked!==false,
     updated_at:  new Date().toISOString(),
   };
   try {
