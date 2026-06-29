@@ -24,6 +24,64 @@ async function supaFetch(table, method='GET', body=null, query='') {
   return text ? JSON.parse(text) : null;
 }
 
+// ══════════════════════════════════════════════════════════════════
+// GLOBAL: User profiles & authority limits cache
+// ══════════════════════════════════════════════════════════════════
+let _userProfilesCache = null;
+let _authorityCache    = null;
+
+async function loadUserProfilesAsync() {
+  if(_userProfilesCache) return _userProfilesCache;
+  try {
+    const rows = await supaFetch('user_profiles','GET',null,'?order=full_name.asc');
+    if(rows && rows.length){ _userProfilesCache = rows; return rows; }
+  } catch(e){ console.warn('user_profiles load failed',e.message); }
+  _userProfilesCache = [
+    {full_name:'นาย นวพล งามวรโรจน์สกุล',  title:'ผู้อำนวยการโครงการ',     name_aliases:['นวพล','Nawaphon'],       is_approver:true, is_pmo:true, email:'nawaphon@orbitdigital.co.th'},
+    {full_name:'นาย ปกรณ์ เจียมสกุลทิพย์', title:'ประธานเจ้าหน้าที่บริหาร', name_aliases:['ปกรณ์','CEO','Pakorn'],   is_approver:true, is_pmo:true, email:'pakorn@orbitdigital.co.th'},
+    {full_name:'นางสาว ชื่นกมล สารมานิตย์', title:'ผู้จัดการโครงการ',        name_aliases:['ชื่นกมล','Chuenkamon'],  is_approver:true, is_pmo:true, email:'somying@orbitdigital.co.th'},
+  ];
+  return _userProfilesCache;
+}
+async function loadAuthorityAsync() {
+  if(_authorityCache) return _authorityCache;
+  try {
+    const rows = await supaFetch('authority_limits','GET',null,'?order=title.asc');
+    if(rows && rows.length){ _authorityCache = rows; return rows; }
+  } catch(e){ console.warn('authority_limits load failed',e.message); }
+  return null;
+}
+function getApprovers() { return (_userProfilesCache||[]).filter(u=>u.is_approver); }
+function findUserByName(name) {
+  if(!name||!_userProfilesCache) return null;
+  const n = name.trim();
+  return _userProfilesCache.find(u=>u.full_name===n||(u.name_aliases||[]).some(a=>a.toLowerCase()===n.toLowerCase()))||null;
+}
+function getAuthorityLimit(title, memoType) {
+  if(_authorityCache){
+    const r = _authorityCache.find(r=>r.title===title&&r.memo_type===memoType);
+    if(r) return Number(r.limit_thb)||0;
+  }
+  const fb={
+    'ประธานเจ้าหน้าที่บริหาร':          {sl:2000000,hw:2000000,int:0,ent:150000,dep:2000000},
+    'ประธานเจ้าหน้าที่สายการเงิน (CFO)':{sl:1000000,hw:500000, int:0,ent:50000, dep:500000},
+    'ผู้อำนวยการ (Team Director)':       {sl:500000, hw:500000, int:0,ent:50000, dep:500000},
+    'ผู้อำนวยการโครงการ':                {sl:500000, hw:500000, int:0,ent:50000, dep:500000},
+    'Senior Manager / Manager':          {sl:50000,  hw:50000,  int:0,ent:10000, dep:50000},
+    'Team Leader':                       {sl:30000,  hw:30000,  int:0,ent:5000,  dep:30000},
+  };
+  return fb[title]?.[memoType]??0;
+}
+
+// isPMO — single source of truth (moved from budget.js)
+function isPMO() {
+  return (document.getElementById('sb-urole')?.textContent?.trim()||'')==='PMO';
+}
+// currentUser — single source of truth (moved from pending.js)
+function currentUser() {
+  return document.getElementById('sb-uname')?.textContent?.trim()||'';
+}
+
 // ── Memo field mapping: JS camelCase ↔ DB snake_case ──
 function memoToDb(m) {
   return {
@@ -469,20 +527,13 @@ function renderMemoPdf(data) {
     return `${MONTHS_TH[parseInt(m[2],10)-1]} ${parseInt(m[1])+543}`;
   }
 
-  // ── Authority master table ──
-  // Looks up spending limit by last approver's title and memo type
-  const AUTHORITY_TABLE = {
-    'ประธานเจ้าหน้าที่บริหาร': { sl:2000000, hw:2000000, ent:150000, int:2000000, dep:2000000 },
-    'ผู้อำนวยการโครงการ':     { sl:500000,  hw:500000,  ent:150000, int:500000,  dep:500000  },
-    'ผู้อำนวยการ':             { sl:500000,  hw:500000,  ent:150000, int:500000,  dep:500000  },
-  };
+  // ── Authority — dynamic from Supabase (_authorityCache) with fallback ──
   function getAuthority(memoType) {
     const approvers = data.approvers || [];
-    const lastApprover = approvers.length > 0 ? approvers[approvers.length-1] : null;
-    const title = lastApprover?.title || data.approverTitle || '';
-    const row = AUTHORITY_TABLE[title] || AUTHORITY_TABLE['ประธานเจ้าหน้าที่บริหาร'];
-    const limit = row[memoType] || 2000000;
-    return { title: title || 'ประธานเจ้าหน้าที่บริหาร', limit };
+    const finalApprover = approvers.length > 0 ? approvers[approvers.length-1] : null;
+    const title = finalApprover?.title || data.approverTitle || 'ประธานเจ้าหน้าที่บริหาร';
+    const limit = getAuthorityLimit(title, memoType);
+    return { title, limit };
   }
   function fmtLimit(n) { return (Number(n)||0).toLocaleString('th-TH',{maximumFractionDigits:0}); }
 
@@ -503,6 +554,7 @@ function renderMemoPdf(data) {
   const totalNoSign = data.total ? (Number(data.total)||0).toLocaleString('th-TH',{maximumFractionDigits:0}) : '-';
 
   const closingMap = {
+    // SL — ค่าบริการ พ.ศ. 2566
     sl: data.total ? (function(){
       const slSection = (data.sections||[]).find(s => s.title === 'รายการ Software');
       let totalSeats = 0, months = 12;
@@ -521,20 +573,28 @@ function renderMemoPdf(data) {
       const auth = getAuthority('sl');
       const seatsStr  = totalSeats ? `จำนวนรวมทั้งหมด ${totalSeats} Seats ` : '';
       const monthsStr = `ระยะเวลา ${months} เดือน `;
-      return `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณสำหรับค่าใช้จ่ายดังกล่าว รวมเป็นจำนวนเงินไม่เกิน ${amtStr} ${seatsStr}${monthsStr}อ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงินที่มี (การตั้งงบประมาณไว้) หมวดการชำระค่าบริการ ซึ่งให้อำนาจแก่${esc(auth.title)}ไม่เกิน ${fmtLimit(auth.limit)} บาท`;
+      const limitStr  = auth.limit>0 ? `ซึ่งให้อำนาจแก่${esc(auth.title)}ไม่เกิน ${fmtLimit(auth.limit)} บาท` : `ซึ่งให้อำนาจแก่${esc(auth.title)}ในการอนุมัติงบประมาณ`;
+      return `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณสำหรับค่าใช้จ่ายดังกล่าว รวมเป็นจำนวนเงินไม่เกิน ${amtStr} ${seatsStr}${monthsStr}อ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงินที่มี (การตั้งงบประมาณไว้) หมวดการชำระค่าบริการ ${limitStr}`;
     })() : '',
+    // HW — ค่าสวัสดิการพนักงาน พ.ศ. 2566
     hw: data.total ? (function(){
       const auth = getAuthority('hw');
-      return `จึงขอความกรุณาโปรดพิจารณาอนุมัติค่าใช้จ่ายสำหรับรายการจัดซื้อข้างต้น ในวงเงิน ${amtStr} อ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงินที่มี (การตั้งงบประมาณไว้) หมวดการชำระเงินค่าสวัสดิการพนักงาน ซึ่งให้อำนาจแก่${esc(auth.title)}ไม่เกิน ${fmtLimit(auth.limit)} บาท`;
+      const limitStr = auth.limit>0 ? `ซึ่งให้อำนาจแก่${esc(auth.title)}ไม่เกิน ${fmtLimit(auth.limit)} บาท` : `ซึ่งให้อำนาจแก่${esc(auth.title)}ในการอนุมัติงบประมาณ`;
+      return `จึงขอความกรุณาโปรดพิจารณาอนุมัติค่าใช้จ่ายสำหรับรายการจัดซื้อข้างต้น ในวงเงิน ${amtStr} อ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงินที่มี (การตั้งงบประมาณไว้) หมวดการชำระเงินค่าสวัสดิการพนักงาน ${limitStr}`;
     })() : '',
+    // INT — ไม่มี authority reference ตาม policy
     int: data.total ? `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณสำหรับค่ากิจกรรมทีม ${esc(data.project||'-')} เพื่อใช้จัดกิจกรรมดังกล่าว เป็นวงเงินจำนวนไม่เกิน ${totalNoSign} บาท (${esc(data.amountWords||'-')})` : '',
+    // ENT — ค่าเลี้ยงรับรอง พ.ศ. 2564
     ent: data.total ? (function(){
       const auth = getAuthority('ent');
-      return `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณค่ารับรองลูกค้าจาก ${esc(data.entClient||data.project||'-')} ในช่วงเวลาดังกล่าว อ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2564 ข้อ 3.2 หมวดค่าเลี้ยงรับรอง วงเงินไม่เกิน ${fmtLimit(auth.limit)} บาท ซึ่งให้อำนาจแก่${esc(auth.title)}ในการอนุมัติงบประมาณ`;
+      const limitStr = auth.limit>0 ? `วงเงินไม่เกิน ${fmtLimit(auth.limit)} บาท ซึ่งให้อำนาจแก่${esc(auth.title)}ในการอนุมัติงบประมาณ` : `ซึ่งให้อำนาจแก่${esc(auth.title)}ในการอนุมัติงบประมาณ`;
+      return `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณค่ารับรองลูกค้าจาก ${esc(data.entClient||data.project||'-')} ในช่วงเวลาดังกล่าว อ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2564 ข้อ 3.2 หมวดค่าเลี้ยงรับรอง ${limitStr}`;
     })() : '',
+    // DEP — ค่าสวัสดิการพนักงาน พ.ศ. 2566
     dep: data.total ? (function(){
       const auth = getAuthority('dep');
-      return `จึงขอความอนุเคราะห์อนุมัติการจัดซื้อสำหรับรายการจัดซื้อข้างต้น ในวงเงิน ${amtStr} อ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงินที่มี (การตั้งงบประมาณไว้) หมวดการชำระเงินค่าสวัสดิการพนักงาน ซึ่งให้อำนาจแก่${esc(auth.title)}ไม่เกิน ${fmtLimit(auth.limit)} บาท`;
+      const limitStr = auth.limit>0 ? `ซึ่งให้อำนาจแก่${esc(auth.title)}ไม่เกิน ${fmtLimit(auth.limit)} บาท` : `ซึ่งให้อำนาจแก่${esc(auth.title)}ในการอนุมัติงบประมาณ`;
+      return `จึงขอความอนุเคราะห์อนุมัติการจัดซื้อสำหรับรายการจัดซื้อข้างต้น ในวงเงิน ${amtStr} อ้างอิงอำนาจอนุมัติจากคู่มืออำนาจอนุมัติ พ.ศ. 2566 ข้อ 3.2 การชำระเงินที่มี (การตั้งงบประมาณไว้) หมวดการชำระเงินค่าสวัสดิการพนักงาน ${limitStr}`;
     })() : '',
   };
   const closingText = closingMap[data.type] || (data.total ? `ในการนี้จึงขอให้ท่านโปรดพิจารณาอนุมัติงบประมาณรวมเป็นจำนวนเงินไม่เกิน ${amtStr}` : '');
@@ -946,6 +1006,8 @@ function initApp() {
   // Load all Supabase data on startup in parallel
   Promise.all([
     loadMemosAsync(),
+    loadUserProfilesAsync(),
+    loadAuthorityAsync(),
     typeof loadManualLicensesAsync === 'function' ? loadManualLicensesAsync() : Promise.resolve(),
     typeof loadInfraCostsAsync     === 'function' ? loadInfraCostsAsync()     : Promise.resolve(),
     typeof loadBudgetsAsync        === 'function' ? loadBudgetsAsync()        : Promise.resolve(),
@@ -954,5 +1016,6 @@ function initApp() {
   ]).then(() => {
     renderPendingMemos();
     renderHistoryMemos();
+    if(typeof refreshApproverDropdowns === 'function') refreshApproverDropdowns();
   }).catch(e => console.warn('Supabase init load failed', e));
 }
