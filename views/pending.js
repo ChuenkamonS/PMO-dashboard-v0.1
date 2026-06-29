@@ -215,11 +215,14 @@ function buildPendingRow(memo) {
   const amt     = Number(memo.total)||0;
   const stage   = memo.status === 'pending_a2' ? 'Pending A2' : 'Pending A1';
   const isOwn   = (memo.requesterName||'') === currentUser();
-  // canAct: user is in approvers[] at the current pending stage, and it's their turn
   const _user   = currentUser();
+  const _isPMOUser = typeof isPMO === 'function' && isPMO();
   const _stage  = memo.status === 'pending_a2' ? 1 : memo.status === 'pending_a3' ? 2 : 0;
   const _stageApprover = (memo.approvers||[])[_stage];
-  const canAct  = _stageApprover && _stageApprover.name === _user && _stageApprover.status !== 'approved';
+  // canAct: must be the stage approver AND not the requester (even if PMO)
+  const canAct  = !isOwn && _stageApprover && _stageApprover.name === _user && _stageApprover.status !== 'approved';
+  // PMO override: can approve any memo that is NOT their own
+  const canActAsPMO = !isOwn && _isPMOUser;
   const accent  = TYPE_COLOR_PENDING[memo.type] || '#888780';
   const typeLbl = TYPE_LABEL_PENDING[memo.type] || (memo.type||'').toUpperCase();
   const typeBg  = TYPE_BG_PENDING[memo.type]    || '#F1EFE8';
@@ -234,8 +237,8 @@ function buildPendingRow(memo) {
 
   // Row action buttons — different per role
   let actionBtns = '';
-  if (_pmo) {
-    // PMO sees Approve + Reject + View
+  if (canActAsPMO) {
+    // PMO sees Approve + Reject + View — but NOT on their own memo
     actionBtns = `
       <button class="btn-approve" data-action="approve" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px" title="Approve">✓</button>
       <button class="btn-reject"  data-action="reject"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px" title="Reject">✕</button>
@@ -442,7 +445,7 @@ function openDetailModal(memoNo) {
   const _dApprover = (memo.approvers||[])[_dStage];
   const canApprove = isPending && _dApprover && _dApprover.name===_dUser && _dApprover.status!=='approved';
   // PMO can always approve as override
-  const canApproveAsPMO = isPending && _isPMO;
+  const canApproveAsPMO = isPending && _isPMO && !isOwn;  // PMO cannot approve own memo
   // canCancel: pending memo AND current user IS the requester OR draft owner
   const canCancel  = isPending && isOwn;
 
@@ -830,10 +833,11 @@ function resubmitMemo(memoNo) {
     resubmittedAt:new Date().toISOString(), resubmittedBy:user,
     updatedAt:new Date().toISOString()};
   storeMemos(memos);
+  const resubTime = new Date().toISOString();
   updateMemoStatusAsync(memoNo, 'pending', {
     approvers:      resetApprovers,
     rejectionReason:null, rejectedBy:null, rejectedAt:null,
-    resubmittedAt:  new Date().toISOString(),
+    resubmittedAt:  resubTime,   // signals updateMemoStatusAsync to reset approvers
     resubmittedBy:  user,
     auditLog:       memos[idx].auditLog,
   });
