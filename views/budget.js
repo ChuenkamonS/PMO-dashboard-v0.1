@@ -2192,10 +2192,7 @@ function showPoolMemos(poolId) {
 // ══════════════════════════════════════════════════════════════════
 // PMO ROLE HELPER — replace body when user system is ready
 // ══════════════════════════════════════════════════════════════════
-function isPMO() {
-  const role = document.getElementById('sb-urole')?.textContent?.trim() || '';
-  return role === 'PMO';
-}
+// isPMO() defined in app.js — do not redefine here
 
 // ══════════════════════════════════════════════════════════════════
 // BUDGET POOL — EXCEL TEMPLATE DOWNLOAD
