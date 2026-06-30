@@ -2893,7 +2893,7 @@ function openBudgetPoolModal(editId) {
   modal.id = 'bpool-modal';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;display:flex;align-items:center;justify-content:center';
   modal.innerHTML = `
-    <div class="card" style="width:500px;max-width:95vw;padding:24px">
+    <div class="card" style="width:500px;max-width:95vw;max-height:90vh;overflow-y:auto;padding:24px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
         <span style="font-size:15px;font-weight:700">${editId ? 'Edit' : 'New'} Budget Pool</span>
         <button class="btn-sm" onclick="document.getElementById('bpool-modal').remove()" style="padding:4px 10px">✕</button>
@@ -2921,11 +2921,11 @@ function openBudgetPoolModal(editId) {
       </div>
       <div class="fg" style="margin-top:12px">
         <label>Memo Types ที่จะตัดเข้า pool นี้ <span style="font-size:11px;font-weight:400;color:var(--text-3)">(ไม่เลือก = รับทุกประเภท)</span></label>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px 12px;margin-top:6px">
           ${Object.entries(BGT_TYPE_LABELS).map(([k,v]) => `
-            <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
-              <input type="checkbox" id="bpool-type-${k}" value="${k}" ${(g('memoTypes')||[]).includes(k) ? 'checked' : ''}>
-              ${v}
+            <label style="display:flex;align-items:center;gap:7px;min-width:0;font-size:12px;line-height:1.3;cursor:pointer">
+              <input type="checkbox" id="bpool-type-${k}" value="${k}" ${(g('memoTypes')||[]).includes(k) ? 'checked' : ''} style="width:16px;height:16px;min-width:16px;padding:0;flex:0 0 16px;accent-color:var(--blue);cursor:pointer">
+              <span>${v}</span>
             </label>`).join('')}
         </div>
       </div>
