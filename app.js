@@ -63,6 +63,12 @@ const FINANCIAL_STORAGE_KEYS = Object.freeze({
   actualSpend: 'orbit-pmo-actual-spend-v1',
   budgetPools: 'orbit-pmo-budget-pools-v1',
 });
+const BUDGET_STATUSES = Object.freeze({
+  MANUAL_OVERRIDE: 'Manual Override',
+  MAPPED: 'Mapped',
+  NEEDS_PMO_REVIEW: 'Needs PMO Review',
+  UNBUDGETED: 'Unbudgeted',
+});
 
 function spendTypeFromMemoType(memoType) {
   return MEMO_TYPE_TO_SPEND_TYPE[String(memoType || '').trim().toLowerCase()] || SPEND_TYPES.OTHERS;
@@ -309,12 +315,90 @@ function getFinalBudgetPoolId(actualSpend = {}) {
   return actualSpend.manualBudgetPoolId || actualSpend.finalBudgetPoolId || actualSpend.autoBudgetPoolId || null;
 }
 
+function calendarValueInRange(value, startValue, endValue) {
+  const date = parseStrictCalendarValue(value);
+  const start = parseStrictCalendarValue(startValue);
+  const end = parseStrictCalendarValue(endValue);
+  if (!date || !start || !end) return false;
+  if (date.precision === 'date' && start.precision === 'date' && end.precision === 'date') {
+    return date.text >= start.text && date.text <= end.text;
+  }
+  const monthIndex = part => part.year * 12 + part.month;
+  return monthIndex(date) >= monthIndex(start) && monthIndex(date) <= monthIndex(end);
+}
+
+function actualSpendMappingDate(actualSpend = {}) {
+  return actualSpend.startDate || actualSpend.month || (actualSpend.year ? `${actualSpend.year}-01` : null);
+}
+
+function findMatchingBudgetPools(actualSpend, pools = []) {
+  const mappingDate = actualSpendMappingDate(actualSpend);
+  if (!mappingDate) return [];
+  return pools.filter(pool =>
+    pool.project === actualSpend.project &&
+    Array.isArray(pool.spendTypes) && pool.spendTypes.includes(actualSpend.spendType) &&
+    calendarValueInRange(mappingDate, pool.startDate || pool.startMonth, pool.endDate || pool.endMonth)
+  );
+}
+
+function mapBudgetPool(actualSpend, pools = []) {
+  if (actualSpend.manualBudgetPoolId) {
+    return {
+      ...actualSpend,
+      finalBudgetPoolId: actualSpend.manualBudgetPoolId,
+      budgetStatus: BUDGET_STATUSES.MANUAL_OVERRIDE,
+    };
+  }
+  const matches = findMatchingBudgetPools(actualSpend, pools);
+  if (matches.length === 1) {
+    return {
+      ...actualSpend,
+      autoBudgetPoolId: matches[0].id,
+      finalBudgetPoolId: matches[0].id,
+      budgetStatus: BUDGET_STATUSES.MAPPED,
+    };
+  }
+  return {
+    ...actualSpend,
+    autoBudgetPoolId: null,
+    finalBudgetPoolId: null,
+    budgetStatus: matches.length > 1 ? BUDGET_STATUSES.NEEDS_PMO_REVIEW : BUDGET_STATUSES.UNBUDGETED,
+  };
+}
+
+function mapActualSpendRecords(records = [], pools = []) {
+  return records.map(record => mapBudgetPool(record, pools));
+}
+
+function calculateActualSpend(records = [], filters = {}) {
+  return queryActualSpend(filters, records).reduce((sum, record) => sum + (Number(record.amount) || 0), 0);
+}
+
+function calculateBudgetUtilization(pool, records = []) {
+  const actual = calculateActualSpend(
+    records.filter(record => getFinalBudgetPoolId(record) === pool.id),
+    { project: pool.project },
+  );
+  const budget = Number(pool.budget) || 0;
+  return {
+    budget,
+    actual,
+    remaining: budget - actual,
+    utilizationPercent: budget > 0 ? actual / budget * 100 : 0,
+  };
+}
+
 const FINANCIAL_HELPERS = Object.freeze({
   queryActualSpend,
   queryBudgetPools,
   getActualSpendByProject,
   getBudgetPoolsByProject,
   getFinalBudgetPoolId,
+  findMatchingBudgetPools,
+  mapBudgetPool,
+  mapActualSpendRecords,
+  calculateActualSpend,
+  calculateBudgetUtilization,
 });
 
 function importActualSpendRecords(rows) {

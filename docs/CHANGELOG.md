@@ -77,3 +77,16 @@
 #### Remaining Work
 - Connect the shared models to application workflows and financial pages in later phases.
 - Defer Supabase migration until the baseline schema is available.
+
+---
+
+### Phase 1B
+#### Added
+- Shared Budget Pool auto-mapping by project, Spend Type, and pool period.
+- Manual override precedence and shared Budget Status values.
+- Multiple-match handling with `Needs PMO Review` and no-match handling with `Unbudgeted`.
+- Shared Actual Spend total and Budget utilization calculations.
+- Batch mapping helper for re-evaluating Actual Spend records.
+
+#### Remaining Work
+- Connect shared mapping and calculations to workflows and UI in later phases.

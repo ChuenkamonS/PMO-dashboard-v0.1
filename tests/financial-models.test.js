@@ -157,3 +157,73 @@ test('shared query helpers filter records and preserve manual override priority'
   assert.equal(ctx.getFinalBudgetPoolId({ autoBudgetPoolId:'auto', manualBudgetPoolId:'manual' }), 'manual');
   assert.equal(vm.runInContext('FINANCIAL_HELPERS.queryActualSpend === queryActualSpend', ctx), true);
 });
+
+test('budget mapping applies manual override before auto mapping', () => {
+  const ctx = context();
+  const record = ctx.createActualSpendRecord({ ...base, manualBudgetPoolId:'manual-pool' });
+  const pools = [ctx.createBudgetPoolRecord({
+    id:'auto-pool', project:'AOA-MP', budget:10000,
+    spendTypes:['Software'], startDate:'2026-01', endDate:'2026-12',
+  })];
+  const mapped = ctx.mapBudgetPool(record, pools);
+  assert.equal(mapped.finalBudgetPoolId, 'manual-pool');
+  assert.equal(mapped.budgetStatus, 'Manual Override');
+});
+
+test('budget mapping auto maps one match and leaves no match unbudgeted', () => {
+  const ctx = context();
+  const record = ctx.createActualSpendRecord(base);
+  const pools = [ctx.createBudgetPoolRecord({
+    id:'pool-1', project:'AOA-MP', budget:10000,
+    spendTypes:['Software'], startDate:'2026-01', endDate:'2026-12',
+  })];
+  const mapped = ctx.mapBudgetPool(record, pools);
+  assert.equal(mapped.autoBudgetPoolId, 'pool-1');
+  assert.equal(mapped.finalBudgetPoolId, 'pool-1');
+  assert.equal(mapped.budgetStatus, 'Mapped');
+  assert.equal(ctx.mapBudgetPool({ ...record, project:'TTB' }, pools).budgetStatus, 'Unbudgeted');
+});
+
+test('multiple matching pools require PMO review and are not selected', () => {
+  const ctx = context();
+  const record = ctx.createActualSpendRecord(base);
+  const pools = ['pool-1','pool-2'].map(id => ctx.createBudgetPoolRecord({
+    id, project:'AOA-MP', budget:10000,
+    spendTypes:['Software'], startDate:'2026-01', endDate:'2026-12',
+  }));
+  const mapped = ctx.mapBudgetPool(record, pools);
+  assert.equal(mapped.finalBudgetPoolId, null);
+  assert.equal(mapped.budgetStatus, 'Needs PMO Review');
+});
+
+test('shared calculation engine totals spend and budget utilization', () => {
+  const ctx = context();
+  const pool = ctx.createBudgetPoolRecord({
+    id:'pool-1', project:'AOA-MP', budget:10000,
+    spendTypes:['Software'], startDate:'2026-01', endDate:'2026-12',
+  });
+  const records = [
+    ctx.createActualSpendRecord({ ...base, amount:2000, finalBudgetPoolId:'pool-1' }),
+    ctx.createActualSpendRecord({ ...base, referenceNo:'ORB-002', amount:500, finalBudgetPoolId:'other-pool' }),
+  ];
+  assert.equal(ctx.calculateActualSpend(records), 2500);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(ctx.calculateBudgetUtilization(pool, records))),
+    { budget:10000, actual:2000, remaining:8000, utilizationPercent:20 },
+  );
+});
+
+test('batch mapping re-evaluates unbudgeted records without replacing manual overrides', () => {
+  const ctx = context();
+  const pool = ctx.createBudgetPoolRecord({
+    id:'pool-1', project:'AOA-MP', budget:10000,
+    spendTypes:['Software'], startDate:'2026-01', endDate:'2026-12',
+  });
+  const records = [
+    ctx.createActualSpendRecord(base),
+    ctx.createActualSpendRecord({ ...base, referenceNo:'ORB-002', manualBudgetPoolId:'manual-pool' }),
+  ];
+  const mapped = ctx.mapActualSpendRecords(records, [pool]);
+  assert.equal(mapped[0].finalBudgetPoolId, 'pool-1');
+  assert.equal(mapped[1].finalBudgetPoolId, 'manual-pool');
+});
