@@ -38,6 +38,7 @@ function deviceToDb(d, isNew=false) {
 function dbToDevice(r) {
   return {
     id:           r.id,
+    _supaId:      r.id,
     name:         r.name,
     brand:        r.brand || '',
     platform:     r.platform || 'other',
@@ -91,10 +92,12 @@ async function saveDeviceAsync(data) {
         const result = await supaFetch('devices', 'POST', row, '?select=id');
         // Store the Supabase-generated id back in cache
         if (result?.[0]?.id) {
+          data._supaId = result[0].id;
           if (_devCache) {
             const i2 = _devCache.findIndex(d => String(d.id) === String(data.id));
             if (i2 >= 0) _devCache[i2]._supaId = result[0].id;
           }
+          storeDevices(_devCache || all);
         }
       } else {
         await supaFetch('devices', 'PATCH', deviceToDb(data), `?id=eq.${data._supaId}`);

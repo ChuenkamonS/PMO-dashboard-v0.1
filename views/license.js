@@ -26,7 +26,7 @@ function licenseToDb(l) {
     license_type:    l.licenseType || 'subscription',
     purchase_date:   l.purchaseDate || null,
     expiry:          l.expiry || null,
-    billing_freq:    l.billingFreq || 'monthly',
+    billing_freq:    l.billingFreq || null,
     status_override: l.statusOverride || null,
     memo_no:         l.memoNo || null,
     note:            l.note || null,
@@ -41,7 +41,7 @@ function dbToLicense(r) {
     seats: Number(r.seats) || 1, pricePerMonth: Number(r.price_per_month) || 0,
     owner: r.owner || '', department: r.department || '', project: r.project || '',
     licenseType: r.license_type || 'subscription', purchaseDate: r.purchase_date || '',
-    expiry: r.expiry || null, billingFreq: r.billing_freq || 'monthly',
+    expiry: r.expiry || null, billingFreq: r.billing_freq || '',
     statusOverride: r.status_override || null, memoNo: r.memo_no || '',
     note: r.note || '', source: r.source || 'manual',
     createdAt: r.created_at, updatedAt: r.updated_at,
@@ -109,8 +109,11 @@ function parseLicenseFromMemo(memo) {
         : new Date(purchaseDate);
       const expiry = new Date(start);
       expiry.setMonth(expiry.getMonth() + months);
+      const identity = [memo.memoNo, it.name, it.plan || '', it.startMonth || '', it.endMonth || '']
+        .map(value => String(value).trim().replace(/\s+/g, '_'))
+        .join('-');
       return {
-        id: `memo-${memo.memoNo}-${it.name}`.replace(/\s/g, '_'),
+        id: `memo-${identity}`,
         name: it.name, plan: it.plan || '', seats, pricePerMonth: price, months,
         fxRate, pricePerMonthTHB: price * fxRate,
         purchaseDate: start.toISOString(),
@@ -437,7 +440,8 @@ function _renderLicMemoIndex() {
     <div class="card" style="padding:0;overflow:hidden">
       <table class="hist-table">
         <thead><tr>
-          <th style="width:15%;padding-left:16px">Software</th>
+          <th style="width:12%;padding-left:16px">Software</th>
+          <th style="width:8%">Plan</th>
           <th style="width:7%">Seats</th>
           <th style="width:9%">฿/เดือน</th>
           <th style="width:9%">Owner</th>
@@ -497,7 +501,7 @@ function _renderLicMemoIndexRows() {
     }
     if (filterProj !== 'all' && lic.project !== filterProj) return false;
     if (search) {
-      const hay = `${lic.name} ${lic.project} ${lic.owner} ${lic.vendor} ${lic.department}`.toLowerCase();
+      const hay = `${lic.name} ${lic.plan} ${lic.project} ${lic.owner} ${lic.vendor} ${lic.department}`.toLowerCase();
       if (!hay.includes(search)) return false;
     }
     return true;
@@ -519,7 +523,7 @@ function _renderLicMemoIndexRows() {
   const tbody = document.getElementById('lic-table-body');
   if (!tbody) return;
   if (!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:34px 16px;color:var(--text-3)">ยังไม่มีข้อมูล${search ? ' ที่ตรงกับการค้นหา' : ''} — Approve SL Memo หรือกด Add License</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="12" style="text-align:center;padding:34px 16px;color:var(--text-3)">ยังไม่มีข้อมูล${search ? ' ที่ตรงกับการค้นหา' : ''} — Approve SL Memo หรือกด Add License</td></tr>`;
     return;
   }
 
@@ -539,6 +543,7 @@ function _renderLicMemoIndexRows() {
         ${lic.vendor ? `<div style="font-size:10px;color:var(--text-3);font-weight:400">${esc(lic.vendor)}</div>` : ''}
         ${lic.memoNo ? `<div style="font-size:10px;color:var(--blue);font-weight:400;cursor:pointer" onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly('${esc(lic.memoNo)}')">${esc(lic.memoNo)}</div>` : ''}
       </td>
+      <td style="font-size:12px">${esc(lic.plan || '—')}</td>
       <td>${esc(lic.seats || 1)}</td>
       <td class="mono">${esc(money(monthlyCostLic))}</td>
       <td style="font-size:12px">${esc(lic.owner || '—')}</td>
@@ -1041,6 +1046,7 @@ function openLicenseModal(id) {
     document.getElementById('lic-modal-title').textContent = fromMemo ? 'Edit License (from Memo)' : 'Edit License';
     document.getElementById('lic-edit-id').value     = lic.id;
     document.getElementById('lic-name').value        = lic.name || '';
+    document.getElementById('lic-plan').value        = lic.plan || '';
     document.getElementById('lic-vendor').value      = lic.vendor || '';
     document.getElementById('lic-seats').value       = lic.seats || 1;
     document.getElementById('lic-price').value       = lic.pricePerMonth || 0;
@@ -1054,7 +1060,7 @@ function openLicenseModal(id) {
     document.getElementById('lic-status-field').value = lic.statusOverride || 'active';
     document.getElementById('lic-memo-ref').value    = lic.memoNo || '';
     document.getElementById('lic-note').value        = lic.note || '';
-    ['lic-name','lic-vendor','lic-seats','lic-price','lic-purchase-date','lic-expiry-date','lic-billing','lic-memo-ref'].forEach(fid => {
+    ['lic-name','lic-plan','lic-vendor','lic-seats','lic-price','lic-purchase-date','lic-expiry-date','lic-billing','lic-memo-ref'].forEach(fid => {
       const el = document.getElementById(fid);
       if (el) { el.disabled = fromMemo; el.style.opacity = fromMemo ? '0.5' : '1'; }
     });
@@ -1063,7 +1069,7 @@ function openLicenseModal(id) {
   } else {
     document.getElementById('lic-modal-title').textContent = 'Add License';
     document.getElementById('lic-edit-id').value = '';
-    ['lic-name','lic-vendor','lic-owner','lic-dept','lic-note','lic-memo-ref'].forEach(fid => { const el = document.getElementById(fid); if (el) el.value = ''; });
+    ['lic-name','lic-plan','lic-vendor','lic-owner','lic-dept','lic-note','lic-memo-ref'].forEach(fid => { const el = document.getElementById(fid); if (el) el.value = ''; });
     document.getElementById('lic-seats').value = 1;
     document.getElementById('lic-price').value = 0;
     document.getElementById('lic-purchase-date').value = new Date().toISOString().slice(0,10);
@@ -1072,7 +1078,7 @@ function openLicenseModal(id) {
     document.getElementById('lic-type-field').value = 'subscription';
     document.getElementById('lic-billing').value = 'monthly';
     document.getElementById('lic-status-field').value = 'active';
-    ['lic-name','lic-vendor','lic-seats','lic-price','lic-purchase-date','lic-expiry-date','lic-billing','lic-memo-ref'].forEach(fid => {
+    ['lic-name','lic-plan','lic-vendor','lic-seats','lic-price','lic-purchase-date','lic-expiry-date','lic-billing','lic-memo-ref'].forEach(fid => {
       const el = document.getElementById(fid);
       if (el) { el.disabled = false; el.style.opacity = '1'; }
     });
@@ -1088,7 +1094,9 @@ function saveLicenseManual() {
   const editId = document.getElementById('lic-edit-id').value;
   const now = new Date().toISOString();
   const data = {
-    name, vendor: document.getElementById('lic-vendor').value.trim(),
+    name,
+    plan: document.getElementById('lic-plan').value.trim(),
+    vendor: document.getElementById('lic-vendor').value.trim(),
     seats: Number(document.getElementById('lic-seats').value)||1,
     pricePerMonth: Number(document.getElementById('lic-price').value)||0,
     owner: document.getElementById('lic-owner').value.trim(),

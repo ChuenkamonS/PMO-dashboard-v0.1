@@ -575,6 +575,7 @@ function validateMemo(data) {
     slRows.forEach((r, i) => {
       const name = r.querySelector('.sl-name')?.value?.trim();
       if(!name) return;
+      if(!r.querySelector('.sl-plan')?.value?.trim()) missing.push(`Software แถว ${i+1}: Plan / Tier`);
       if(!(parseFloat(r.querySelector('.sl-price')?.value) > 0)) missing.push(`Software แถว ${i+1}: ราคา/เดือน`);
       if(!(parseInt(r.querySelector('.sl-mo')?.value) > 0))    missing.push(`Software แถว ${i+1}: จำนวนเดือน`);
       if(!(parseInt(r.querySelector('.sl-qty')?.value) > 0))   missing.push(`Software แถว ${i+1}: จำนวน (Qty)`);
@@ -682,7 +683,29 @@ async function submitMemo() {
 // Backward-compatible alias for older buttons/bookmarks.
 function generateMemoPdf() { return submitMemo(); }
 function resetMemoForm() {
-  if(confirm('ล้างข้อมูลที่กรอกหรือไม่?')) location.reload();
+  if(!confirm('ล้างข้อมูลที่กรอกหรือไม่?')) return;
+  document.querySelectorAll('#form-body input, #form-body textarea').forEach(el => {
+    if(el.type === 'checkbox' || el.type === 'radio') el.checked = false;
+    else el.value = '';
+  });
+  document.querySelectorAll('#form-body select').forEach(el => { el.selectedIndex = 0; });
+  ['sl-rows','hw-rows','int-names','ent-names','dep-items','approver-rows-form','acct-body'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.innerHTML = '';
+  });
+  ['sl-total','hw-total','int-total','ent-total','dep-total'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.textContent = '฿0';
+  });
+  selectedType = null;
+  _editingSourceMemoNo = null;
+  document.querySelectorAll('.type-btn').forEach(btn => btn.classList.remove('selected'));
+  document.querySelectorAll('.fs').forEach(section => section.classList.remove('active'));
+  const body = document.getElementById('form-body');
+  const hint = document.getElementById('form-hint');
+  if(body) body.style.display = 'none';
+  if(hint) hint.style.display = '';
+  setNextMemoNo();
 }
 
 // ── Dropdown toggle helpers ──
@@ -980,14 +1003,6 @@ function _updateApproverAuthorityHint(row, name, title) {
   }
 }
 
-// Keep backward compat for old toggle functions referenced elsewhere
-function toggleReviewerNameOther()  {}
-function toggleReviewerTitleOther() {}
-function toggleApproverNameOther()  {}
-function toggleApproverTitleOther() {}
-function toggleA3Section()          {}
-function toggleApprover3NameOther() {}
-
 // ── Bulk Name Modal ──
 let _bulkTargetId = '', _bulkCls = '', _bulkCalc = false;
 function openBulkNameModal(containerId, cls, doCalc) {
@@ -1046,7 +1061,7 @@ document.addEventListener('click', e => {
   if(e.target === document.getElementById('bulk-acct-modal')) closeBulkAcctModal();
 });
 // ── Apply Draft Edit ──
-function applyDraftEdit() {
+async function applyDraftEdit() {
   try {
     const raw = localStorage.getItem('orbit-pmo-edit-draft');
     if(!raw) return;
@@ -1060,8 +1075,11 @@ function applyDraftEdit() {
                     [...document.querySelectorAll('.type-btn')].find(b => b.getAttribute('onclick')?.includes(`'${memo.type}'`));
     if(typeBtn) typeBtn.click();
 
-    // Fill common fields after short delay (selectType rerenders form)
-    setTimeout(() => {
+    const loadingApprovers = document.getElementById('approver-rows-form');
+    if(loadingApprovers) loadingApprovers.innerHTML = '<div style="font-size:12px;color:var(--text-3);padding:8px 0">Loading approver list...</div>';
+    await loadUserProfilesAsync();
+    if(loadingApprovers) loadingApprovers.innerHTML = '';
+
       // Store memoNo so saveDraft/submit updates instead of creates
       const memoNoEl = document.getElementById('f-memo-no');
       if(memoNoEl) {
@@ -1115,8 +1133,9 @@ function applyDraftEdit() {
         });
         _updateApproverUI();
         updateSelfA1Notice();
+      } else if(apprContainer) {
+        initApproverRows();
       }
 
-    }, 150);
   } catch(e) { console.error('applyDraftEdit error', e); }
 }

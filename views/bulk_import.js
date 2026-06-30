@@ -73,18 +73,31 @@ function numVal(v) { const n = Number(v); return isNaN(n) ? 0 : n; }
 // Name | Vendor | Seats | Price/Month | Owner | Department | Project |
 // License Type | Purchase Date | Expiry Date | Billing Freq | Status | Memo Ref | Note
 // ─────────────────────────────────
-function importLicenses(rows) {
+async function importLicenses(rows) {
   const existing = loadManualLicenses();
   const now = new Date().toISOString();
   let added = 0, skipped = 0, updated = 0;
+  const changed = [];
+
+  const licenseDateKey = value => {
+    const raw = String(value || '').trim();
+    if(/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+    const date = new Date(raw);
+    if(Number.isNaN(date.getTime())) return raw;
+    return [date.getFullYear(), String(date.getMonth()+1).padStart(2,'0'), String(date.getDate()).padStart(2,'0')].join('-');
+  };
+  const licenseKey = l => [
+    l.memoNo, l.name, l.plan, licenseDateKey(l.purchaseDate), licenseDateKey(l.expiry),
+  ].map(v => String(v || '').trim().toLowerCase()).join('||');
 
   rows.forEach(row => {
     const name = strVal(row['Name'] || row['name'] || row['Software Name'] || row['software_name'] || row['ชื่อ Software']);
     if(!name) { skipped++; return; }
 
     const license = {
-      id: Date.now() + added, // unique enough
+      id: crypto.randomUUID(),
       name,
+      plan:          strVal(row['Plan'] || row['plan'] || row['Tier'] || row['tier']),
       vendor:        strVal(row['Vendor'] || row['vendor'] || row['ผู้ขาย']),
       seats:         numVal(row['Seats'] || row['seats'] || row['จำนวน']) || 1,
       pricePerMonth: numVal(row['Price/Month'] || row['price_per_month'] || row['ราคา/เดือน']),
@@ -97,7 +110,7 @@ function importLicenses(rows) {
         const d = parseExcelDate(row['Expiry Date'] || row['expiry_date'] || row['วันหมดอายุ']);
         return d ? new Date(d+'T00:00:00').toISOString() : null;
       })(),
-      billingFreq:   strVal(row['Billing Freq'] || row['billing_freq'] || 'monthly'),
+      billingFreq:   strVal(row['Billing Freq'] || row['billing_freq']),
       statusOverride: (() => {
         const s = strVal(row['Status'] || row['status'] || '').toLowerCase();
         return ['cancelled','suspended'].includes(s) ? s : null;
@@ -108,13 +121,28 @@ function importLicenses(rows) {
       createdAt:     now,
       updatedAt:     now,
     };
-    existing.push(license);
-    added++;
+    const matchIdx = existing.findIndex(item => licenseKey(item) === licenseKey(license));
+    if(matchIdx >= 0) {
+      const refreshed = {
+        ...existing[matchIdx],
+        ...license,
+        id: existing[matchIdx].id,
+        createdAt: existing[matchIdx].createdAt || now,
+      };
+      existing[matchIdx] = refreshed;
+      changed.push(refreshed);
+      updated++;
+    } else {
+      existing.push(license);
+      changed.push(license);
+      added++;
+    }
   });
 
   storeManualLicenses(existing);
+  await Promise.all(changed.map(license => saveLicenseAsync(license)));
   renderLicense();
-  alert(`✓ Import สำเร็จ\nเพิ่ม ${added} license${skipped ? `\nข้ามแถวว่าง ${skipped} แถว` : ''}`);
+  alert(`✓ Import สำเร็จ\nAdded ${added} · Updated ${updated} · Skipped ${skipped}`);
 }
 
 // ─────────────────────────────────
@@ -123,10 +151,11 @@ function importLicenses(rows) {
 // Name | Type | Serial No | Asset Tag | Owner | Assigned Date | Project |
 // Return Date | Warranty Expiry | Condition | Status | Memo Ref | Note
 // ─────────────────────────────────
-function importDevices(rows) {
+async function importDevices(rows) {
   const existing = loadDevices();
   const now = new Date().toISOString();
   let added = 0, skipped = 0, updated = 0;
+  const changed = [];
 
   rows.forEach(row => {
     const name = strVal(row['Brand / Model'] || row['Name'] || row['name'] || row['Device Name']);
@@ -141,7 +170,7 @@ function importDevices(rows) {
     const platform = platMap[osRaw] || 'other';
 
     const device = {
-      id: nextDeviceId() + added,
+      id: crypto.randomUUID(),
       name, type, platform,
       brand:        strVal(row['Brand / Model'] || ''),
       pbxNumber:    strVal(row['PBX Number'] || row['pbx_number'] || ''),
@@ -172,14 +201,17 @@ function importDevices(rows) {
 
     if(dupIdx >= 0) {
       existing[dupIdx] = { ...existing[dupIdx], ...device, id: existing[dupIdx].id, createdAt: existing[dupIdx].createdAt };
+      changed.push(existing[dupIdx]);
       updated++;
     } else {
       existing.push(device);
+      changed.push(device);
       added++;
     }
   });
 
   storeDevices(existing);
+  await Promise.all(changed.map(device => saveDeviceAsync(device)));
   renderDevice();
   alert(`✓ Import สำเร็จ\nเพิ่มใหม่ ${added}${updated ? ` · อัปเดตเดิม ${updated}` : ''}${skipped ? `\nข้ามแถวว่าง ${skipped}` : ''} รายการ`);
 }
@@ -209,7 +241,7 @@ function importBudgetMemos(rows) {
     const type = typeMap[typeRaw] || 'sl';
 
     const statusRaw = strVal(row['Status'] || row['status'] || 'completed').toLowerCase();
-    const status = ['completed','rejected','pending'].includes(statusRaw) ? statusRaw : 'completed';
+    const status = ['completed','rejected','pending','cancelled'].includes(statusRaw) ? statusRaw : 'completed';
 
     const dateStr = parseExcelDate(row['Date'] || row['date'] || row['วันที่']);
     const dateISO = dateStr ? new Date(dateStr+'T00:00:00').toISOString() : now;
@@ -221,7 +253,7 @@ function importBudgetMemos(rows) {
       status,
       project:       strVal(row['Project'] || row['project'] || row['โครงการ']),
       requesterName: strVal(row['Requester'] || row['requester'] || row['ผู้ขอ']),
-      reviewerName:  strVal(row['Requester'] || row['requester'] || row['ผู้ขอ']),
+      reviewerName:  strVal(row['Reviewer'] || row['reviewer'] || '-'),
       approverName:  strVal(row['Approver'] || row['approver'] || row['ผู้อนุมัติ']),
       approvedBy:    strVal(row['Approver'] || row['approver'] || row['ผู้อนุมัติ']),
       total:         numVal(row['Amount'] || row['amount'] || row['วงเงิน']),
@@ -257,9 +289,9 @@ function downloadTemplate(type) {
   const templates = {
     license: {
       filename: 'license_import_template.xlsx',
-      headers: ['Name','Vendor','Seats','Price/Month','Owner','Department','Project','License Type','Purchase Date','Expiry Date','Billing Freq','Status','Memo Ref','Note'],
-      sample: [['GitHub Copilot','GitHub',15,600,'Chuen K.','PMO','AOA-MP','subscription','2025-01-01','2026-01-01','annual','','ORB-2501-001',''],
-               ['Figma','Figma Inc',5,900,'Design Lead','Design','Release 3','subscription','2025-03-01','2026-03-01','annual','','','']]
+      headers: ['Name','Plan','Vendor','Seats','Price/Month','Owner','Department','Project','License Type','Purchase Date','Expiry Date','Billing Freq','Status','Memo Ref','Note'],
+      sample: [['GitHub Copilot','Business','GitHub',15,600,'Chuen K.','PMO','AOA-MP','subscription','2025-01-01','2026-01-01','annual','','ORB-2501-001',''],
+               ['Figma','Professional','Figma Inc',5,900,'Design Lead','Design','Release 3','subscription','2025-03-01','2026-03-01','annual','','','']]
     },
     device: {
       filename: 'device_import_template.xlsx',
@@ -269,9 +301,9 @@ function downloadTemplate(type) {
     },
     budget: {
       filename: 'budget_import_template.xlsx',
-      headers: ['Memo No','Type','Project','Requester','Approver','Amount','Status','Date','Subject','Reason'],
-      sample: [['ORB-2401-001','sl','AOA-MP','Chuen K.','Phi Wing',108000,'completed','2024-01-15','ขออนุมัติ Software License','เป็นโปรแกรมที่ใช้งานประจำ'],
-               ['ORB-2402-001','hw','TTB','Tom P.','Phi Wing',79000,'completed','2024-02-10','ขออนุมัติซื้อ Laptop','เพื่อรองรับทีมงานใหม่']]
+      headers: ['Memo No','Type','Project','Requester','Reviewer','Approver','Amount','Status','Date','Subject','Reason'],
+      sample: [['ORB-2401-001','sl','AOA-MP','Chuen K.','Nina Review','Phi Wing',108000,'completed','2024-01-15','ขออนุมัติ Software License','เป็นโปรแกรมที่ใช้งานประจำ'],
+               ['ORB-2402-001','hw','TTB','Tom P.','Nina Review','Phi Wing',79000,'completed','2024-02-10','ขออนุมัติซื้อ Laptop','เพื่อรองรับทีมงานใหม่']]
     }
   };
 

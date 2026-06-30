@@ -1060,7 +1060,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <!-- SL fields -->
             <div class="fs" id="fs-sl">
               <div class="items-hdr" style="grid-template-columns:2fr 1.2fr 1.2fr 0.8fr 0.8fr 1fr 1fr 30px">
-                <span>ชื่อ Software *</span><span>Plan</span><span>฿/เดือน *</span><span>เดือน *</span><span>จำนวน *</span><span>เริ่ม (เดือน) *</span><span>สิ้นสุด (เดือน) *</span><span></span>
+                <span>ชื่อ Software *</span><span>Plan *</span><span>฿/เดือน *</span><span>เดือน *</span><span>จำนวน *</span><span>เริ่ม (เดือน) *</span><span>สิ้นสุด (เดือน) *</span><span></span>
               </div>
               <div id="sl-rows">
                 <div class="item-row" style="grid-template-columns:2fr 1.2fr 1.2fr 0.8fr 0.8fr 1fr 1fr 30px">
@@ -1284,6 +1284,8 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <option value="amount-desc">วงเงิน มาก→น้อย</option>
             <option value="amount-asc">วงเงิน น้อย→มาก</option>
           </select>
+          <button class="btn-export" id="pending-refresh-btn" onclick="refreshPendingMemos()">↻ Refresh</button>
+          <span id="pending-last-refreshed" style="font-size:11px;color:var(--text-3)"></span>
           <button class="btn-export" onclick="exportPendingCSV()">⬇ Export CSV</button>
         </div>
 
@@ -1735,6 +1737,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
           </div>
           <div class="form-grid" style="margin-bottom:10px">
             <div class="fg"><label>Software Name *</label><input type="text" id="lic-name" placeholder="เช่น Figma, GitHub Copilot"></div>
+            <div class="fg"><label>Plan / Tier</label><input type="text" id="lic-plan" placeholder="เช่น Pro, Business, Premium"></div>
             <div class="fg"><label>Vendor</label><input type="text" id="lic-vendor" placeholder="เช่น Adobe, Microsoft"></div>
             <div class="fg"><label>Seats</label><input type="number" id="lic-seats" placeholder="1" min="1"></div>
             <div class="fg"><label>ราคา/เดือน (บาท)</label><input type="number" id="lic-price" placeholder="0"></div>
@@ -2121,7 +2124,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
   .badge-purple { background:#E9D5FF; color:#6B21A8; }
   .badge-teal   { background:#CCFBF1; color:#115E59; }
   .badge-yellow { background:#FEF9C3; color:#854D0E; }
-  #resource-detail-drawer.open { transform: translateX(0); }
 </style>
 
 <!-- Approve Modal -->
@@ -2163,7 +2165,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
     <!-- Actions -->
     <div style="display:flex;gap:8px;justify-content:flex-end;padding:12px 22px;border-top:1px solid var(--border)">
       <button class="btn-ghost" onclick="closeApproveModal()">Cancel</button>
-      <button class="btn-primary" onclick="confirmApprove()" style="background:var(--green)">✓ Confirm Approve</button>
+      <button class="btn-primary" id="approve-confirm-btn" onclick="confirmApprove()" style="background:var(--green)">✓ Confirm Approve</button>
     </div>
   </div>
 </div>

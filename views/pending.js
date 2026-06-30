@@ -75,6 +75,31 @@ function formatDateTime(iso) {
 
 // ── Search state ──
 let _pendingSearch = '';
+let _pendingLastRefreshedAt = null;
+
+function updatePendingRefreshLabel() {
+  const label = document.getElementById('pending-last-refreshed');
+  if(!label || !_pendingLastRefreshedAt) return;
+  const minutes = Math.floor((Date.now() - _pendingLastRefreshedAt) / 60000);
+  label.textContent = minutes < 1 ? 'Last refreshed just now' : `Last refreshed ${minutes} min ago`;
+}
+
+async function refreshPendingMemos() {
+  const btn = document.getElementById('pending-refresh-btn');
+  if(btn) { btn.disabled = true; btn.textContent = 'Refreshing...'; }
+  try {
+    await loadMemosAsync();
+    _pendingLastRefreshedAt = Date.now();
+    renderPendingMemos();
+    updatePendingRefreshLabel();
+  } catch(e) {
+    console.error('Pending refresh failed', e);
+    alert('Refresh ไม่สำเร็จ กรุณาลองอีกครั้ง');
+  } finally {
+    if(btn) { btn.disabled = false; btn.textContent = '↻ Refresh'; }
+  }
+}
+setInterval(updatePendingRefreshLabel, 60000);
 
 // ── Populate filter dropdowns dynamically from actual memo data ──
 function populatePendingFilters() {
@@ -140,7 +165,10 @@ function renderPendingContent() {
   let memos = loadMemos().filter(isMemoVisibleInPending);
   if(_pendingSearch) {
     const s = _pendingSearch.toLowerCase();
-    memos = memos.filter(m => (m.memoNo||'').toLowerCase().includes(s)||(m.project||'').toLowerCase().includes(s)||(m.reviewerName||'').toLowerCase().includes(s));
+    memos = memos.filter(m => [
+      m.memoNo, m.project, m.reviewerName, m.requesterName, m.subject,
+      ...(m.approvers || []).map(a => a.name),
+    ].some(value => String(value || '').toLowerCase().includes(s)));
   }
   const typeF = val('#pend-filter-type')    ||'all';
   const projF = val('#pend-filter-project') ||'all';
@@ -338,7 +366,7 @@ function handleApproveEvidenceUpload(input) {
   };
   reader.readAsDataURL(file);
 }
-function confirmApprove() {
+async function confirmApprove() {
   const targets = JSON.parse(document.getElementById('approve-modal').dataset.targets || '[]');
   const note    = document.getElementById('approve-note').value.trim();
   const evidenceUrl = document.getElementById('approve-evidence-url')?.value || '';
@@ -352,34 +380,55 @@ function confirmApprove() {
     return;
   }
 
-  allowedTargets.forEach(memoNo => {
-    const memo      = memos.find(m => m.memoNo === memoNo);
-    if (!memo) return;
-    const user      = currentUser();
+  const confirmBtn = document.getElementById('approve-confirm-btn');
+  const originalLabel = confirmBtn?.textContent || '✓ Confirm Approve';
+  if(confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Saving...';
+  }
 
-    // Determine which approver step we're on
-    const isPendingA2 = memo.status === 'pending_a2';
-    const isPendingA3 = memo.status === 'pending_a3';
-    const actionKey   = isPendingA3 ? 'approved_a3' : isPendingA2 ? 'approved_a2' : 'approved_a1';
-    const stageLabel  = isPendingA3 ? 'A3' : isPendingA2 ? 'A2' : 'A1';
+  try {
+    const updates = allowedTargets.map(memoNo => {
+      const memo = memos.find(m => m.memoNo === memoNo);
+      const user = currentUser();
 
-    // Write audit log entry into the in-memory memos array FIRST
-    appendAuditLog(memos, memoNo, `${stageLabel} Approved by ${user}`, note);
+      const isPendingA2 = memo.status === 'pending_a2';
+      const isPendingA3 = memo.status === 'pending_a3';
+      const actionKey   = isPendingA3 ? 'approved_a3' : isPendingA2 ? 'approved_a2' : 'approved_a1';
+      const stageLabel  = isPendingA3 ? 'A3' : isPendingA2 ? 'A2' : 'A1';
 
-    // Now read the updated auditLog back out and pass it to async function
-    // so Supabase gets the same audit log that localStorage gets
-    const updatedAuditLog = memos.find(m => m.memoNo === memoNo)?.auditLog || [];
+      const updatedAuditLog = [...(memo.auditLog || []), {
+        actor: user,
+        actorProfileId: typeof currentUserProfileId === 'function' ? currentUserProfileId() : null,
+        action: `${stageLabel} Approved by ${user}`,
+        comment: note,
+        timestamp: new Date().toISOString(),
+        statusBefore: memo.status || null,
+        statusAfter: actionKey,
+        evidenceUrl: evidenceUrl || null,
+        channel: 'in-app',
+      }];
 
-    updateMemoStatusAsync(memoNo, actionKey, {
-      approvalNote:  note,
-      approvedBy:    user,
-      auditLog:      updatedAuditLog,
-      ...(evidenceUrl ? { approvalEvidenceUrl: evidenceUrl } : {}),
+      return updateMemoStatusAsync(memoNo, actionKey, {
+        approvalNote: note,
+        approvedBy: user,
+        auditLog: updatedAuditLog,
+        throwOnSyncError: true,
+        ...(evidenceUrl ? { approvalEvidenceUrl: evidenceUrl } : {}),
+      });
     });
-  });
-  storeMemos(memos);
-  closeApproveModal();
-  alert(`✓ Approved ${allowedTargets.length} รายการแล้ว`);
+    await Promise.all(updates);
+    closeApproveModal();
+    alert(`✓ Approved ${allowedTargets.length} รายการแล้ว`);
+  } catch(e) {
+    console.error('Approval save failed', e);
+    alert('บันทึกการอนุมัติไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง');
+  } finally {
+    if(confirmBtn) {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = originalLabel;
+    }
+  }
 }
 
 // ── Reject Modal ──
@@ -684,9 +733,9 @@ function openPmoEditApproversModal(memoNo) {
   const memo      = loadMemos().find(m => m.memoNo === memoNo);
   if (!memo) return;
   const approvers = memo.approvers || [];
-  const s         = typeof loadSettings === 'function' ? loadSettings() : null;
-  const names     = s?.approverNames || [];
-  const titles    = s?.approverTitles || [];
+  const profiles  = typeof getApprovers === 'function' ? getApprovers() : [];
+  const names     = profiles.map(profile => profile.full_name).filter(Boolean);
+  const titles    = [...new Set(profiles.map(profile => profile.title).filter(Boolean))];
 
   const existing = document.getElementById('pmo-approvers-modal');
   if (existing) existing.remove();
@@ -706,11 +755,11 @@ function openPmoEditApproversModal(memoNo) {
       <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end">
         <div>
           <label style="font-size:11px;color:var(--text-3)">ชื่อ</label>
-          <input class="ri appr-name" style="margin-top:3px;font-size:12px" value="${esc(a.name||'')}" ${a.status==='approved'?'disabled':''}>
+          <input class="ri appr-name" list="pmo-approver-names" style="margin-top:3px;font-size:12px" value="${esc(a.name||'')}" ${a.status==='approved'?'disabled':''}>
         </div>
         <div>
           <label style="font-size:11px;color:var(--text-3)">ตำแหน่ง</label>
-          <input class="ri appr-title" style="margin-top:3px;font-size:12px" value="${esc(a.title||'')}" ${a.status==='approved'?'disabled':''}>
+          <input class="ri appr-title" list="pmo-approver-titles" style="margin-top:3px;font-size:12px" value="${esc(a.title||'')}" ${a.status==='approved'?'disabled':''}>
         </div>
         ${a.status !== 'approved' && idx > 0 ? `<button class="btn-sm" onclick="this.closest('.approver-edit-row').remove()" style="color:var(--red);padding:6px 8px">✕</button>` : '<div></div>'}
       </div>
@@ -725,6 +774,8 @@ function openPmoEditApproversModal(memoNo) {
       <div style="font-size:12px;color:var(--text-2);margin-bottom:14px">
         Memo: <strong>${esc(memo.memoNo)}</strong>
       </div>
+      <datalist id="pmo-approver-names">${nameOpts}</datalist>
+      <datalist id="pmo-approver-titles">${titleOpts}</datalist>
       <div id="approver-rows">${approvers.map(renderApproverRow).join('')}</div>
       ${approvers.length < 3 ? `
         <button class="add-btn" onclick="addApproverRow()" style="margin-bottom:14px">+ เพิ่ม Approver</button>` : ''}
@@ -752,8 +803,8 @@ function addApproverRow() {
   row.innerHTML = `
     <div style="font-size:10px;font-weight:600;color:var(--text-3);margin-bottom:6px">A${idx+1}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end">
-      <div><label style="font-size:11px;color:var(--text-3)">ชื่อ</label><input class="ri appr-name" style="margin-top:3px;font-size:12px" placeholder="ชื่อ-นามสกุล"></div>
-      <div><label style="font-size:11px;color:var(--text-3)">ตำแหน่ง</label><input class="ri appr-title" style="margin-top:3px;font-size:12px" placeholder="ตำแหน่ง"></div>
+      <div><label style="font-size:11px;color:var(--text-3)">ชื่อ</label><input class="ri appr-name" list="pmo-approver-names" style="margin-top:3px;font-size:12px" placeholder="ชื่อ-นามสกุล"></div>
+      <div><label style="font-size:11px;color:var(--text-3)">ตำแหน่ง</label><input class="ri appr-title" list="pmo-approver-titles" style="margin-top:3px;font-size:12px" placeholder="ตำแหน่ง"></div>
       <button class="btn-sm" onclick="this.closest('.approver-edit-row').remove()" style="color:var(--red);padding:6px 8px">✕</button>
     </div>`;
   container.appendChild(row);

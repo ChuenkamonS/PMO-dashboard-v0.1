@@ -256,6 +256,7 @@ function memoToDb(m) {
     // ENT fields
     ent_client: m.entClient || null,
     ent_date:   m.entDate   || null,
+    ent_time:   m.entTime   || null,
     ent_place:  m.entPlace  || null,
     ent_people: m.entPeople || null,
     // DEP fields
@@ -394,7 +395,10 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   if (status === 'approved_a3' && memo.status !== 'pending_a3') return memo;
 
   const now     = new Date().toISOString();
+  const deferRender = !!extra._deferRender;
   const updated = { ...memo, ...extra, status, updatedAt: now };
+  delete updated._deferRender;
+  delete updated.throwOnSyncError;
 
   // ── Multi-approver flow logic ──
   const approvers = memo.approvers || [];
@@ -458,11 +462,15 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   }
 
   // Sync to Supabase
-  if (await checkSupa()) {
+  const supaReady = await checkSupa();
+  if (!supaReady && extra.throwOnSyncError) {
+    throw new Error('Supabase is unavailable');
+  }
+  if (supaReady) {
     try {
       const toSnake = s => s.replace(/([A-Z])/g, '_$1').toLowerCase();
       // Only exclude auditLog (handled separately above) and evidence URLs (now in DB)
-      const PENDING_COLUMNS = new Set(['auditLog']);
+      const PENDING_COLUMNS = new Set(['auditLog', 'throwOnSyncError', '_deferRender']);
       const patch = {
         status: updated.status,
         updated_at: now,
@@ -479,7 +487,10 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
       if (updated.rejectedAt)  patch.rejected_at  = updated.rejectedAt;
       if (updated.cancelledAt) patch.cancelled_at = updated.cancelledAt;
       await supaFetch('memos', 'PATCH', patch, '?memo_no=eq.' + encodeURIComponent(memoNo));
-    } catch(e) { console.warn('Supabase patch failed', e.message); }
+    } catch(e) {
+      console.warn('Supabase patch failed', e.message);
+      if(extra.throwOnSyncError) throw e;
+    }
   }
 
   // Update in-memory cache (always — whether Supabase succeeded or not)
@@ -499,8 +510,10 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   }
 
   // Safe render — only if DOM is ready
-  try { if (typeof renderPendingMemos === 'function') renderPendingMemos(); } catch(e) {}
-  try { if (typeof renderHistoryMemos === 'function') renderHistoryMemos(); } catch(e) {}
+  if(!deferRender) {
+    try { if (typeof renderPendingMemos === 'function') renderPendingMemos(); } catch(e) {}
+    try { if (typeof renderHistoryMemos === 'function') renderHistoryMemos(); } catch(e) {}
+  }
 
   return updated;
 }
@@ -652,9 +665,7 @@ function updateMemoStatus(memoNo, status, extra={}) {
       createPurchaseOrdersFromMemo(memos[idx]);
     }
   }
-  renderPendingMemos();
-  renderHistoryMemos();
-  updateMemoStatusAsync(memoNo, status, extra)
+  updateMemoStatusAsync(memoNo, status, { ...extra, _deferRender:true })
     .then(() => { renderPendingMemos(); renderHistoryMemos(); })
     .catch(e => console.warn('Supabase status update failed', e));
   return memos[idx];

@@ -6,22 +6,13 @@ const HIST_TYPE_LABELS = { sl:'Software License', hw:'Hardware', int:'Team Activ
 
 // ── Status lifecycle ──
 function memoStatusKey(memo) {
-  const s = memo.status || 'pending';
-  if (s === 'draft') return 'draft';
-  if (s === 'cancelled') return 'cancelled';
-  if (s === 'expired') return 'expired';
-  if (s === 'completed') return 'completed';
-  if (s === 'rejected') return 'rejected';
-  const stage = String(memo.approvalStage || '').toLowerCase();
-  if (stage.includes('a2')) return 'pending_a2';
-  if (stage.includes('a1')) return 'pending_a1';
-  return 'pending';
+  return memo.status || 'pending';
 }
 function histStatusLabel(memo) {
   const key = memoStatusKey(memo);
   const map = {
-    completed: 'Completed', rejected: 'Rejected', pending: 'Pending',
-    pending_a1: 'Pending A1', pending_a2: 'Pending A2',
+    completed: 'Completed', rejected: 'Rejected', pending: 'Pending A1',
+    pending_a2: 'Pending A2', pending_a3: 'Pending A3',
     draft: 'Draft', cancelled: 'Cancelled', expired: 'Expired'
   };
   return map[key] || key;
@@ -30,7 +21,7 @@ function histStatusBadgeClass(memo) {
   const key = memoStatusKey(memo);
   const map = {
     completed: 'badge-green', rejected: 'badge-red', pending: 'badge-amber',
-    pending_a1: 'badge-amber', pending_a2: 'badge-amber',
+    pending_a2: 'badge-amber', pending_a3: 'badge-amber',
     draft: 'badge-gray', cancelled: 'badge-gray', expired: 'badge-red'
   };
   return map[key] || 'badge-gray';
