@@ -24,6 +24,307 @@ async function supaFetch(table, method='GET', body=null, query='') {
   return text ? JSON.parse(text) : null;
 }
 
+// ── Shared financial models (Phase 1A — local storage only) ──
+const SPEND_TYPES = Object.freeze({
+  SOFTWARE: 'Software',
+  HARDWARE: 'Hardware',
+  TEAM_ACTIVITY: 'Team Activity',
+  CLIENT_EXPENSE: 'Client Expense',
+  DEPLOYMENT: 'Deployment',
+  INFRA: 'Infra',
+  OTHERS: 'Others',
+});
+const SPEND_TYPE_VALUES = Object.freeze(Object.values(SPEND_TYPES));
+const MEMO_TYPE_TO_SPEND_TYPE = Object.freeze({
+  sl: SPEND_TYPES.SOFTWARE,
+  hw: SPEND_TYPES.HARDWARE,
+  int: SPEND_TYPES.TEAM_ACTIVITY,
+  ent: SPEND_TYPES.CLIENT_EXPENSE,
+  dep: SPEND_TYPES.DEPLOYMENT,
+  infra: SPEND_TYPES.INFRA,
+  other: SPEND_TYPES.OTHERS,
+});
+const SPEND_TYPE_TO_MEMO_TYPE = Object.freeze({
+  [SPEND_TYPES.SOFTWARE]: 'sl',
+  [SPEND_TYPES.HARDWARE]: 'hw',
+  [SPEND_TYPES.TEAM_ACTIVITY]: 'int',
+  [SPEND_TYPES.CLIENT_EXPENSE]: 'ent',
+  [SPEND_TYPES.DEPLOYMENT]: 'dep',
+  [SPEND_TYPES.INFRA]: 'infra',
+  [SPEND_TYPES.OTHERS]: 'other',
+});
+const ACTUAL_SPEND_SOURCES = Object.freeze({
+  APPROVED_MEMO: 'Approved Memo',
+  MANUAL_EXPENSE: 'Manual / Historical Expense',
+  INFRA_COST: 'Infra Cost',
+});
+const ACTUAL_SPEND_SOURCE_VALUES = Object.freeze(Object.values(ACTUAL_SPEND_SOURCES));
+const FINANCIAL_STORAGE_KEYS = Object.freeze({
+  actualSpend: 'orbit-pmo-actual-spend-v1',
+  budgetPools: 'orbit-pmo-budget-pools-v1',
+});
+
+function spendTypeFromMemoType(memoType) {
+  return MEMO_TYPE_TO_SPEND_TYPE[String(memoType || '').trim().toLowerCase()] || SPEND_TYPES.OTHERS;
+}
+
+function parseStrictCalendarValue(value) {
+  const text = String(value || '').trim();
+  const match = text.match(/^(\d{4})-(\d{2})(?:-(\d{2}))?$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = match[3] == null ? null : Number(match[3]);
+  if (month < 1 || month > 12) return null;
+  if (day != null) {
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  }
+  return { text, year, month, day, precision: day == null ? 'month' : 'date' };
+}
+
+function isValidCalendarRange(startValue, endValue) {
+  const start = parseStrictCalendarValue(startValue);
+  const end = parseStrictCalendarValue(endValue);
+  if (!start || !end || start.precision !== end.precision) return false;
+  return start.text <= end.text;
+}
+
+function inclusiveCoverageMonths(startDate, endDate) {
+  if (!startDate || !endDate) return null;
+  const start = parseStrictCalendarValue(startDate);
+  const end = parseStrictCalendarValue(endDate);
+  if (!start || !end || !isValidCalendarRange(startDate, endDate)) return null;
+  return (end.year - start.year) * 12 + end.month - start.month + 1;
+}
+
+function generateFinancialRecordId(prefix = 'record') {
+  const uuid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${prefix}-${uuid}`;
+}
+
+function createActualSpendRecord(input = {}) {
+  const now = new Date().toISOString();
+  const startDate = input.startDate || null;
+  const endDate = input.endDate || null;
+  const coverageMonths = inclusiveCoverageMonths(startDate, endDate);
+  const coverageStatus = !startDate || !endDate ? 'Missing Coverage'
+    : coverageMonths ? 'Complete' : 'Invalid Coverage';
+  const effectiveDate = startDate || input.date || null;
+  return {
+    id: input.id || generateFinancialRecordId('actual-spend'),
+    source: input.source || '',
+    referenceNo: input.referenceNo || '',
+    memoId: input.memoId || null,
+    project: input.project || '',
+    spendType: input.spendType || SPEND_TYPES.OTHERS,
+    amount: Number(input.amount) || 0,
+    currency: input.currency || 'THB',
+    startDate,
+    endDate,
+    month: input.month || (effectiveDate ? String(effectiveDate).slice(0, 7) : null),
+    year: input.year || (effectiveDate ? String(effectiveDate).slice(0, 4) : null),
+    coverageMonths,
+    coverageStatus,
+    vendorProgram: input.vendorProgram || '',
+    description: input.description || '',
+    autoBudgetPoolId: input.autoBudgetPoolId || null,
+    manualBudgetPoolId: input.manualBudgetPoolId || null,
+    finalBudgetPoolId: input.manualBudgetPoolId || input.finalBudgetPoolId || input.autoBudgetPoolId || null,
+    budgetStatus: input.budgetStatus || 'Unbudgeted',
+    createdBy: input.createdBy || '',
+    createdAt: input.createdAt || now,
+    updatedBy: input.updatedBy || '',
+    updatedAt: input.updatedAt || now,
+  };
+}
+
+function validateActualSpendRecord(input) {
+  const record = createActualSpendRecord(input);
+  const errors = [];
+  if (!ACTUAL_SPEND_SOURCE_VALUES.includes(record.source)) errors.push('Invalid Source');
+  if (!record.referenceNo) errors.push('Reference No is required');
+  if (!record.project) errors.push('Project is required');
+  if (!SPEND_TYPE_VALUES.includes(record.spendType)) errors.push('Invalid Spend Type');
+  if (!(record.amount > 0)) errors.push('Amount must be greater than zero');
+  if (record.currency !== 'THB') errors.push('Current calculations support THB only');
+  if (record.startDate && !parseStrictCalendarValue(record.startDate)) errors.push('Invalid Start Date');
+  if (record.endDate && !parseStrictCalendarValue(record.endDate)) errors.push('Invalid End Date');
+  if (record.coverageStatus === 'Invalid Coverage') errors.push('Invalid coverage period');
+  return { valid: errors.length === 0, errors, record };
+}
+
+function actualSpendDuplicateKey(input = {}) {
+  const record = createActualSpendRecord(input);
+  return [
+    record.source,
+    record.referenceNo,
+    record.project,
+    record.spendType,
+    record.amount,
+    record.startDate || '',
+    record.endDate || '',
+  ].map(v => String(v).trim().toLowerCase()).join('|');
+}
+
+function validateActualSpendImport(rows, existingRows = []) {
+  const existingKeys = new Set(existingRows.map(actualSpendDuplicateKey));
+  const batchKeys = new Set();
+  const records = [];
+  const duplicates = [];
+  const errors = [];
+  (rows || []).forEach((row, index) => {
+    const result = validateActualSpendRecord(row);
+    if (!result.valid) {
+      errors.push({ row: index + 1, errors: result.errors });
+      return;
+    }
+    const key = actualSpendDuplicateKey(result.record);
+    if (existingKeys.has(key) || batchKeys.has(key)) {
+      duplicates.push({ row: index + 1, record: result.record });
+      return;
+    }
+    batchKeys.add(key);
+    records.push(result.record);
+  });
+  return {
+    valid: errors.length === 0,
+    errors,
+    duplicates,
+    records: errors.length ? [] : records,
+  };
+}
+
+function createBudgetPoolRecord(input = {}) {
+  const legacyTypes = Array.isArray(input.memoTypes) ? input.memoTypes.map(spendTypeFromMemoType) : [];
+  const spendTypes = (Array.isArray(input.spendTypes) ? input.spendTypes : legacyTypes)
+    .filter(t => SPEND_TYPE_VALUES.includes(t));
+  const memoTypes = spendTypes.map(t => SPEND_TYPE_TO_MEMO_TYPE[t]).filter(Boolean);
+  return {
+    id: input.id || '',
+    project: input.project || '',
+    name: input.name || '',
+    budget: Number(input.budget) || 0,
+    currency: input.currency || 'THB',
+    spendTypes,
+    startDate: input.startDate || input.startMonth || null,
+    endDate: input.endDate || input.endMonth || null,
+    year: input.year || null,
+    startMonth: input.startMonth || input.startDate || null,
+    endMonth: input.endMonth || input.endDate || null,
+    memoTypes,
+    createdBy: input.createdBy || '',
+    createdAt: input.createdAt || new Date().toISOString(),
+    updatedBy: input.updatedBy || '',
+    updatedAt: input.updatedAt || new Date().toISOString(),
+  };
+}
+
+function validateBudgetPoolRecord(input) {
+  const record = createBudgetPoolRecord(input);
+  const errors = [];
+  if (!record.id) errors.push('ID is required');
+  if (!record.project) errors.push('Project is required');
+  if (!(record.budget > 0)) errors.push('Budget must be greater than zero');
+  if (record.currency !== 'THB') errors.push('Current calculations support THB only');
+  if (!record.spendTypes.length) errors.push('At least one Spend Type is required');
+  if (!record.startDate || !record.endDate || !isValidCalendarRange(record.startDate, record.endDate)) {
+    errors.push('Valid start/end month or date range is required');
+  }
+  return { valid: errors.length === 0, errors, record };
+}
+
+function loadFinancialRecords(storageKey) {
+  try {
+    const rows = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    return Array.isArray(rows) ? rows : [];
+  } catch(e) { return []; }
+}
+
+function storeFinancialRecords(storageKey, rows) {
+  if (!Array.isArray(rows)) throw new Error('Financial storage requires an array');
+  let validated;
+  if (storageKey === FINANCIAL_STORAGE_KEYS.actualSpend) {
+    validated = rows.map(validateActualSpendRecord);
+  } else if (storageKey === FINANCIAL_STORAGE_KEYS.budgetPools) {
+    validated = rows.map(validateBudgetPoolRecord);
+  } else {
+    throw new Error('Unsupported financial storage key');
+  }
+  const invalid = validated.find(result => !result.valid);
+  if (invalid) throw new Error(invalid.errors.join('; '));
+  const records = validated.map(result => result.record);
+  localStorage.setItem(storageKey, JSON.stringify(records));
+  return records;
+}
+
+function loadActualSpendRecords() {
+  return loadFinancialRecords(FINANCIAL_STORAGE_KEYS.actualSpend).map(createActualSpendRecord);
+}
+
+function storeActualSpendRecords(rows) {
+  return storeFinancialRecords(FINANCIAL_STORAGE_KEYS.actualSpend, rows.map(createActualSpendRecord));
+}
+
+function loadBudgetPoolRecords() {
+  return loadFinancialRecords(FINANCIAL_STORAGE_KEYS.budgetPools).map(createBudgetPoolRecord);
+}
+
+function storeBudgetPoolRecords(rows) {
+  return storeFinancialRecords(FINANCIAL_STORAGE_KEYS.budgetPools, rows.map(createBudgetPoolRecord));
+}
+
+function queryActualSpend(filters = {}, rows = loadActualSpendRecords()) {
+  return rows.filter(record =>
+    (!filters.source || record.source === filters.source) &&
+    (!filters.project || record.project === filters.project) &&
+    (!filters.spendType || record.spendType === filters.spendType) &&
+    (!filters.currency || record.currency === filters.currency) &&
+    (!filters.budgetStatus || record.budgetStatus === filters.budgetStatus) &&
+    (!filters.fromDate || (record.startDate && record.startDate >= filters.fromDate)) &&
+    (!filters.toDate || (record.endDate && record.endDate <= filters.toDate))
+  );
+}
+
+function queryBudgetPools(filters = {}, rows = loadBudgetPoolRecords()) {
+  return rows.filter(pool =>
+    (!filters.project || pool.project === filters.project) &&
+    (!filters.spendType || pool.spendTypes.includes(filters.spendType)) &&
+    (!filters.currency || pool.currency === filters.currency) &&
+    (!filters.date || ((!pool.startDate || filters.date >= pool.startDate) && (!pool.endDate || filters.date <= pool.endDate)))
+  );
+}
+
+function getActualSpendByProject(project, rows) {
+  return queryActualSpend({ project }, rows || loadActualSpendRecords());
+}
+
+function getBudgetPoolsByProject(project, rows) {
+  return queryBudgetPools({ project }, rows || loadBudgetPoolRecords());
+}
+
+function getFinalBudgetPoolId(actualSpend = {}) {
+  return actualSpend.manualBudgetPoolId || actualSpend.finalBudgetPoolId || actualSpend.autoBudgetPoolId || null;
+}
+
+const FINANCIAL_HELPERS = Object.freeze({
+  queryActualSpend,
+  queryBudgetPools,
+  getActualSpendByProject,
+  getBudgetPoolsByProject,
+  getFinalBudgetPoolId,
+});
+
+function importActualSpendRecords(rows) {
+  const existing = loadActualSpendRecords();
+  const result = validateActualSpendImport(rows, existing);
+  if (!result.valid) return { ...result, saved: 0 };
+  storeActualSpendRecords([...existing, ...result.records]);
+  return { ...result, saved: result.records.length };
+}
+
 // ══════════════════════════════════════════════════════════════════
 // GLOBAL: User profiles & authority limits cache
 // ══════════════════════════════════════════════════════════════════
