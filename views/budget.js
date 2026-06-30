@@ -2527,15 +2527,28 @@ function _renderBvaWith(pools) {
   const byProj = {};
   filteredPools.forEach(p => { if (!byProj[p.project]) byProj[p.project] = []; byProj[p.project].push(p); });
 
+  // Group unmatched memos by their effective project so they surface under the right section
+  // (or under a synthetic "(ไม่มี Pool)" section if their project has no pool)
+  const unmatchedMemos = approved.filter(m => !matchMemoToPool(m, allPoolsThisYear));
+  const unmatchedByProj = {};
+  unmatchedMemos.forEach(m => {
+    const key = m.budgetSource || m.project || '(ไม่ระบุ)';
+    if (!unmatchedByProj[key]) unmatchedByProj[key] = [];
+    unmatchedByProj[key].push(m);
+  });
+
+  // Synthetic sections for projects that have unmatched memos but no pool in this view
+  const nopoolProjs = Object.keys(unmatchedByProj).filter(k => !byProj[k]);
+  nopoolProjs.forEach(k => { byProj[k] = []; });
+
   container.innerHTML = Object.entries(byProj).map(([proj, projPools]) => {
     const projBudget = projPools.reduce((s, p) => s + (p.budget || 0), 0);
     const projActual = projPools.reduce((s, p) => s + getPoolActual(p, approved, filteredPools), 0);
     const projPct    = projBudget > 0 ? Math.round(projActual / projBudget * 100) : null;
     const pctColor   = projPct === null ? 'var(--text-3)' : projPct > 100 ? 'var(--red)' : projPct >= 90 ? 'var(--amber)' : 'var(--green)';
 
-    // Unbudgeted for this project
-    const projUnbudgeted = approved
-      .filter(m => (m.project || '(ไม่ระบุ)') === proj && !matchMemoToPool(m, allPoolsThisYear))
+    // Use budgetSource || project (same logic as matchMemoToPool) so the right memos land here
+    const projUnbudgeted = (unmatchedByProj[proj] || [])
       .reduce((s, m) => s + (Number(m.total) || 0), 0);
 
     return `
