@@ -105,3 +105,27 @@
 
 #### Remaining Work
 - Downstream financial pages continue to use their existing data paths until their planned phases.
+
+---
+
+### Phase 3 - Unified Actual Spend
+#### Added
+- Actual Spend summary cards, canonical record table, Budget Status filter, and row drill-down.
+- Historical/Manual and Infra Cost projection into the shared Phase 1A Actual Spend model.
+- Actual Spend spreadsheet import using Phase 1A validation, all-or-nothing failure, and duplicate rules.
+- Focused tests covering the three allowed sources and inclusive Historical/Infra coverage totals.
+
+#### Changed
+- Actual Spend filters and CSV export now consume the same canonical, Phase 1B-mapped records.
+- Completed memos remain idempotently integrated from Phase 2; Historical and Infra records are reconciled by stable source IDs.
+- Invalid legacy source rows are skipped during reconciliation so they cannot block valid Actual Spend records from rendering.
+- Actual Spend now defaults to a selectable data year and groups the filtered result by Project, Spend Type, and Source.
+- Replaced Actual Spend KPI cards with a compact year-specific total line and project summaries.
+- Removed the Overview budget KPI card and clarified the wording of the remaining KPI values.
+- Actual Spend drill-down now uses responsive detail cards that fit within one view without horizontal scrolling.
+
+#### Data Flow
+- Approved Memo + Historical/Manual Expense + Infra Cost → shared Actual Spend → Budget Pool mapping → filters, summary cards, drill-down, and export.
+
+#### Remaining Work
+- Forecast, Budget vs Actual, Overview, Settings, and later cleanup phases remain unchanged.

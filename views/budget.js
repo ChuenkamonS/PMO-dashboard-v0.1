@@ -356,33 +356,145 @@ function switchBudgetTab(tab, btn) {
 // ── Export Budget CSVs ──────────────────────────────────────────
 
 async function exportActualSpendCSV() {
-  await loadManualExpensesAsync();
-  const fromVal = document.getElementById('as-from')?.value || '';
-  const toVal = document.getElementById('as-to')?.value || '';
-  const projVal = document.getElementById('as-project')?.value || 'all';
-  const typeVal = document.getElementById('as-type')?.value || 'all';
-  const sourceVal = document.getElementById('as-source')?.value || 'all';
-  const headers = ['Source','Reference','ประเภท','โครงการ','วงเงิน','ช่วงเวลา','ผู้บันทึก','รายละเอียด'];
-  const rows = [];
-  if (sourceVal !== 'manual') {
-    loadMemos().filter(m => memoStatusKey(m) === 'completed').forEach(m => {
-      const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
-      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      const project = m.budgetSource || m.project || '(ไม่ระบุ)';
-      if ((fromVal && key < fromVal) || (toVal && key > toVal) || (projVal !== 'all' && project !== projVal) || (typeVal !== 'all' && m.type !== typeVal)) return;
-      rows.push(['Memo',m.memoNo,m.type?.toUpperCase(),project,Number(m.total)||0,key,m.requesterName||'',m.subject||'']);
-    });
-  }
-  if (sourceVal !== 'memo') {
-    activeManualExpenses().forEach(e => {
-      const amount = manualExpenseAmountInRange(e, fromVal, toVal);
-      if (!amount || (projVal !== 'all' && e.project !== projVal) || (typeVal !== 'all' && e.expenseType !== typeVal)) return;
-      const period = e.frequency === 'monthly' ? `${e.startMonth} to ${e.endMonth}` : e.expenseDate;
-      rows.push(['Historical',e.referenceNo||e.id,e.expenseType.toUpperCase(),e.project,amount,period,e.createdBy||'',e.description]);
-    });
-  }
+  await refreshCanonicalActualSpend();
+  const rows = filteredActualSpendRecords().map(record => [
+    record.source, record.referenceNo, record.spendType, record.project, record.amount,
+    record.startDate || '', record.endDate || '', record.finalBudgetPoolId || '', record.budgetStatus,
+    record.createdBy || '', record.description || '',
+  ]);
   if (!rows.length) { alert('ไม่มีข้อมูล'); return; }
-  _downloadCSV('Actual_Spend', headers, rows);
+  _downloadCSV('Actual_Spend', ['Source','Reference','Spend Type','Project','Amount','Start','End','Budget Pool','Budget Status','Created By','Description'], rows);
+}
+
+function manualExpenseToActualSpend(expense) {
+  const monthly = expense.frequency === 'monthly';
+  const startDate = monthly ? expense.startMonth : expense.expenseDate;
+  const endDate = monthly ? expense.endMonth : expense.expenseDate;
+  const months = monthly ? inclusiveCoverageMonths(startDate, endDate) : 1;
+  return createActualSpendRecord({
+    id: `actual-spend-manual-${expense.id}`,
+    source: ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE,
+    referenceNo: expense.referenceNo || expense.id,
+    project: expense.project,
+    spendType: spendTypeFromMemoType(expense.expenseType),
+    amount: (Number(expense.amount) || 0) * (months || 1),
+    startDate, endDate,
+    description: expense.description || expense.notes || '',
+    manualBudgetPoolId: expense.budgetPoolId || null,
+    createdBy: expense.createdBy || '', createdAt: expense.createdAt,
+    updatedBy: expense.updatedBy || '', updatedAt: expense.updatedAt,
+  });
+}
+
+function infraCostToActualSpend(entry) {
+  const months = inclusiveCoverageMonths(entry.start_month, entry.end_month);
+  return createActualSpendRecord({
+    id: `actual-spend-infra-${entry.id}`,
+    source: ACTUAL_SPEND_SOURCES.INFRA_COST,
+    referenceNo: entry.id,
+    project: entry.project,
+    spendType: SPEND_TYPES.INFRA,
+    amount: (Number(entry.monthly_cost) || 0) * (months || 1),
+    startDate: entry.start_month, endDate: entry.end_month,
+    vendorProgram: entry.program || '', description: entry.program || 'Infrastructure cost',
+  });
+}
+
+function reconcileActualSpendSources(memos = loadMemos(), manual = activeManualExpenses(), infra = loadInfraCosts(), pools = loadBudgetPoolRecords()) {
+  const existing = loadActualSpendRecords();
+  const retained = existing.filter(record =>
+    !String(record.id).startsWith('actual-spend-manual-') &&
+    !String(record.id).startsWith('actual-spend-infra-')
+  );
+  const byId = new Map(retained.map(record => [record.id, record]));
+  memos.filter(memo => memoStatusKey(memo) === 'completed').forEach(memo => {
+    const previous = existing.find(record => record.memoId === memo.memoNo);
+    const record = actualSpendFromMemo({ ...memo, status:'completed' }, previous);
+    if (record && validateActualSpendRecord(record).valid) byId.set(record.id, record);
+  });
+  [...manual.map(manualExpenseToActualSpend), ...infra.map(infraCostToActualSpend)].forEach(record => {
+    if (validateActualSpendRecord(record).valid) byId.set(record.id, record);
+  });
+  const validRecords = [...byId.values()].filter(record => validateActualSpendRecord(record).valid);
+  const mapped = mapActualSpendRecords(validRecords, pools);
+  storeActualSpendRecords(mapped);
+  return mapped;
+}
+
+async function refreshCanonicalActualSpend() {
+  await Promise.all([loadManualExpensesAsync(), loadInfraCostsAsync()]);
+  return reconcileActualSpendSources();
+}
+
+function actualSpendRecordInRange(record, fromMonth, toMonth) {
+  const start = String(record.startDate || record.month || '').slice(0, 7);
+  const end = String(record.endDate || record.month || start).slice(0, 7);
+  return (!fromMonth || !end || end >= fromMonth) && (!toMonth || !start || start <= toMonth);
+}
+
+function filteredActualSpendRecords(records = loadActualSpendRecords()) {
+  const from = document.getElementById('as-from')?.value || '';
+  const to = document.getElementById('as-to')?.value || '';
+  const project = document.getElementById('as-project')?.value || 'all';
+  const type = document.getElementById('as-type')?.value || 'all';
+  const source = document.getElementById('as-source')?.value || 'all';
+  const budgetStatus = document.getElementById('as-budget-status')?.value || 'all';
+  const year = document.getElementById('as-year')?.value || '';
+  const sourceMap = { memo:ACTUAL_SPEND_SOURCES.APPROVED_MEMO, manual:ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE, infra:ACTUAL_SPEND_SOURCES.INFRA_COST };
+  return queryActualSpend({
+    project: project === 'all' ? '' : project,
+    spendType: type === 'all' ? '' : spendTypeFromMemoType(type),
+    source: source === 'all' ? '' : sourceMap[source],
+    budgetStatus: budgetStatus === 'all' ? '' : budgetStatus,
+  }, records).filter(record =>
+    actualSpendRecordInRange(record, from, to) && (!year || actualSpendRecordInYear(record, year))
+  );
+}
+
+function actualSpendRecordInYear(record, year) {
+  const fallback = String(record.year || record.month || record.createdAt || record.updatedAt || '').slice(0, 4);
+  const startYear = String(record.startDate || fallback).slice(0, 4);
+  const endYear = String(record.endDate || startYear).slice(0, 4);
+  return (!startYear || startYear <= year) && (!endYear || endYear >= year);
+}
+
+function actualSpendImportRow(row) {
+  const get = (...keys) => keys.map(key => row[key]).find(value => value !== undefined && value !== '');
+  const rawSource = String(get('Source','source') || ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE).trim();
+  const source = rawSource.toLowerCase().includes('infra') ? ACTUAL_SPEND_SOURCES.INFRA_COST : ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE;
+  const rawType = get('Spend Type','spendType','Type','type') || (source === ACTUAL_SPEND_SOURCES.INFRA_COST ? 'Infra' : 'Others');
+  const spendType = SPEND_TYPE_VALUES.includes(rawType) ? rawType : spendTypeFromMemoType(rawType);
+  return {
+    source, referenceNo:String(get('Reference No','Reference','referenceNo') || '').trim(),
+    project:String(get('Project','project') || '').trim(), spendType,
+    amount:Number(get('Amount','amount') || 0), currency:'THB',
+    startDate:String(get('Start Date','Start','startDate') || '').trim() || null,
+    endDate:String(get('End Date','End','endDate') || '').trim() || null,
+    vendorProgram:String(get('Vendor / Program','Program','vendorProgram') || '').trim(),
+    description:String(get('Description','description') || '').trim(), createdBy:currentUser(),
+  };
+}
+
+function handleActualSpendImport(event) {
+  if (!isPMO()) { alert('เฉพาะ PMO เท่านั้นที่ import Actual Spend ได้'); event.target.value = ''; return; }
+  const file = event.target.files?.[0];
+  if (!file || typeof XLSX === 'undefined') return;
+  const reader = new FileReader();
+  reader.onload = async e => {
+    try {
+      const workbook = XLSX.read(e.target.result, { type:'binary' });
+      const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval:'' }).map(actualSpendImportRow);
+      const result = importActualSpendRecords(rows);
+      if (!result.valid) {
+        alert(`Import ไม่สำเร็จ\n${result.errors.map(error => `Row ${error.row}: ${error.errors.join(', ')}`).join('\n')}`);
+        return;
+      }
+      alert(`Import สำเร็จ ${result.saved} รายการ · ข้ามข้อมูลซ้ำ ${result.duplicates.length} รายการ`);
+      await renderActualSpend();
+    } catch(error) { alert('Import ไม่สำเร็จ: ' + error.message); }
+  };
+  reader.readAsBinaryString(file);
+  event.target.value = '';
 }
 
 function exportBudgetVsActualCSV() {
@@ -687,7 +799,7 @@ function _ovUpdateKPIs() {
 
   const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
   setText('bgt-kpi-total', money(Math.round(total)));
-  setText('bgt-kpi-actual-sub', `SL กระจายตาม duration · others ตามวันที่ (${numMonths} เดือน)`);
+  setText('bgt-kpi-actual-sub', `ยอดใช้จ่ายจริงในช่วง ${numMonths} เดือนที่เลือก`);
 
   if (budgetTotal > 0) {
     const pct      = Math.round(total / budgetTotal * 100);
@@ -697,11 +809,11 @@ function _ovUpdateKPIs() {
     setText('bgt-kpi-budget-sub', `งบ SL ตั้งไว้ ${numMonths} เดือน`);
     const remEl = document.getElementById('bgt-kpi-remaining');
     if (remEl) { remEl.textContent = money(Math.round(rem)); remEl.style.color = remColor; }
-    setText('bgt-kpi-remaining-sub', `${pct}% utilized`);
+    setText('bgt-kpi-remaining-sub', `ใช้งบประมาณแล้ว ${pct}%`);
     const fColor = forecastTotal > annualBudget ? 'var(--red)' : forecastTotal / annualBudget >= 0.9 ? 'var(--amber)' : 'var(--green)';
     const fEl = document.getElementById('bgt-kpi-forecast');
     if (fEl) { fEl.textContent = money(Math.round(forecastTotal)); fEl.style.color = fColor; }
-    setText('bgt-kpi-forecast-sub', 'avg 3 เดือนล่าสุด');
+    setText('bgt-kpi-forecast-sub', 'อ้างอิงค่าเฉลี่ย 3 เดือนล่าสุด');
   } else {
     setText('bgt-kpi-budget', '—');
     const budEl = document.getElementById('bgt-kpi-budget-sub');
@@ -710,7 +822,7 @@ function _ovUpdateKPIs() {
     setText('bgt-kpi-remaining-sub', 'ต้องตั้งงบก่อน');
     const fEl = document.getElementById('bgt-kpi-forecast');
     if (fEl) { fEl.textContent = money(Math.round(forecastTotal)); fEl.style.color = 'var(--amber)'; }
-    setText('bgt-kpi-forecast-sub', 'avg 3 เดือนล่าสุด (ไม่มีงบอ้างอิง)');
+    setText('bgt-kpi-forecast-sub', 'อ้างอิงค่าเฉลี่ย 3 เดือนล่าสุด');
   }
 }
 
@@ -2109,7 +2221,7 @@ async function voidManualExpense(id) {
 }
 
 async function renderActualSpend() {
-  await loadManualExpensesAsync();
+  const canonical = await refreshCanonicalActualSpend();
   const fromVal   = document.getElementById('as-from')?.value || '';
   const toVal     = document.getElementById('as-to')?.value   || '';
   const projVal   = document.getElementById('as-project')?.value || 'all';
@@ -2119,114 +2231,104 @@ async function renderActualSpend() {
   if (!container) return;
   const addButton = document.getElementById('as-add-manual');
   if (addButton) addButton.style.display = isPMO() ? '' : 'none';
+  const importButton = document.getElementById('as-import-button');
+  if (importButton) importButton.style.display = isPMO() ? '' : 'none';
+
+  const yearSel = document.getElementById('as-year');
+  if (yearSel) {
+    const current = yearSel.value || String(new Date().getFullYear());
+    const years = [...new Set(canonical.flatMap(record => {
+      const fallback = String(record.year || record.month || record.createdAt || record.updatedAt || '').slice(0, 4);
+      const start = Number(String(record.startDate || fallback).slice(0, 4));
+      const end = Number(String(record.endDate || start).slice(0, 4));
+      if (!start) return [];
+      return Array.from({ length:Math.max(1, Math.min(20, (end || start) - start + 1)) }, (_, i) => String(start + i));
+    }))].sort((a,b) => b.localeCompare(a));
+    if (!years.length) years.push(String(new Date().getFullYear()));
+    yearSel.innerHTML = years.map(year => `<option value="${year}">ปี ${year}</option>`).join('');
+    yearSel.value = years.includes(current) ? current : years[0];
+  }
 
   const projSel = document.getElementById('as-project');
   if (projSel) {
     const current = projSel.value;
-    const projs = [...new Set([
-      ...loadMemos().filter(m => memoStatusKey(m) === 'completed').map(m => m.budgetSource || m.project || '(ไม่ระบุ)'),
-      ...activeManualExpenses().map(e => e.project || '(ไม่ระบุ)'),
-    ])].sort();
+    const projs = [...new Set(canonical.map(record => record.project).filter(Boolean))].sort();
     projSel.innerHTML = '<option value="all">ทุกโปรเจค</option>';
     projs.forEach(p => { const o = document.createElement('option'); o.value = o.textContent = p; projSel.appendChild(o); });
     projSel.value = projs.includes(current) ? current : 'all';
   }
 
+  const selectedYear = yearSel?.value || String(new Date().getFullYear());
   const labelEl = document.getElementById('as-period-label');
-  if (labelEl) labelEl.textContent = fromVal && toVal ? `${fromVal} – ${toVal}` : fromVal ? `ตั้งแต่ ${fromVal}` : toVal ? `ถึง ${toVal}` : 'ทั้งหมด';
+  if (labelEl) labelEl.textContent = fromVal && toVal ? `ปี ${selectedYear} · ${fromVal} – ${toVal}` : fromVal ? `ปี ${selectedYear} · ตั้งแต่ ${fromVal}` : toVal ? `ปี ${selectedYear} · ถึง ${toVal}` : `แสดงข้อมูลปี ${selectedYear}`;
 
-  let approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
-  if (fromVal || toVal) {
-    approved = approved.filter(m => {
-      const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
-      const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      return (!fromVal || k >= fromVal) && (!toVal || k <= toVal);
-    });
-  }
-  if (projVal !== 'all') approved = approved.filter(m => (m.budgetSource || m.project || '(ไม่ระบุ)') === projVal);
-  if (typeVal !== 'all') approved = approved.filter(m => m.type === typeVal);
-  if (sourceVal === 'manual') approved = [];
-
-  let manual = activeManualExpenses().filter(e => manualExpenseAmountInRange(e, fromVal, toVal) > 0);
-  if (projVal !== 'all') manual = manual.filter(e => (e.project || '(ไม่ระบุ)') === projVal);
-  if (typeVal !== 'all') manual = manual.filter(e => e.expenseType === typeVal);
-  if (sourceVal === 'memo') manual = [];
-
-  if (!approved.length && !manual.length) {
+  const records = filteredActualSpendRecords(canonical);
+  if (!records.length) {
     container.innerHTML = `<div class="card" style="padding:32px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูลในช่วงที่เลือก</div>`;
     return;
   }
 
-  const byProj = {};
-  approved.forEach(m => {
-    const p = m.budgetSource || m.project || '(ไม่ระบุ)';
-    const t = m.type    || 'other';
-    if (!byProj[p])    byProj[p] = {};
-    const key = `${t}|memo`;
-    if (!byProj[p][key]) byProj[p][key] = { type:t, source:'memo', total:0, memos:[], manual:[] };
-    byProj[p][key].total += Number(m.total) || 0;
-    byProj[p][key].memos.push(m);
-  });
-  manual.forEach(e => {
-    const p = e.project || '(ไม่ระบุ)';
-    const t = e.expenseType || 'other';
-    if (!byProj[p]) byProj[p] = {};
-    const key = `${t}|manual`;
-    if (!byProj[p][key]) byProj[p][key] = { type:t, source:'manual', total:0, memos:[], manual:[] };
-    byProj[p][key].total += manualExpenseAmountInRange(e, fromVal, toVal);
-    byProj[p][key].manual.push(e);
-  });
-
-  const memoTotal = approved.reduce((s, m) => s + (Number(m.total) || 0), 0);
-  const manualTotal = manual.reduce((s, e) => s + manualExpenseAmountInRange(e, fromVal, toVal), 0);
-  const grandTotal = memoTotal + manualTotal;
+  const sourceTotal = source => calculateActualSpend(records, { source });
+  const memoTotal = sourceTotal(ACTUAL_SPEND_SOURCES.APPROVED_MEMO);
+  const manualTotal = sourceTotal(ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE);
+  const infraTotal = sourceTotal(ACTUAL_SPEND_SOURCES.INFRA_COST);
+  const grandTotal = calculateActualSpend(records);
   const tdS = 'padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px';
+  const byProject = {};
+  records.forEach(record => {
+    const project = record.project || '(ไม่ระบุ)';
+    const key = `${record.spendType}|${record.source}`;
+    if (!byProject[project]) byProject[project] = {};
+    if (!byProject[project][key]) byProject[project][key] = { spendType:record.spendType, source:record.source, amount:0, records:[] };
+    byProject[project][key].amount += Number(record.amount) || 0;
+    byProject[project][key].records.push(record);
+  });
+  const sourceLabel = source => source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO ? 'Memo' : source === ACTUAL_SPEND_SOURCES.INFRA_COST ? 'Infra' : 'Historical';
+  const percentLabel = (amount, total) => {
+    const percent = total > 0 ? amount / total * 100 : 0;
+    return percent > 0 && percent < 1 ? '<1%' : `${Math.round(percent)}%`;
+  };
 
   container.innerHTML = `
-    <div style="margin-bottom:12px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
-      <span style="font-size:13px;font-weight:600;color:var(--text)">Total: </span>
-      <span style="font-size:13px;font-weight:600;color:var(--blue)">${money(Math.round(grandTotal))}</span>
-      <span style="font-size:11px;color:var(--text-3)"><strong style="color:var(--blue)">Memo</strong> ${money(Math.round(memoTotal))} · ${approved.length} รายการ</span>
-      <span style="font-size:11px;color:var(--text-3)"><strong style="color:var(--amber)">Historical</strong> ${money(Math.round(manualTotal))} · ${manual.length} รายการ</span>
+    <div style="margin:2px 0 14px;display:flex;gap:20px;align-items:center;flex-wrap:wrap;font-size:12px">
+      <strong style="font-size:13px">Actual Spend ปี ${esc(selectedYear)}: <span style="color:var(--blue)">${money(Math.round(grandTotal))}</span></strong>
+      <span style="color:var(--text-3)"><strong style="color:var(--blue)">Memo</strong> ${money(Math.round(memoTotal))} · ${records.filter(r=>r.source===ACTUAL_SPEND_SOURCES.APPROVED_MEMO).length} รายการ</span>
+      <span style="color:var(--text-3)"><strong style="color:var(--amber)">Historical</strong> ${money(Math.round(manualTotal))} · ${records.filter(r=>r.source===ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE).length} รายการ</span>
+      <span style="color:var(--text-3)"><strong style="color:var(--green)">Infra</strong> ${money(Math.round(infraTotal))} · ${records.filter(r=>r.source===ACTUAL_SPEND_SOURCES.INFRA_COST).length} รายการ</span>
     </div>
-    ${Object.entries(byProj)
-      .sort((a,b) => Object.values(b[1]).reduce((s,v)=>s+v.total,0) - Object.values(a[1]).reduce((s,v)=>s+v.total,0))
-      .map(([proj, types]) => {
-        const projTotal = Object.values(types).reduce((s, v) => s + v.total, 0);
-        return `
-          <div class="card" style="padding:0;overflow:hidden;margin-bottom:10px">
-            <div style="padding:10px 14px;background:var(--bg);display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)">
-              <span style="font-size:13px;font-weight:600">${esc(proj)}</span>
-              <span style="font-size:13px;font-weight:600;color:var(--blue)">${money(Math.round(projTotal))}</span>
-            </div>
-            <table class="hist-table">
-              <thead><tr>
-                <th style="${tdS};text-align:left">Type</th>
-                <th style="${tdS};text-align:left">Source</th>
-                <th style="${tdS};text-align:right">Amount</th>
-                <th style="${tdS};text-align:right">รายการ</th>
-                <th style="${tdS};text-align:right">% ของ project</th>
-              </tr></thead>
-              <tbody>
-                ${Object.values(types).sort((a,b) => b.total - a.total).map(data => {
-                  const type = data.type;
-                  const memoNosAttr = data.memos.map(m=>m.memoNo).join(',');
-                  const action = data.source === 'memo'
-                    ? `showActualMemos('${esc(proj)}','${esc(type)}','${esc(memoNosAttr)}')`
-                    : `showManualExpenses('${esc(proj)}','${esc(type)}')`;
-                  const count = data.source === 'memo' ? data.memos.length : data.manual.length;
-                  return `<tr style="cursor:pointer" onclick="${action}">
-                    <td style="${tdS}"><span style="font-size:11px;padding:2px 8px;border-radius:4px;background:var(--bg);color:var(--text-2)">${BGT_TYPE_LABELS[type] || type}</span></td>
-                    <td style="${tdS}"><span style="font-size:10px;padding:2px 7px;border-radius:4px;background:${data.source==='memo'?'var(--blue-50)':'var(--amber-50)'};color:${data.source==='memo'?'var(--blue)':'var(--amber)'}">${data.source==='memo'?'Memo':'Historical'}</span></td>
-                    <td style="${tdS};text-align:right;font-weight:500">${money(Math.round(data.total))}</td>
-                    <td style="${tdS};text-align:right;color:var(--blue)">${count} <span style="font-size:10px;color:var(--text-3)">ดูรายการ →</span></td>
-                    <td style="${tdS};text-align:right;color:var(--text-2)">${projTotal > 0 ? Math.round(data.total/projTotal*100) : 0}%</td>
-                  </tr>`;
-                }).join('')}
-              </tbody>
-            </table>
-          </div>`;
-      }).join('')}`;
+    ${Object.entries(byProject).sort((a,b) => Object.values(b[1]).reduce((s,v)=>s+v.amount,0) - Object.values(a[1]).reduce((s,v)=>s+v.amount,0)).map(([project, groups]) => {
+      const projectTotal = Object.values(groups).reduce((sum, group) => sum + group.amount, 0);
+      return `<div class="card" style="padding:0;overflow:auto;margin-bottom:10px">
+        <div style="padding:10px 14px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;justify-content:space-between"><strong>${esc(project)}</strong><strong style="color:var(--blue)">${money(Math.round(projectTotal))}</strong></div>
+        <table class="hist-table"><thead><tr><th style="${tdS};text-align:left">Type</th><th style="${tdS};text-align:left">Source</th><th style="${tdS};text-align:right">Amount</th><th style="${tdS};text-align:right">รายการ</th><th style="${tdS};text-align:right">% ของ Project</th></tr></thead>
+        <tbody>${Object.values(groups).sort((a,b)=>b.amount-a.amount).map(group => `<tr style="cursor:pointer" onclick="showActualSpendGroup('${encodeURIComponent(project)}','${encodeURIComponent(group.spendType)}','${encodeURIComponent(group.source)}')">
+          <td style="${tdS}"><span style="padding:2px 8px;border-radius:4px;background:var(--bg)">${esc(group.spendType)}</span></td><td style="${tdS}"><span style="padding:2px 7px;border-radius:4px;background:var(--blue-50);color:var(--blue)">${sourceLabel(group.source)}</span></td>
+          <td style="${tdS};text-align:right;font-weight:600">${money(Math.round(group.amount))}</td><td style="${tdS};text-align:right;color:var(--blue)">${group.records.length} <span style="color:var(--text-3)">รายการ →</span></td><td style="${tdS};text-align:right">${percentLabel(group.amount, projectTotal)}</td></tr>`).join('')}</tbody></table></div>`;
+    }).join('')}`;
+}
+
+function showActualSpendGroup(projectEncoded, typeEncoded, sourceEncoded) {
+  const project = decodeURIComponent(projectEncoded);
+  const spendType = decodeURIComponent(typeEncoded);
+  const source = decodeURIComponent(sourceEncoded);
+  const rows = filteredActualSpendRecords().filter(record => record.project === project && record.spendType === spendType && record.source === source);
+  const panel = document.createElement('div');
+  panel.id = 'actual-spend-group-panel';
+  panel.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;display:flex;align-items:center;justify-content:center';
+  panel.innerHTML = `<div class="card" style="width:900px;max-width:96vw;max-height:86vh;overflow-x:hidden;overflow-y:auto;padding:0"><div style="padding:12px 16px;display:flex;justify-content:space-between;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:1"><div><strong>${esc(project)} · ${esc(spendType)}</strong><div style="font-size:11px;color:var(--text-3)">${rows.length} รายการ · ${money(calculateActualSpend(rows))}</div></div><button class="btn-sm" onclick="document.getElementById('actual-spend-group-panel').remove()">✕</button></div><div style="padding:10px;display:flex;flex-direction:column;gap:8px">${rows.map(record => `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;align-items:start" onclick="document.getElementById('actual-spend-group-panel').remove();showActualSpendRecord('${esc(record.id)}')"><div style="min-width:0"><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Reference</div><div style="font-weight:600;color:var(--blue);overflow-wrap:anywhere">${esc(record.referenceNo)}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Source</div><div>${esc(record.source)}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Coverage</div><div>${esc(record.startDate||'—')} → ${esc(record.endDate||'—')}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Budget Status</div><div>${esc(record.budgetStatus)}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Amount</div><div style="font-weight:700">${money(record.amount)}</div></div></div>`).join('')}</div></div>`;
+  document.body.appendChild(panel);
+  panel.addEventListener('click', event => { if (event.target === panel) panel.remove(); });
+}
+
+function showActualSpendRecord(id) {
+  const record = loadActualSpendRecords().find(item => item.id === id);
+  if (!record) return;
+  if (record.source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO && record.memoId) { openMemoReadOnly(record.memoId); return; }
+  if (record.source === ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE) {
+    const expenseId = String(record.id).replace('actual-spend-manual-', '');
+    if (isPMO() && loadManualExpenses().some(item => item.id === expenseId)) { openManualExpenseModal(expenseId); return; }
+  }
+  alert(`${record.referenceNo}\n${record.source} · ${record.spendType}\n${record.project}\n${record.description || record.vendorProgram || ''}\n${money(record.amount)}\nBudget: ${record.budgetStatus}`);
 }
 
 function showActualMemos(proj, type, memoNosStr) {

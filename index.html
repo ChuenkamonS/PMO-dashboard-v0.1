@@ -1445,26 +1445,21 @@ svg.icon { display: inline-block; vertical-align: middle; }
           </div>
 
           <!-- KPI row -->
-          <div class="metric-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">
+          <div class="metric-row" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px">
             <div class="metric-card">
-              <div class="metric-label">งบประมาณ (ช่วงนี้)</div>
-              <div class="metric-val" id="bgt-kpi-budget" style="color:var(--text)">฿0</div>
-              <div class="metric-sub" id="bgt-kpi-budget-sub">ตั้งไว้สำหรับช่วงนี้</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">ใช้จ่ายจริง</div>
+              <div class="metric-label">ใช้จ่ายจริง (ช่วงที่เลือก)</div>
               <div class="metric-val" id="bgt-kpi-total" style="color:var(--blue)">฿0</div>
-              <div class="metric-sub" id="bgt-kpi-actual-sub">กระจายตาม duration</div>
+              <div class="metric-sub" id="bgt-kpi-actual-sub">ยอดใช้จ่ายในช่วงเวลาที่เลือก</div>
             </div>
             <div class="metric-card">
-              <div class="metric-label">คงเหลือ</div>
+              <div class="metric-label">งบคงเหลือ (ช่วงที่เลือก)</div>
               <div class="metric-val" id="bgt-kpi-remaining" style="color:var(--green)">—</div>
-              <div class="metric-sub" id="bgt-kpi-remaining-sub">จากงบที่ตั้งไว้</div>
+              <div class="metric-sub" id="bgt-kpi-remaining-sub">งบประมาณหักค่าใช้จ่ายจริง</div>
             </div>
             <div class="metric-card">
-              <div class="metric-label">Forecast (ถึงสิ้นปี)</div>
+              <div class="metric-label">ประมาณการใช้จ่ายถึงสิ้นปี</div>
               <div class="metric-val" id="bgt-kpi-forecast" style="color:var(--amber)">—</div>
-              <div class="metric-sub" id="bgt-kpi-forecast-sub">avg 3 เดือนล่าสุด</div>
+              <div class="metric-sub" id="bgt-kpi-forecast-sub">อ้างอิงค่าเฉลี่ย 3 เดือนล่าสุด</div>
             </div>
           </div>
 
@@ -1504,6 +1499,9 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <div id="bgt-tab-actual-spend" class="cost-tab-panel" style="display:none">
 
           <div class="filter-row">
+            <select id="as-year" onchange="renderActualSpend()" aria-label="ปีข้อมูล Actual Spend">
+              <option value="2026">ปี 2026</option>
+            </select>
             <div style="display:flex;align-items:center;gap:6px">
               <label style="font-size:11px;color:var(--text-3)">จาก</label>
               <input type="month" id="as-from" onchange="renderActualSpend()">
@@ -1520,14 +1518,26 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <option value="int">Team Activity</option>
               <option value="ent">Client Expense</option>
               <option value="dep">Deployment</option>
+              <option value="infra">Infrastructure</option>
+              <option value="other">Other</option>
             </select>
             <select id="as-source" onchange="renderActualSpend()">
               <option value="all">ทุกแหล่งข้อมูล</option>
               <option value="memo">จาก Memo</option>
               <option value="manual">Historical / Manual</option>
+              <option value="infra">Infra Cost</option>
+            </select>
+            <select id="as-budget-status" onchange="renderActualSpend()">
+              <option value="all">ทุก Budget Status</option>
+              <option value="Mapped">Mapped</option>
+              <option value="Manual Override">Manual Override</option>
+              <option value="Needs PMO Review">Needs PMO Review</option>
+              <option value="Unbudgeted">Unbudgeted</option>
             </select>
             <span id="as-period-label" style="font-size:11px;color:var(--text-3)">ทั้งหมด</span>
             <button class="btn-export" onclick="exportActualSpendCSV()">⬇ Export CSV</button>
+            <button class="btn-export" id="as-import-button" onclick="document.getElementById('as-import-file').click()">⬆ Import</button>
+            <input id="as-import-file" type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleActualSpendImport(event)">
             <button class="btn-primary" id="as-add-manual" onclick="openManualExpenseModal()" style="font-size:11px;padding:5px 10px">+ Add Historical Expense</button>
           </div>
 
