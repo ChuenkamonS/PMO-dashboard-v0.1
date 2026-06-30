@@ -1080,6 +1080,19 @@ async function applyDraftEdit() {
     await loadUserProfilesAsync();
     if(loadingApprovers) loadingApprovers.innerHTML = '';
 
+    const waitForApproverRows = expectedCount => new Promise((resolve, reject) => {
+      const deadline = Date.now() + 5000;
+      const check = () => {
+        const container = document.getElementById('approver-rows-form');
+        const rows = container ? [...container.querySelectorAll('.appr-form-row')] : [];
+        const selects = container ? container.querySelectorAll('.appr-name-sel') : [];
+        if(container && selects.length >= expectedCount) return resolve({ container, rows });
+        if(Date.now() >= deadline) return reject(new Error('Approver rows did not render in time'));
+        requestAnimationFrame(check);
+      };
+      check();
+    });
+
       // Store memoNo so saveDraft/submit updates instead of creates
       const memoNoEl = document.getElementById('f-memo-no');
       if(memoNoEl) {
@@ -1112,13 +1125,14 @@ async function applyDraftEdit() {
       if(signDate && memo.reviewerDate) signDate.value = memo.reviewerDate.slice(0,10);
 
       // Fill dynamic approver rows from approvers[]
-      const apprContainer = document.getElementById('approver-rows-form');
-      if (apprContainer && (memo.approvers || []).length > 0) {
+      const savedApprovers = memo.approvers || [];
+      const { container: apprContainer } = await waitForApproverRows(0);
+      if (savedApprovers.length > 0) {
         apprContainer.innerHTML = '';
-        memo.approvers.forEach((a, i) => {
-          _appendApproverRow(i === 0);
-          const rows = apprContainer.querySelectorAll('.appr-form-row');
-          const row  = rows[rows.length - 1];
+        savedApprovers.forEach((a, i) => _appendApproverRow(i === 0));
+        const { rows } = await waitForApproverRows(savedApprovers.length);
+        savedApprovers.forEach((a, i) => {
+          const row = rows[i];
           if (!row) return;
           const nameSel = row.querySelector('.appr-name-sel');
           const nameOth = row.querySelector('.appr-name-other');
@@ -1133,7 +1147,7 @@ async function applyDraftEdit() {
         });
         _updateApproverUI();
         updateSelfA1Notice();
-      } else if(apprContainer) {
+      } else {
         initApproverRows();
       }
 
