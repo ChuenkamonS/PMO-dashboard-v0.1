@@ -876,12 +876,12 @@ function _appendApproverRow(isFirst) {
       <div class="fg">
         <label>ชื่อ${isFirst ? ' *' : ''}</label>
         <select class="ri appr-name-sel" onchange="onApproverNameChange(this)" style="margin-top:3px">${_approverNameOpts('', stage)}</select>
-        <input class="ri appr-name-other" type="text" placeholder="กรอกชื่อ-นามสกุล" style="display:none;margin-top:6px">
+        <div class="appr-name-warning" role="alert" style="display:none;margin-top:6px;font-size:11px;line-height:1.4;color:#A32D2D;background:#FCEBEB;border-radius:4px;padding:6px 8px"></div>
       </div>
       <div class="fg">
         <label>ตำแหน่ง${isFirst ? ' *' : ''}</label>
         <select class="ri appr-title-sel" onchange="onApproverTitleChange(this)" style="margin-top:3px">${_approverTitleOpts('', stage)}</select>
-        <input class="ri appr-title-other" type="text" placeholder="กรอกตำแหน่ง" style="display:none;margin-top:6px">
+        <div class="appr-title-warning" role="alert" style="display:none;margin-top:6px;font-size:11px;line-height:1.4;color:#A32D2D;background:#FCEBEB;border-radius:4px;padding:6px 8px"></div>
       </div>
     </div>`;
   container.appendChild(row);
@@ -916,24 +916,30 @@ function _updateApproverUI() {
 }
 
 function onApproverNameChange(sel) {
-  const row   = sel.closest('.appr-form-row');
-  const other = row?.querySelector('.appr-name-other');
-  if (other) other.style.display = sel.value === 'other' ? '' : 'none';
+  const row = sel.closest('.appr-form-row');
+  const nameWarning = row?.querySelector('.appr-name-warning');
+  if(sel.value && nameWarning) { nameWarning.style.display = 'none'; nameWarning.textContent = ''; }
   // Auto-fill title from user_profiles when name is selected
-  if(sel.value && sel.value !== 'other') {
+  if(sel.value) {
     const user = typeof findUserByName === 'function' ? findUserByName(sel.value) : null;
     if(user) {
       const titleSel = row?.querySelector('.appr-title-sel');
+      const titleWarning = row?.querySelector('.appr-title-warning');
       if(titleSel) {
         // Try to match existing option, otherwise set value directly
         const opt = [...titleSel.options].find(o=>o.value===user.title);
-        if(opt) titleSel.value = user.title;
-        else { titleSel.value=''; }
+        if(opt) {
+          titleSel.value = user.title;
+          if(titleWarning) { titleWarning.style.display = 'none'; titleWarning.textContent = ''; }
+        } else {
+          titleSel.value = '';
+          if(titleWarning) {
+            titleWarning.textContent = `ไม่พบตำแหน่งเดิม ('${user.title || '-'}') ในรายชื่อปัจจุบัน กรุณาเลือกตำแหน่งใหม่`;
+            titleWarning.style.display = '';
+          }
+        }
         // Store auto-filled title as data attribute for read-back
         titleSel.dataset.autofill = user.title;
-        // Also update the hidden input if any
-        const titleOth = row?.querySelector('.appr-title-other');
-        if(titleOth && titleSel.value==='') { titleOth.style.display=''; titleOth.value=user.title; }
       }
       // Show authority warning
       _updateApproverAuthorityHint(row, sel.value, user.title);
@@ -957,9 +963,9 @@ function updateSelfA1Notice() {
   }
 }
 function onApproverTitleChange(sel) {
-  const row   = sel.closest('.appr-form-row');
-  const other = row?.querySelector('.appr-title-other');
-  if (other) other.style.display = sel.value === 'other' ? '' : 'none';
+  const row = sel.closest('.appr-form-row');
+  const titleWarning = row?.querySelector('.appr-title-warning');
+  if(sel.value && titleWarning) { titleWarning.style.display = 'none'; titleWarning.textContent = ''; }
   // Update authority hint when title changes manually
   const nameSel = row?.querySelector('.appr-name-sel');
   const name = nameSel?.value||'';
@@ -1135,15 +1141,29 @@ async function applyDraftEdit() {
           const row = rows[i];
           if (!row) return;
           const nameSel = row.querySelector('.appr-name-sel');
-          const nameOth = row.querySelector('.appr-name-other');
+          const nameWarning = row.querySelector('.appr-name-warning');
           const titleSel = row.querySelector('.appr-title-sel');
-          const titleOth = row.querySelector('.appr-title-other');
+          const titleWarning = row.querySelector('.appr-title-warning');
           const nameOpt = nameSel && [...nameSel.options].find(o => o.value === a.name);
-          if (nameOpt) { nameSel.value = a.name; }
-          else if (nameSel) { nameSel.value = 'other'; if (nameOth) { nameOth.style.display = ''; nameOth.value = a.name || ''; } }
+          if (nameOpt) {
+            nameSel.value = a.name;
+          } else if (nameSel) {
+            nameSel.value = '';
+            if(nameWarning) {
+              nameWarning.textContent = `ไม่พบชื่อผู้อนุมัติเดิม ('${a.name || '-'}') ในรายชื่อปัจจุบัน กรุณาเลือกผู้อนุมัติใหม่`;
+              nameWarning.style.display = '';
+            }
+          }
           const titleOpt = titleSel && [...titleSel.options].find(o => o.value === a.title);
-          if (titleOpt) { titleSel.value = a.title; }
-          else if (titleSel) { titleSel.value = 'other'; if (titleOth) { titleOth.style.display = ''; titleOth.value = a.title || ''; } }
+          if (titleOpt) {
+            titleSel.value = a.title;
+          } else if (titleSel) {
+            titleSel.value = '';
+            if(titleWarning) {
+              titleWarning.textContent = `ไม่พบตำแหน่งเดิม ('${a.title || '-'}') ในรายชื่อปัจจุบัน กรุณาเลือกตำแหน่งใหม่`;
+              titleWarning.style.display = '';
+            }
+          }
         });
         _updateApproverUI();
         updateSelfA1Notice();
