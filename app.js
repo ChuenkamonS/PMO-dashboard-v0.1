@@ -204,8 +204,11 @@ function validateActualSpendImport(rows, existingRows = []) {
 }
 
 function createBudgetPoolRecord(input = {}) {
-  const legacyTypes = Array.isArray(input.memoTypes) ? input.memoTypes.map(spendTypeFromMemoType) : [];
-  const spendTypes = (Array.isArray(input.spendTypes) ? input.spendTypes : legacyTypes)
+  const hasCanonicalTypes = Object.prototype.hasOwnProperty.call(input, 'spendTypes');
+  const legacyTypes = Array.isArray(input.memoTypes)
+    ? (input.memoTypes.length ? input.memoTypes.map(spendTypeFromMemoType) : SPEND_TYPE_VALUES)
+    : [];
+  const spendTypes = (hasCanonicalTypes && Array.isArray(input.spendTypes) ? input.spendTypes : legacyTypes)
     .filter(t => SPEND_TYPE_VALUES.includes(t));
   const memoTypes = spendTypes.map(t => SPEND_TYPE_TO_MEMO_TYPE[t]).filter(Boolean);
   return {
@@ -407,6 +410,72 @@ function importActualSpendRecords(rows) {
   if (!result.valid) return { ...result, saved: 0 };
   storeActualSpendRecords([...existing, ...result.records]);
   return { ...result, saved: result.records.length };
+}
+
+function memoCoveragePeriod(memo = {}) {
+  const ranges = (memo.slItems || [])
+    .filter(item => item.startMonth && item.endMonth && isValidCalendarRange(item.startMonth, item.endMonth));
+  if (ranges.length) {
+    return {
+      startDate: ranges.map(item => item.startMonth).sort()[0],
+      endDate: ranges.map(item => item.endMonth).sort().at(-1),
+    };
+  }
+  if (memo.depStart && memo.depEnd && isValidCalendarRange(memo.depStart, memo.depEnd)) {
+    return { startDate: memo.depStart, endDate: memo.depEnd };
+  }
+  return { startDate: null, endDate: null };
+}
+
+function actualSpendFromMemo(memo, existing = null) {
+  if (!memo || memo.status !== 'completed') return null;
+  const coverage = memoCoveragePeriod(memo);
+  const effectiveDate = String(memo.approvedAt || memo.updatedAt || memo.createdAt || '').slice(0, 10);
+  return createActualSpendRecord({
+    ...existing,
+    id: existing?.id || `actual-spend-memo-${memo.memoNo}`,
+    source: ACTUAL_SPEND_SOURCES.APPROVED_MEMO,
+    referenceNo: memo.memoNo,
+    memoId: memo.memoNo,
+    project: memo.project,
+    spendType: spendTypeFromMemoType(memo.type),
+    amount: memo.total,
+    currency: 'THB',
+    startDate: coverage.startDate,
+    endDate: coverage.endDate,
+    date: parseStrictCalendarValue(effectiveDate) ? effectiveDate : null,
+    vendorProgram: (memo.slItems || []).map(item => item.name).filter(Boolean).join(', '),
+    description: memo.subject || memo.reason || '',
+    manualBudgetPoolId: memo.manualBudgetPoolId || memo.budgetPoolId || existing?.manualBudgetPoolId || null,
+    createdBy: memo.requesterName || existing?.createdBy || '',
+    createdAt: existing?.createdAt || memo.createdAt,
+    updatedBy: currentUser(),
+  });
+}
+
+function syncMemoToActualSpend(memo, pools = loadBudgetPoolRecords()) {
+  const records = loadActualSpendRecords();
+  const index = records.findIndex(record => record.memoId === memo.memoNo || (
+    record.source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO && record.referenceNo === memo.memoNo
+  ));
+  if (memo.status !== 'completed') {
+    if (index >= 0) storeActualSpendRecords(records.filter((_, i) => i !== index));
+    return null;
+  }
+  const mapped = mapBudgetPool(actualSpendFromMemo(memo, index >= 0 ? records[index] : null), pools);
+  if (index >= 0) records[index] = mapped; else records.push(mapped);
+  storeActualSpendRecords(records);
+  return mapped;
+}
+
+function updateActualSpendBudgetOverride(memoNo, manualBudgetPoolId, pools = loadBudgetPoolRecords()) {
+  const records = loadActualSpendRecords();
+  const index = records.findIndex(record => record.memoId === memoNo);
+  if (index < 0) return null;
+  const updated = mapBudgetPool({ ...records[index], manualBudgetPoolId: manualBudgetPoolId || null }, pools);
+  records[index] = updated;
+  storeActualSpendRecords(records);
+  return updated;
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -748,6 +817,15 @@ async function saveMemoAsync(data) {
       } else {
         _memCache = [saved];
       }
+      if (saved.status === 'completed') {
+        const actualSpend = syncMemoToActualSpend(saved);
+        if (actualSpend) Object.assign(saved, {
+          autoBudgetPoolId: actualSpend.autoBudgetPoolId,
+          manualBudgetPoolId: actualSpend.manualBudgetPoolId,
+          finalBudgetPoolId: actualSpend.finalBudgetPoolId,
+          budgetStatus: actualSpend.budgetStatus,
+        });
+      }
       return saved;
     } catch(e) { console.warn('Supabase save failed', e.message); }
   }
@@ -756,6 +834,16 @@ async function saveMemoAsync(data) {
   const idx = memos.findIndex(m => m.memoNo === data.memoNo);
   if(idx>=0) memos[idx]=saved; else memos.push(saved);
   storeMemos(memos);
+  if (saved.status === 'completed') {
+    const actualSpend = syncMemoToActualSpend(saved);
+    if (actualSpend) Object.assign(saved, {
+      autoBudgetPoolId: actualSpend.autoBudgetPoolId,
+      manualBudgetPoolId: actualSpend.manualBudgetPoolId,
+      finalBudgetPoolId: actualSpend.finalBudgetPoolId,
+      budgetStatus: actualSpend.budgetStatus,
+    });
+    storeMemos(memos);
+  }
   return saved;
 }
 
@@ -886,6 +974,16 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   // Keep the offline backup current as well. Without this, status changes made
   // while Supabase is unavailable disappear on the next page load.
   storeMemos(_memCache);
+  const actualSpend = syncMemoToActualSpend(updated);
+  if (actualSpend) {
+    Object.assign(updated, {
+      autoBudgetPoolId: actualSpend.autoBudgetPoolId,
+      manualBudgetPoolId: actualSpend.manualBudgetPoolId,
+      finalBudgetPoolId: actualSpend.finalBudgetPoolId,
+      budgetStatus: actualSpend.budgetStatus,
+    });
+    storeMemos(_memCache);
+  }
 
   // Side effects on completion
   if (updated.status === 'completed') {
@@ -1042,6 +1140,14 @@ function updateMemoStatus(memoNo, status, extra={}) {
   memos[idx] = { ...memos[idx], ...extra, status, updatedAt: new Date().toISOString() };
   if(status==='completed') memos[idx].approvedAt = memos[idx].updatedAt;
   if(status==='rejected')  memos[idx].rejectedAt = memos[idx].updatedAt;
+  storeMemos(memos);
+  const actualSpend = syncMemoToActualSpend(memos[idx]);
+  if (actualSpend) Object.assign(memos[idx], {
+    autoBudgetPoolId: actualSpend.autoBudgetPoolId,
+    manualBudgetPoolId: actualSpend.manualBudgetPoolId,
+    finalBudgetPoolId: actualSpend.finalBudgetPoolId,
+    budgetStatus: actualSpend.budgetStatus,
+  });
   storeMemos(memos);
   // _memCache is already updated by storeMemos — do not null it here
   // Auto-create purchase orders for HW memos (sync only — avoid double-firing)

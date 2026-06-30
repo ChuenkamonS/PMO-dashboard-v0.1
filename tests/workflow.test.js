@@ -58,6 +58,10 @@ function createAppContext() {
 function memo(overrides = {}) {
   return {
     memoNo: 'ORB-2606-999',
+    type: 'sl',
+    project: 'AOA-MP',
+    subject: 'Software subscription',
+    total: 12000,
     status: 'pending',
     requesterProfileId: 3,
     requesterName: 'นางสาว ชื่นกมล สารมานิตย์',
@@ -127,6 +131,7 @@ test('intermediate approval does not set approvedAt; final approval does', async
   assert.equal(afterA1.status, 'pending_a2');
   assert.equal(afterA1.approvedAt, null);
   assert.equal(afterA1.currentApproverProfileId, 2);
+  assert.equal(context.loadActualSpendRecords().length, 0);
 
   userButton.dataset.profileId = '2';
   userName.textContent = 'นาย ปกรณ์ เจียมสกุลทิพย์';
@@ -134,6 +139,44 @@ test('intermediate approval does not set approvedAt; final approval does', async
   assert.equal(afterA2.status, 'completed');
   assert.ok(afterA2.approvedAt);
   assert.equal(afterA2.currentApproverProfileId, null);
+  assert.equal(context.loadActualSpendRecords().length, 1);
+  assert.equal(context.loadActualSpendRecords()[0].memoId, initial.memoNo);
+  assert.equal(context.loadActualSpendRecords()[0].budgetStatus, 'Unbudgeted');
+});
+
+test('rejected and cancelled memos do not create Actual Spend', async () => {
+  const { context } = createAppContext();
+  const rejected = memo();
+  vm.runInContext(`_memCache = [${JSON.stringify(rejected)}]`, context);
+  await context.updateMemoStatusAsync(rejected.memoNo, 'rejected', { rejectedBy:'Approver' });
+  assert.equal(context.loadActualSpendRecords().length, 0);
+
+  const cancelled = memo({ memoNo:'ORB-2606-998' });
+  vm.runInContext(`_memCache = [${JSON.stringify(cancelled)}]`, context);
+  await context.updateMemoStatusAsync(cancelled.memoNo, 'cancelled', { cancelledBy:'Requester' });
+  assert.equal(context.loadActualSpendRecords().length, 0);
+});
+
+test('completed memo posting is idempotent and manual Budget Pool override wins', () => {
+  const { context } = createAppContext();
+  const completed = memo({ status:'completed', approvedAt:'2026-06-30T00:00:00.000Z' });
+  const pool = context.createBudgetPoolRecord({
+    id:'manual-pool', project:'AOA-MP', budget:50000,
+    spendTypes:['Software'], startDate:'2026-01', endDate:'2026-12',
+  });
+  context.syncMemoToActualSpend(completed, [pool]);
+  context.syncMemoToActualSpend(completed, [pool]);
+  assert.equal(context.loadActualSpendRecords().length, 1);
+  const overridden = context.updateActualSpendBudgetOverride(completed.memoNo, pool.id, [pool]);
+  assert.equal(overridden.finalBudgetPoolId, pool.id);
+  assert.equal(overridden.budgetStatus, 'Manual Override');
+});
+
+test('All Memo reuses the Budget column for canonical status and manual override', () => {
+  const historyCode = fs.readFileSync(path.join(root, 'views/history.js'), 'utf8');
+  assert.match(historyCode, /getMemoActualSpend/);
+  assert.match(historyCode, /budgetStatus/);
+  assert.match(historyCode, /updateActualSpendBudgetOverride/);
 });
 
 test('re-edit creates a new clean draft and preserves source reference', () => {

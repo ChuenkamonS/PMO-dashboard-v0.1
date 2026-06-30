@@ -90,3 +90,18 @@
 
 #### Remaining Work
 - Connect shared mapping and calculations to workflows and UI in later phases.
+
+---
+
+### Phase 2
+#### Added
+- Idempotent Actual Spend posting when a memo reaches Completed status.
+- Memo lifecycle removal guard so Pending, Rejected, and Cancelled memos do not contribute to Actual Spend.
+- Canonical Budget Pool and Budget Status display in the existing All Memo Budget column.
+- Existing PMO Budget Pool modal now persists manual overrides to Actual Spend.
+
+#### Changed
+- Completed memo posting uses the Phase 1 Spend Type master and Budget Pool mapping priority.
+
+#### Remaining Work
+- Downstream financial pages continue to use their existing data paths until their planned phases.

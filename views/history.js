@@ -905,12 +905,19 @@ document.addEventListener('click', e => {
 
 // ── Budget Tag Cell (inline in history table) ──
 // Default: auto-assign to memo.project — PMO can override to Company-Wide
+function getMemoActualSpend(memoNo) {
+  if (typeof loadActualSpendRecords !== 'function') return null;
+  return loadActualSpendRecords().find(record => record.memoId === memoNo) || null;
+}
+
 function getEffectiveBudgetSource(memo) {
+  const actualSpend = getMemoActualSpend(memo.memoNo);
+  const effectivePoolId = actualSpend?.finalBudgetPoolId || memo.finalBudgetPoolId || memo.budgetPoolId;
   // If PMO directly picked a pool, show pool name (project / pool name)
-  if (memo.budgetPoolId) {
+  if (effectivePoolId) {
     const pools = typeof loadBudgetPools === 'function' ? loadBudgetPools() : [];
-    const pool  = pools.find(p => p.id === memo.budgetPoolId);
-    if (pool) return { source: pool.project + ' / ' + pool.name, isAuto: false, poolId: pool.id };
+    const pool  = pools.find(p => p.id === effectivePoolId);
+    if (pool) return { source: pool.project + ' / ' + pool.name, isAuto: !actualSpend?.manualBudgetPoolId, poolId: pool.id };
     // Pool was deleted — fall back to budgetSource
   }
   if (memo.budgetSource) return { source: memo.budgetSource, isAuto: false };
@@ -929,12 +936,15 @@ function buildBudgetTagCell(memo) {
     return `<span style="font-size:10px;padding:2px 7px;background:var(--green-50);color:var(--green-800);border-radius:4px;white-space:nowrap">${esc(source)}</span>`;
   }
   const { source, isAuto } = getEffectiveBudgetSource(memo);
+  const actualSpend = getMemoActualSpend(memo.memoNo);
+  const budgetStatus = actualSpend?.budgetStatus || memo.budgetStatus || 'Unbudgeted';
   const isCompany = source === 'Company-Wide';
+  const statusText = `<span style="opacity:.65"> · ${esc(budgetStatus)}</span>`;
 
   if(isAuto) {
-    return `<span style="font-size:10px;padding:2px 7px;background:var(--green-50);color:var(--green-800);border-radius:4px;cursor:pointer;white-space:nowrap" onclick="openBudgetTagModal('${esc(memo.memoNo)}')" title="Auto จาก project — คลิกเพื่อ override">${esc(source)} <span style="opacity:.6">auto</span></span>`;
+    return `<span style="font-size:10px;padding:2px 7px;background:var(--green-50);color:var(--green-800);border-radius:4px;cursor:pointer;white-space:nowrap" onclick="openBudgetTagModal('${esc(memo.memoNo)}')" title="Auto จาก project — คลิกเพื่อ override">${esc(source)}${statusText}</span>`;
   }
-  return `<span style="font-size:10px;padding:2px 7px;background:${isCompany?'var(--blue-50)':'var(--green-50)'};color:${isCompany?'var(--blue-800)':'var(--green-800)'};border:0.5px solid ${isCompany?'#B5D4F4':'#C0DD97'};border-radius:4px;cursor:pointer;white-space:nowrap" onclick="openBudgetTagModal('${esc(memo.memoNo)}')" title="คลิกเพื่อเปลี่ยน">⚑ ${esc(source)}</span>`;
+  return `<span style="font-size:10px;padding:2px 7px;background:${isCompany?'var(--blue-50)':'var(--green-50)'};color:${isCompany?'var(--blue-800)':'var(--green-800)'};border:0.5px solid ${isCompany?'#B5D4F4':'#C0DD97'};border-radius:4px;cursor:pointer;white-space:nowrap" onclick="openBudgetTagModal('${esc(memo.memoNo)}')" title="คลิกเพื่อเปลี่ยน">⚑ ${esc(source)}${statusText}</span>`;
 }
 
 // ── Budget Source Tag ──
@@ -1127,9 +1137,24 @@ function saveBudgetTag(memoNo) {
   const memos = loadMemos();
   const idx   = memos.findIndex(m => m.memoNo === memoNo);
   if (idx < 0) { closeBudgetTagModal(); return; }
+  const canonicalPools = typeof loadBudgetPoolRecords === 'function' ? loadBudgetPoolRecords() : [];
+  let actualSpend = typeof updateActualSpendBudgetOverride === 'function'
+    ? updateActualSpendBudgetOverride(memoNo, newPoolId, canonicalPools)
+    : null;
+  if (!actualSpend && typeof syncMemoToActualSpend === 'function') {
+    actualSpend = syncMemoToActualSpend({
+      ...memos[idx],
+      manualBudgetPoolId: newPoolId,
+      budgetPoolId: newPoolId,
+    }, canonicalPools);
+  }
   memos[idx] = {
     ...memos[idx],
     budgetPoolId: newPoolId,
+    manualBudgetPoolId: actualSpend?.manualBudgetPoolId || null,
+    autoBudgetPoolId: actualSpend?.autoBudgetPoolId || null,
+    finalBudgetPoolId: actualSpend?.finalBudgetPoolId || null,
+    budgetStatus: actualSpend?.budgetStatus || 'Unbudgeted',
     budgetSource: newSource,
     updatedAt: new Date().toISOString(),
   };

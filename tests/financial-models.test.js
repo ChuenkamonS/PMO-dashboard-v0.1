@@ -110,6 +110,16 @@ test('budget pool storage reuses the existing key and accepts legacy memo types'
   assert.deepEqual(Array.from(pool.memoTypes), ['sl', 'infra']);
 });
 
+test('legacy empty memoTypes remains compatible with all Spend Types', () => {
+  const ctx = context();
+  const pool = ctx.createBudgetPoolRecord({
+    id:'legacy-pool', project:'AOA-MP', budget:100000, memoTypes:[],
+    startMonth:'2026-01', endMonth:'2026-12',
+  });
+  assert.equal(pool.spendTypes.length, 7);
+  assert.equal(ctx.validateBudgetPoolRecord(pool).valid, true);
+});
+
 test('spendTypes-only pools keep legacy memoTypes synchronized', () => {
   const ctx = context();
   const pool = ctx.createBudgetPoolRecord({
