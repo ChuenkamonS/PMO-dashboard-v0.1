@@ -4,6 +4,7 @@
 
 let selectedType = null;
 let _editingSourceMemoNo = null;
+let _editingDraftMemoNo = null;
 const TYPE_LABELS = { sl:'Software License', hw:'Hardware', int:'Team Activity', ent:'Client Expense', dep:'Deployment' };
 const TYPE_CFG = {
   sl:  { title:'รายการ Software *', to:'ประธานเจ้าหน้าที่บริหาร', apprTitle:'ประธานเจ้าหน้าที่บริหาร',
@@ -23,7 +24,10 @@ function selectType(type, btn) {
   if(selectedType && selectedType !== type) {
     if(!confirm('การเปลี่ยนประเภท Memo จะล้างข้อมูลที่กรอกไว้ทั้งหมด\nต้องการดำเนินการต่อไหม?')) return;
     // Clear all form fields
-    document.querySelectorAll('#form-body input[type="text"], #form-body input[type="number"], #form-body input[type="date"], #form-body textarea').forEach(el => { el.value = ''; });
+    document.querySelectorAll('#form-body input[type="text"], #form-body input[type="number"], #form-body input[type="date"], #form-body textarea').forEach(el => {
+      el.value = '';
+      if(el.classList.contains('acct-col')) delete el.dataset.manual;
+    });
     document.querySelectorAll('#form-body select').forEach(el => { el.selectedIndex = 0; });
     // Reset subject manual edit flag
     const subjectEl = document.getElementById('f-subject');
@@ -145,6 +149,7 @@ const TRASH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke
 function rmRow(btn, cid) {
   const c = document.getElementById(cid);
   if(c.querySelectorAll('.item-row').length > 1) btn.closest('.item-row').remove();
+  if(cid === 'sl-rows') syncAcctColsFromSoftware();
 }
 // ── Normalize: trim + title case for consistent storage ──
 function normalizeSLText(str) {
@@ -188,6 +193,9 @@ function addSLRow() {
   const sugg = getExistingSLSuggestions();
   attachTypeahead(d.querySelector('.sl-name'), sugg.names, 'dl-sl-names');
   attachTypeahead(d.querySelector('.sl-plan'), sugg.plans, 'dl-sl-plans');
+  d.querySelector('.sl-name').addEventListener('input', syncAcctColsFromSoftware);
+  d.querySelector('.sl-name').addEventListener('blur', syncAcctColsFromSoftware);
+  syncAcctColsFromSoftware();
 }
 function addHWRow() {
   const d = document.createElement('div'); d.className='item-row'; d.style.gridTemplateColumns='3fr 1.4fr 1fr 30px';
@@ -308,28 +316,61 @@ function rmName(btn, cid) {
 
 // ── Account table ──
 function getAcctCols() { return Array.from(document.querySelectorAll('.acct-col')).map(i=>i.value.trim()).filter(c=>c); }
+function getAcctColEntries() {
+  return Array.from(document.querySelectorAll('.acct-col'))
+    .map((input, index) => ({ name:input.value.trim(), index }))
+    .filter(col => col.name);
+}
+function markAcctColEdited(input) {
+  input.dataset.manual = 'true';
+  rebuildAcct();
+}
+function syncAcctColsFromSoftware() {
+  const names = getSlAccountSoftwareNames();
+  const wrap = document.getElementById('acct-cols');
+  if(!wrap) return;
+  while(wrap.querySelectorAll('.acct-col').length < Math.max(5, names.length)) {
+    const input = document.createElement('input');
+    input.className = 'ri acct-col';
+    input.type = 'text';
+    input.placeholder = `Application ${wrap.querySelectorAll('.acct-col').length + 1}`;
+    input.style.cssText = 'font-size:11px;padding:5px 7px';
+    input.addEventListener('input', () => markAcctColEdited(input));
+    wrap.appendChild(input);
+  }
+  Array.from(wrap.querySelectorAll('.acct-col')).forEach((input, i) => {
+    if(input.dataset.manual === 'true') return;
+    input.value = names[i] || '';
+  });
+  rebuildAcct();
+}
 function rebuildAcct() {
-  const cols = getAcctCols(); const show = cols.length ? cols : ['Col 1'];
+  const cols = getAcctColEntries(); const show = cols.length ? cols : [{name:'Col 1', index:0}];
   const head = document.getElementById('acct-head');
   const body = document.getElementById('acct-body');
-  head.innerHTML = `<tr style="background:var(--bg)"><th style="padding:6px 10px;text-align:left;border:1px solid var(--border);font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase">Email</th>${show.map(c=>`<th style="padding:6px 10px;text-align:center;border:1px solid var(--border);font-size:10px;font-weight:600;color:var(--text-3);width:80px">${c}</th>`).join('')}<th style="width:36px;border:1px solid var(--border)"></th></tr>`;
+  head.innerHTML = `<tr style="background:var(--bg)"><th style="padding:6px 10px;text-align:left;border:1px solid var(--border);font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase">Email</th>${show.map(c=>`<th style="padding:6px 10px;text-align:center;border:1px solid var(--border);font-size:10px;font-weight:600;color:var(--text-3);width:80px">${c.name}</th>`).join('')}<th style="width:36px;border:1px solid var(--border)"></th></tr>`;
   Array.from(body.querySelectorAll('tr')).forEach(tr => {
     const email = tr.querySelector('.acct-email')?.value||'';
-    const vals  = Array.from(tr.querySelectorAll('.acct-val')).map(s=>s.value);
-    tr.innerHTML = _buildAcctRow(email, vals, show.length);
+    const vals = {};
+    tr.querySelectorAll('.acct-val').forEach(input => { vals[Number(input.dataset.colIndex)] = input.checked ? '✓' : ''; });
+    tr.innerHTML = _buildAcctRow(email, vals, show);
   });
   if(!body.children.length) addAcctRow();
 }
-function _buildAcctRow(email, vals, n) {
+function _buildAcctRow(email, vals, cols) {
+  const entries = Array.isArray(cols) ? cols : Array.from({length:cols}, (_, index) => ({index}));
   let h = `<td style="padding:3px 6px;border:1px solid var(--border)"><input type="text" class="ri acct-email" placeholder="email@orbitdigital.co.th" value="${email}" style="font-size:11px;padding:3px 7px"></td>`;
-  for(let i=0;i<n;i++) h += `<td style="padding:3px 6px;border:1px solid var(--border);text-align:center"><select class="acct-val" style="font-size:11px;padding:2px 4px;width:100%;border:1px solid var(--border-md);border-radius:4px"><option${vals[i]==='-'||!vals[i]?' selected':''}>-</option><option${vals[i]==='✓'?' selected':''}>✓</option></select></td>`;
+  entries.forEach((col, i) => {
+    const value = Array.isArray(vals) ? vals[i] : vals[col.index];
+    h += `<td style="padding:3px 6px;border:1px solid var(--border);text-align:center"><input type="checkbox" class="acct-val" data-col-index="${col.index}" aria-label="ใช้งาน Application"${value==='Y'||value==='✓'?' checked':''} style="width:18px;height:18px;accent-color:var(--blue);cursor:pointer"></td>`;
+  });
   h += `<td style="padding:3px 4px;border:1px solid var(--border);text-align:center"><button class="rm-btn" onclick="this.closest('tr').remove()" style="width:24px;height:24px" title="ลบ">${TRASH}</button></td>`;
   return h;
 }
 function addAcctRow(email) {
-  const n = getAcctCols().length || 1;
+  const cols = getAcctColEntries();
   const tr = document.createElement('tr');
-  tr.innerHTML = _buildAcctRow(email||'', [], n);
+  tr.innerHTML = _buildAcctRow(email||'', [], cols.length ? cols : [{name:'Col 1', index:0}]);
   document.getElementById('acct-body').appendChild(tr);
 }
 
@@ -443,7 +484,9 @@ function collectMemoData() {
     data.amountWords = val('#fs-sl .form-grid .fg:nth-child(2) input');
     data.sections.push({ title:'รายการ Software', html:table(['#','ชื่อ Software','Plan','฿/เดือน','เดือน','จำนวน','เริ่ม','สิ้นสุด','รวม'], rows.map(r=>[r.no,r.name,r.plan||'-',money(r.price),r.months,r.qty,r.startMonth||'-',r.endMonth||'-',money(r.subtotal)]), [3,8]) });
     const acctCols = getAcctCols();
-    const acctRows = Array.from(document.querySelectorAll('#acct-body tr')).map(tr=>[val('.acct-email',tr),...Array.from(tr.querySelectorAll('.acct-val')).map(s=>s.value)]).filter(r=>r.some(Boolean));
+    const acctRows = Array.from(document.querySelectorAll('#acct-body tr'))
+      .map(tr=>[val('.acct-email',tr).trim(),...Array.from(tr.querySelectorAll('.acct-val')).map(input=>input.checked ? '✓' : '')])
+      .filter(r=>r[0]);
     if(acctCols.length && acctRows.length) data.sections.push({ title:'ตาราง Account', html:table(['Email',...acctCols], acctRows, []) });
   }
   if(data.type==='hw') {
@@ -660,6 +703,20 @@ function saveDraft() {
 async function submitMemo() {
   const data = collectMemoData();
   if(!validateMemo(data)) return;
+  try {
+    const conflicts = await supaFetch('memos', 'GET', null,
+      `?memo_no=eq.${encodeURIComponent(data.memoNo)}&select=memo_no,status&limit=1`);
+    const conflict = conflicts?.[0];
+    const editingSameDraft = conflict?.status === 'draft' && _editingDraftMemoNo === data.memoNo;
+    if(conflict && conflict.status !== 'rejected' && !editingSameDraft) {
+      alert(`เลข Memo ${data.memoNo} ถูกใช้งานแล้ว (สถานะ: ${conflict.status || '-'}) กรุณาใช้เลขอื่น`);
+      return;
+    }
+  } catch(e) {
+    console.error('Memo number duplicate check failed', e);
+    alert('ไม่สามารถตรวจสอบเลข Memo กับฐานข้อมูลได้ กรุณาตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง');
+    return;
+  }
   const a1 = data.approvers?.[0];
   const a2 = data.approvers?.[1];
   const selfA1 = !!a1 && profileMatches(a1.profileId, a1.name, data.requesterProfileId, data.requesterName);
@@ -699,6 +756,7 @@ function resetMemoForm() {
   });
   selectedType = null;
   _editingSourceMemoNo = null;
+  _editingDraftMemoNo = null;
   document.querySelectorAll('.type-btn').forEach(btn => btn.classList.remove('selected'));
   document.querySelectorAll('.fs').forEach(section => section.classList.remove('active'));
   const body = document.getElementById('form-body');
@@ -1063,6 +1121,59 @@ function saveBulkAcct() {
   rebuildAcct();
   closeBulkAcctModal();
 }
+
+function getSlAccountSoftwareNames() {
+  return [...new Set(Array.from(document.querySelectorAll('#sl-rows .sl-name'))
+    .map(input => input.value.trim()).filter(Boolean))];
+}
+
+function downloadSlAccountTemplate() {
+  if(typeof XLSX === 'undefined') { alert('SheetJS ยังโหลดไม่เสร็จ'); return; }
+  const softwareNames = getAcctCols();
+  if(!softwareNames.length) { alert('กรุณากรอกชื่อ Software หรือหัวตาราง Account ก่อนดาวน์โหลด Template'); return; }
+  const ws = XLSX.utils.aoa_to_sheet([
+    ['Email', ...softwareNames],
+    ['user@orbitdigital.co.th', ...softwareNames.map(() => '✓')]
+  ]);
+  ws['!cols'] = [{wch:32}, ...softwareNames.map(name => ({wch:Math.max(14, name.length + 2)}))];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Accounts');
+  XLSX.writeFile(wb, 'sl_account_template.xlsx');
+}
+
+async function uploadSlAccountFile(input) {
+  const file = input?.files?.[0];
+  if(!file) return;
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array'});
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, defval:''});
+    const headers = (rows[0] || []).map(value => String(value).trim());
+    const softwareNames = getAcctCols();
+    if(headers[0] !== 'Email' || headers.slice(1).length !== softwareNames.length ||
+       headers.slice(1).some((name, i) => name !== softwareNames[i])) {
+      alert('หัวตารางไม่ตรงกับรายการ Software ปัจจุบัน กรุณาดาวน์โหลด Template ใหม่');
+      return;
+    }
+    const cols = document.getElementById('acct-cols');
+    cols.innerHTML = softwareNames.map(name => `<input class="ri acct-col" value="${esc(name)}" data-manual="true" style="font-size:11px;padding:5px 7px" oninput="markAcctColEdited(this)">`).join('');
+    const body = document.getElementById('acct-body');
+    body.innerHTML = '';
+    rows.slice(1).filter(row => String(row[0] || '').trim()).forEach(row => {
+      const tr = document.createElement('tr');
+      const vals = softwareNames.map((_, i) => String(row[i + 1] || '').trim() ? 'Y' : '');
+      tr.innerHTML = _buildAcctRow(String(row[0]).trim(), vals, softwareNames.length);
+      body.appendChild(tr);
+    });
+    rebuildAcct();
+    alert(`✓ นำเข้า Account ${body.children.length} รายการแล้ว`);
+  } catch(e) {
+    console.error('SL account upload failed', e);
+    alert('อ่านไฟล์ Account ไม่สำเร็จ กรุณาใช้ไฟล์ Excel หรือ CSV ตาม Template');
+  } finally {
+    input.value = '';
+  }
+}
 document.addEventListener('click', e => {
   if(e.target === document.getElementById('bulk-acct-modal')) closeBulkAcctModal();
 });
@@ -1075,6 +1186,7 @@ async function applyDraftEdit() {
     if(!memo || memo.status !== 'draft') return;
     localStorage.removeItem('orbit-pmo-edit-draft');
     _editingSourceMemoNo = memo.sourceMemoNo || null;
+    _editingDraftMemoNo = memo.memoNo || null;
 
     // Select type
     const typeBtn = document.querySelector(`.type-btn[onclick*="selectType('${memo.type}"]`) ||

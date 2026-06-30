@@ -316,6 +316,8 @@ body {
 }
 .items-hdr span { font-size: 10px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .3px; }
 .item-row { display: grid; gap: 7px; align-items: center; margin-bottom: 6px; }
+.item-row > input,
+.item-row > select { min-width: 0; width: 100%; }
 .ri {
   font-family: 'IBM Plex Sans Thai', 'Noto Sans Thai', Sarabun, system-ui, sans-serif;
   font-size: 13px;
@@ -329,6 +331,9 @@ body {
   outline: none;
 }
 .ri:focus { border-color: var(--blue); }
+input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .rm-btn {
   width: 30px; height: 30px;
   border: 1px solid var(--border-md);
@@ -1064,7 +1069,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
               </div>
               <div id="sl-rows">
                 <div class="item-row" style="grid-template-columns:2fr 1.2fr 1.2fr 0.8fr 0.8fr 1fr 1fr 30px">
-                  <input class="ri sl-name" type="text" placeholder="GitHub Copilot">
+                  <input class="ri sl-name" type="text" placeholder="GitHub Copilot" oninput="syncAcctColsFromSoftware()" onblur="this.value=normalizeSLText(this.value);syncAcctColsFromSoftware()">
                   <input class="ri sl-plan" type="text" placeholder="Pro / Business">
                   <input class="ri sl-price" type="number" placeholder="600" oninput="calcSL()">
                   <input class="ri sl-mo" type="number" value="12" oninput="calcSL()">
@@ -1193,12 +1198,12 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <span class="card-title">ตาราง Account</span>
               <span class="card-subtitle">(optional)</span>
             </div>
-            <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:10px">
-              <input class="ri acct-col" type="text" placeholder="Col 1 เช่น GitHub" style="font-size:11px;padding:5px 7px" oninput="rebuildAcct()">
-              <input class="ri acct-col" type="text" placeholder="Col 2" style="font-size:11px;padding:5px 7px" oninput="rebuildAcct()">
-              <input class="ri acct-col" type="text" placeholder="Col 3" style="font-size:11px;padding:5px 7px" oninput="rebuildAcct()">
-              <input class="ri acct-col" type="text" placeholder="Col 4" style="font-size:11px;padding:5px 7px" oninput="rebuildAcct()">
-              <input class="ri acct-col" type="text" placeholder="Col 5" style="font-size:11px;padding:5px 7px" oninput="rebuildAcct()">
+            <div id="acct-cols" style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:10px">
+              <input class="ri acct-col" type="text" placeholder="Application 1" style="font-size:11px;padding:5px 7px" oninput="markAcctColEdited(this)">
+              <input class="ri acct-col" type="text" placeholder="Application 2" style="font-size:11px;padding:5px 7px" oninput="markAcctColEdited(this)">
+              <input class="ri acct-col" type="text" placeholder="Application 3" style="font-size:11px;padding:5px 7px" oninput="markAcctColEdited(this)">
+              <input class="ri acct-col" type="text" placeholder="Application 4" style="font-size:11px;padding:5px 7px" oninput="markAcctColEdited(this)">
+              <input class="ri acct-col" type="text" placeholder="Application 5" style="font-size:11px;padding:5px 7px" oninput="markAcctColEdited(this)">
             </div>
             <div style="overflow-x:auto">
               <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -1208,7 +1213,10 @@ svg.icon { display: inline-block; vertical-align: middle; }
             </div>
             <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
               <button class="add-btn" onclick="addAcctRow()" style="margin-top:0">+ เพิ่ม Account</button>
-              <button class="btn-sm" onclick="openBulkAcctModal()" style="font-size:11px;padding:5px 10px">⬆ Bulk Upload</button>
+              <button class="btn-sm" onclick="openBulkAcctModal()" style="font-size:11px;padding:5px 10px">⬆ Bulk Email</button>
+              <button class="btn-sm" onclick="downloadSlAccountTemplate()" style="font-size:11px;padding:5px 10px">↓ Download Template</button>
+              <button class="btn-sm" onclick="document.getElementById('sl-account-upload').click()" style="font-size:11px;padding:5px 10px">⬆ Upload Excel / CSV</button>
+              <input type="file" id="sl-account-upload" accept=".xlsx,.xls,.csv" style="display:none" onchange="uploadSlAccountFile(this)">
             </div>
           </div>
 
@@ -1792,7 +1800,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <div class="metric-card"><div class="metric-label">Partially arrived</div><div class="metric-val" id="po-kpi-partial" style="color:#854F0B">0</div></div>
             <div class="metric-card"><div class="metric-label">Fulfilled</div><div class="metric-val" id="po-kpi-fulfilled" style="color:#3B6D11">0</div></div>
           </div>
-          <div class="card" style="padding:0;overflow:hidden">
+          <div class="card" style="padding:0;overflow:hidden;overflow-x:auto;-webkit-overflow-scrolling:touch">
             <table class="hist-table">
               <thead><tr>
                 <th>Memo</th><th>Item</th><th>Project</th>
@@ -1818,7 +1826,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
 
           <!-- Table 1: Platform × Type -->
-          <div class="card" style="padding:0;overflow:hidden">
+          <div class="card" style="padding:0;overflow:hidden;overflow-x:auto;-webkit-overflow-scrolling:touch">
             <div style="padding:12px 16px 10px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600">Summary by Platform × Type</div>
             <table class="hist-table" id="dev-summary-platform">
               <thead><tr>
@@ -1833,7 +1841,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
           </div>
 
           <!-- Table 2: By Project -->
-          <div class="card" style="padding:0;overflow:hidden">
+          <div class="card" style="padding:0;overflow:hidden;overflow-x:auto;-webkit-overflow-scrolling:touch">
             <div style="padding:12px 16px 10px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600">Summary by Project</div>
             <table class="hist-table" id="dev-summary-project">
               <thead><tr>
@@ -1870,6 +1878,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
           </select>
           <select id="dev-filter-status" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
             <option value="all">ทุกสถานะ</option>
+            <option value="not_identified">Not Identified</option>
             <option value="in-use">In Use</option>
             <option value="available">Available</option>
             <option value="maintenance">Maintenance</option>
@@ -1901,13 +1910,13 @@ svg.icon { display: inline-block; vertical-align: middle; }
         </div>
 
         <!-- Main registry table -->
-        <div class="card" style="padding:0;overflow:hidden">
+        <div class="card" style="padding:0;overflow:hidden;overflow-x:auto;-webkit-overflow-scrolling:touch">
           <table class="hist-table">
             <thead><tr>
               <th style="width:16%;padding-left:16px">Brand / Model</th>
               <th style="width:8%">OS</th>
               <th style="width:7%">Type</th>
-              <th style="width:10%">Asset IT</th>
+              <th style="width:10%">Asset ACC</th>
               <th style="width:11%">Serial No.</th>
               <th style="width:11%">Assignee</th>
               <th style="width:9%">Project</th>
@@ -2236,10 +2245,9 @@ svg.icon { display: inline-block; vertical-align: middle; }
       </div>
     </div>
     <div class="form-grid" style="margin-bottom:10px">
-      <div class="fg"><label>IT Asset ID</label><input type="text" id="dev-asset" placeholder="เช่น OD-001"></div>
-      <div class="fg"><label>Asset ACC</label><input type="text" id="dev-asset-acc" placeholder="เช่น ACC-001"></div>
+      <div class="fg"><label>Asset ACC</label><input type="text" id="dev-asset" placeholder="เช่น ACC-001"></div>
       <div class="fg"><label>Serial Number</label><input type="text" id="dev-serial" placeholder="S/N หรือ IMEI"></div>
-      <div class="fg"><label>QTY</label><input type="number" id="dev-qty" min="1" value="1"></div>
+      <div class="fg"><label>PBX Number</label><input type="text" id="dev-pbx-number" placeholder="เช่น PBX-001"></div>
       <div class="fg"><label>OS Version</label><input type="text" id="dev-os-version" placeholder="เช่น iOS 17.4.1"></div>
       <div class="fg"><label>Company</label>
         <select id="dev-company">
@@ -2266,16 +2274,11 @@ svg.icon { display: inline-block; vertical-align: middle; }
     </div>
     <div class="form-grid" style="margin-bottom:10px">
       <div class="fg"><label>Warranty Expiry</label><input type="date" id="dev-warranty"></div>
-      <div class="fg"><label>สภาพ (Condition)</label><select id="dev-condition"><option value="new">New</option><option value="good">Good</option><option value="fair">Fair</option><option value="poor">Poor</option></select></div>
-      <div class="fg"><label>สถานะ</label><select id="dev-status"><option value="in-use">In Use</option><option value="available">Available</option><option value="maintenance">Maintenance</option><option value="retired">Retired</option></select></div>
+      <div class="fg"><label>สถานะ</label><select id="dev-status"><option value="not_identified">Not Identified</option><option value="in-use">In Use</option><option value="available">Available</option><option value="maintenance">Maintenance</option><option value="retired">Retired</option></select></div>
     </div>
     <div class="fg" style="margin-bottom:16px">
       <label>หมายเหตุ</label>
       <textarea id="dev-note" placeholder="รายละเอียดเพิ่มเติม..." style="min-height:52px"></textarea>
-      <div class="fg"><label>Device Photo</label>
-        <input type="file" id="dev-photo-input" accept="image/*" style="font-size:12px">
-        <img id="dev-photo-preview" src="" style="display:none;width:80px;height:80px;object-fit:cover;border-radius:var(--r-sm);margin-top:6px;border:1px solid var(--border)">
-      </div>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-ghost" onclick="closeDeviceModal()">ยกเลิก</button>
@@ -2294,7 +2297,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
       <span style="font-size:15px;font-weight:700">Bulk Upload Account</span>
       <button class="btn-sm" onclick="closeBulkAcctModal()" style="padding:4px 10px">✕</button>
     </div>
-    <p style="font-size:12px;color:var(--text-2);margin-bottom:12px">วาง email 1 บรรทัดต่อ 1 account — ค่า Col จะถูกเติมจาก dropdown ที่ตั้งไว้</p>
+    <p style="font-size:12px;color:var(--text-2);margin-bottom:12px">วาง email 1 บรรทัดต่อ 1 account — จากนั้นติ๊ก Application ที่แต่ละ account ใช้งาน</p>
     <textarea id="bulk-acct-input" class="ri" style="width:100%;height:160px;resize:vertical;font-family:inherit;font-size:12px" placeholder="email1@orbitdigital.co.th&#10;email2@orbitdigital.co.th&#10;..."></textarea>
     <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
       <button class="btn-ghost" onclick="closeBulkAcctModal()">ยกเลิก</button>

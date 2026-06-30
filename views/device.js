@@ -19,14 +19,18 @@ function deviceToDb(d, isNew=false) {
     type:          d.type || 'other',
     serial:        d.serial || null,
     asset_tag:     d.assetTag || null,
+    pbx_number:    d.pbxNumber || null,
     owner:         d.owner || null,
+    position:      d.position || null,
     assigned_date: d.assignedDate || null,
     project:       d.project || null,
     company:       d.company || null,
     return_date:   d.returnDate || null,
     warranty:      d.warranty || null,
-    condition:     d.condition || 'good',
-    status:        d.status || 'available',
+    qa_owner:      d.qaOwner || null,
+    os_version:    d.osVersion || null,
+    photo_url:     d.photoUrl || null,
+    status:        d.status || 'not_identified',
     memo_ref:      d.memoNo || null,    // use memoNo as single field name
     note:          d.note || null,
     source:        d.source || 'manual',
@@ -45,14 +49,18 @@ function dbToDevice(r) {
     type:         r.type || 'other',
     serial:       r.serial || '',
     assetTag:     r.asset_tag || '',
+    pbxNumber:    r.pbx_number || '',
     owner:        r.owner || '',
+    position:     r.position || '',
     assignedDate: r.assigned_date || '',
     project:      r.project || '',
     company:      r.company || '',
     returnDate:   r.return_date || '',
     warranty:     r.warranty || '',
-    condition:    r.condition || 'good',
-    status:       r.status || 'available',
+    qaOwner:      r.qa_owner || '',
+    osVersion:    r.os_version || '',
+    photoUrl:     r.photo_url || '',
+    status:       r.status || 'not_identified',
     memoNo:       r.memo_ref || '',   // canonical field name
     note:         r.note || '',
     source:       r.source || 'manual',
@@ -302,8 +310,7 @@ async function markArrived(poId, qty, serialNumbers = []) {
       company:         '',
       returnDate:      '',
       warranty:        '',
-      condition:       'new',
-      status:          'available',
+      status:          'not_identified',
       memoNo:          po.memoNo      || '',
       purchaseOrderId: po.id,
       note:            `Arrived from ${po.memoNo} · ${po.itemName}`,
@@ -326,10 +333,7 @@ const PLATFORM_LABEL = { ios:'iOS', android:'Android', huawei:'Huawei', windows:
 const TYPE_LABEL = { mobile:'Mobile', tablet:'Tablet', laptop:'Laptop', other:'Other' };
 
 function deviceStatusBadge(status) {
-  return { 'in-use':{ label:'In Use', cls:'badge-blue' }, 'available':{ label:'Available', cls:'badge-green' }, 'maintenance':{ label:'Maintenance', cls:'badge-amber' }, 'retired':{ label:'Retired', cls:'badge-gray' } }[status] || { label:status, cls:'badge-gray' };
-}
-function deviceConditionBadge(condition) {
-  return { 'new':{ label:'New', cls:'badge-green' }, 'good':{ label:'Good', cls:'badge-blue' }, 'fair':{ label:'Fair', cls:'badge-amber' }, 'poor':{ label:'Poor', cls:'badge-red' } }[condition] || { label:condition, cls:'badge-gray' };
+  return { 'not_identified':{ label:'Not Identified', cls:'badge-gray' }, 'in-use':{ label:'In Use', cls:'badge-blue' }, 'available':{ label:'Available', cls:'badge-green' }, 'maintenance':{ label:'Maintenance', cls:'badge-amber' }, 'retired':{ label:'Retired', cls:'badge-gray' } }[status] || { label:status, cls:'badge-gray' };
 }
 function warrantyStatus(warrantyDate) {
   if(!warrantyDate) return null;
@@ -407,10 +411,10 @@ function renderDeviceSummaries(devices) {
 // ── Device Bulk Import / Template ──────────────────────────────
 function downloadDeviceTemplate() {
   const headers = ['name','brand','type','platform','serial','asset_tag',
-    'owner','project','condition','status','warranty','note'];
+    'owner','project','warranty','note'];
   const example = ['MacBook Pro 14"','Apple','laptop','mac',
     'C02XL0MCJG5M','ORB-2024-001',
-    'สมชาย ใจดี','Geo9','new','in-use','2027-03-01',''];
+    'สมชาย ใจดี','Geo9','2027-03-01','Status defaults to not_identified'];
   _downloadCSV('Device_Template', headers, [example]);
 }
 
@@ -466,12 +470,15 @@ async function importDeviceBulk(file) {
       brand:        get(row,'brand','manufacturer'),
       type:         get(row,'type','devicetype') || 'other',
       platform:     get(row,'platform','os') || 'other',
+      pbxNumber:    get(row,'pbxnumber','pbx_number'),
       serial:       get(row,'serial','serialnumber','sn'),
-      assetTag:     get(row,'asset_tag','assettag','assetno'),
+      assetTag:     get(row,'assetacc','asset_acc','asset_tag','assettag','assetno'),
       owner:        get(row,'owner','assignee','user'),
+      position:     get(row,'position'),
       project:      get(row,'project'),
-      condition:    get(row,'condition') || 'good',
-      status:       get(row,'status') || 'in-use',
+      qaOwner:      get(row,'qaowner','qa_owner'),
+      osVersion:    get(row,'osversion','os_version'),
+      status:       'not_identified',
       warranty:     get(row,'warranty'),
       note:         get(row,'note','remark'),
       source:       'bulk-import',
@@ -541,7 +548,7 @@ function _renderDeviceTable() {
   if(projFilter !== 'all') devices = devices.filter(d => d.project === projFilter);
   if(compFilter !== 'all') devices = devices.filter(d => d.company === compFilter);
   if(search) devices = devices.filter(d => [
-    d.name, d.brand, d.serial, d.assetTag, d.assetAcc, d.pbxNumber,
+    d.name, d.brand, d.serial, d.assetTag, d.pbxNumber,
     d.owner, d.position, d.project, d.company, d.osVersion,
     d.qaOwner, d.note, d.memoRef, d.type, d.platform,
     PLATFORM_LABEL[d.platform||'other'], TYPE_LABEL[d.type||'other']
@@ -636,18 +643,15 @@ function openDeviceModal(id) {
     setVal('dev-name', d.name);        setVal('dev-brand', d.brand);
     setVal('dev-platform', d.platform||'other'); setVal('dev-type', d.type||'mobile');
     setVal('dev-asset', d.assetTag);   setVal('dev-serial', d.serial);
-    setVal('dev-asset-acc', d.assetAcc); setVal('dev-qty', d.qty||1);
+    setVal('dev-pbx-number', d.pbxNumber);
     setVal('dev-os-version', d.osVersion);
     setVal('dev-company', d.company);  setVal('dev-project', d.project);
     setVal('dev-owner', d.owner);      setVal('dev-position', d.position);
     setVal('dev-assigned-date', d.assignedDate);
     setVal('dev-return-date', d.returnDate); setVal('dev-memo-ref', d.memoRef);
-    setVal('dev-warranty', d.warranty); setVal('dev-condition', d.condition||'good');
-    setVal('dev-status', d.status||'in-use'); setVal('dev-note', d.note);
+    setVal('dev-warranty', d.warranty);
+    setVal('dev-status', d.status||'not_identified'); setVal('dev-note', d.note);
     setVal('dev-qa-owner', d.qaOwner);
-    // Load photo preview
-    const prevImg = document.getElementById('dev-photo-preview');
-    if(prevImg) { prevImg.src = d.photo||''; prevImg.style.display = d.photo ? 'block' : 'none'; }
   } else {
     document.getElementById('dev-modal-title').textContent = 'Add Device';
     document.getElementById('dev-edit-id').value = '';
@@ -655,7 +659,8 @@ function openDeviceModal(id) {
      'dev-warranty','dev-memo-ref','dev-note'].forEach(id => setVal(id,''));
     setVal('dev-platform','ios'); setVal('dev-type','mobile');
     setVal('dev-company',''); setVal('dev-project','');
-    setVal('dev-condition','good'); setVal('dev-status','in-use');
+    setVal('dev-pbx-number',''); setVal('dev-os-version',''); setVal('dev-position',''); setVal('dev-qa-owner','');
+    setVal('dev-status','not_identified');
     setVal('dev-assigned-date', new Date().toISOString().slice(0,10));
   }
 }
@@ -678,32 +683,14 @@ function saveDevice() {
   const devices = loadDevices();
   const now = new Date().toISOString();
   const g = id => document.getElementById(id)?.value?.trim()||'';
-  const photoInput = document.getElementById('dev-photo-input');
-  let photoData = null;
-  if(photoInput?.files?.length) {
-    // Read photo as base64
-    try {
-      const file = photoInput.files[0];
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const editId2 = document.getElementById('dev-edit-id').value;
-        const devices2 = loadDevices();
-        const idx2 = editId2 ? devices2.findIndex(d => d.id === Number(editId2)) : -1;
-        if(idx2 >= 0) { devices2[idx2].photo = ev.target.result; storeDevices(devices2); }
-      };
-      reader.readAsDataURL(file);
-    } catch(e) {}
-  }
-
   const data = {
     name,
     brand:        g('dev-brand'),
     platform:     g('dev-platform') || 'other',
     type:         g('dev-type') || 'mobile',
     assetTag:     g('dev-asset'),
-    assetAcc:     g('dev-asset-acc'),
+    pbxNumber:    g('dev-pbx-number'),
     serial:       g('dev-serial'),
-    qty:          Number(g('dev-qty'))||1,
     osVersion:    g('dev-os-version'),
     company:      g('dev-company'),
     project:      g('dev-project'),
@@ -713,8 +700,8 @@ function saveDevice() {
     returnDate:   g('dev-return-date'),
     memoNo:       g('dev-memo-ref'),
     warranty:     g('dev-warranty'),
-    condition:    g('dev-condition') || 'good',
-    status:       g('dev-status') || 'available',
+    qaOwner:      g('dev-qa-owner'),
+    status:       g('dev-status') || 'not_identified',
     note:         g('dev-note'),
     updatedAt:    now,
     source:       'manual',
@@ -754,16 +741,16 @@ function exportDeviceCSV() { exportDeviceCsv(); } // alias
 function exportDeviceCsv() {
   const devices = loadDevices();
   if(!devices.length) { alert('ไม่มีข้อมูลสำหรับ Export'); return; }
-  const headers = ['PBX Number','OS','Type','Brand / Model','QTY','Asset IT','Asset ACC',
+  const headers = ['PBX Number','OS','Type','Brand / Model','Asset ACC',
     'Serial','Assignee','Position','Project','Received date','QA Owner',
-    'Updated Date','Remark','OS version','Status','Condition','Warranty','Memo Ref'];
+    'Updated Date','Remark','OS version','Status','Warranty','Memo Ref'];
   const rows = devices.map(d => [
     d.pbxNumber||'', PLATFORM_LABEL[d.platform||'other']||d.platform||'',
-    TYPE_LABEL[d.type||'other']||d.type||'', d.name||'', d.qty||1,
-    d.assetTag||'', d.assetAcc||'', d.serial||'', d.owner||'', d.position||'',
+    TYPE_LABEL[d.type||'other']||d.type||'', d.name||'',
+    d.assetTag||'', d.serial||'', d.owner||'', d.position||'',
     d.project||'', d.assignedDate||'', d.qaOwner||'',
     d.updatedAt ? d.updatedAt.slice(0,10) : '', d.note||'', d.osVersion||'',
-    d.status||'', d.condition||'', d.warranty||'', d.memoRef||''
+    d.status||'', d.warranty||'', d.memoRef||''
   ]);
   _downloadCSV('Device_Registry', headers, rows);
 }
@@ -793,7 +780,6 @@ function openDeviceDetail(id) {
   const platLbl = PLATFORM_LABEL[d.platform||'other'] || d.platform || '—';
   const typeLbl = TYPE_LABEL[d.type||'other'] || d.type || '—';
   const statusB = deviceStatusBadge(d.status);
-  const condB   = deviceConditionBadge(d.condition);
   const typeIcon = { mobile:'📱', tablet:'📟', laptop:'💻', other:'🖥' }[d.type||'other'] || '🖥';
 
   let panel = document.getElementById('dev-detail-modal');
@@ -817,7 +803,6 @@ function openDeviceDetail(id) {
       </div>
       <div style="display:flex;gap:6px;align-items:center">
         <span class="badge ${statusB.cls}" style="font-size:10px">${esc(statusB.label)}</span>
-        <span class="badge ${condB.cls}" style="font-size:10px">${esc(condB.label)}</span>
         <button class="btn-sm" onclick="openDeviceModal(${id})" style="font-size:11px;padding:3px 8px">✎ Edit</button>
         <button class="btn-sm" onclick="document.getElementById('dev-detail-modal').style.display='none'" style="font-size:11px;padding:3px 8px">✕</button>
       </div>
@@ -832,11 +817,9 @@ function openDeviceDetail(id) {
           ${infoCell('OS version', d.osVersion||'—')}
           ${infoCell('Type', typeLbl)}
           ${infoCell('Serial no.', d.serial||'—')}
-          ${infoCell('Asset IT', d.assetTag||'—')}
-          ${infoCell('Asset ACC', d.assetAcc||'—')}
-          ${infoCell('QTY', d.qty||1)}
+          ${infoCell('Asset ACC', d.assetTag||'—')}
+          ${infoCell('PBX Number', d.pbxNumber||'—')}
           ${infoCell('Warranty', d.warranty ? shortDate(d.warranty) : '—')}
-          ${infoCell('Condition', condB.label)}
         </div>
       </div>
 
@@ -860,14 +843,15 @@ function openDeviceDetail(id) {
       <div>
         <div style="font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Device photo</div>
         <div style="display:flex;gap:10px;align-items:flex-start">
-          ${d.photo
-            ? `<img src="${d.photo}" style="width:80px;height:80px;border-radius:var(--r-sm);object-fit:cover;border:1px solid var(--border);cursor:pointer" onclick="window.open('${d.photo}')" title="คลิกเพื่อดูขนาดเต็ม">`
+          ${d.photoUrl
+            ? `<a href="${esc(d.photoUrl)}" target="_blank" rel="noopener"><img src="${esc(d.photoUrl)}" style="width:80px;height:80px;border-radius:var(--r-sm);object-fit:cover;border:1px solid var(--border)" title="คลิกเพื่อดูขนาดเต็ม"></a>`
             : `<div style="width:80px;height:80px;border-radius:var(--r-sm);border:1px dashed var(--border-md);background:var(--bg);display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:11px">No photo</div>`}
           <div>
             <label style="cursor:pointer">
               <input type="file" accept="image/*" style="display:none" onchange="uploadDevicePhoto(${id}, this)">
               <span class="btn-sm" style="font-size:11px;padding:4px 10px;display:inline-block">📷 Upload photo</span>
             </label>
+            ${d.photoUrl ? `<button class="btn-sm" style="font-size:11px;padding:4px 10px;color:var(--red);margin-left:4px" onclick="removeDevicePhoto(${id})">✕ Remove</button>` : ''}
             <div style="font-size:10px;color:var(--text-3);margin-top:4px">JPG, PNG · max 5MB<br>Photo replaces previous</div>
           </div>
         </div>
@@ -885,23 +869,66 @@ function infoCell(label, value) {
   </div>`;
 }
 
-function uploadDevicePhoto(id, input) {
+async function uploadDevicePhoto(id, input) {
   if(!input.files?.length) return;
   const file = input.files[0];
   if(file.size > 5 * 1024 * 1024) { alert('ไฟล์ใหญ่เกิน 5MB'); return; }
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    const devices = loadDevices();
-    const idx = devices.findIndex(d => d.id === id);
-    if(idx >= 0) {
-      devices[idx].photo = ev.target.result;
-      devices[idx].updatedAt = new Date().toISOString();
-      storeDevices(devices);
-      openDeviceDetail(id);
-      renderDevice();
+  const device = loadDevices().find(d => d.id === id);
+  if(!device) return;
+  const ext = ({ 'image/jpeg':'jpg', 'image/png':'png', 'image/webp':'webp' })[file.type];
+  if(!ext) { alert('รองรับเฉพาะไฟล์ JPG, PNG หรือ WebP'); return; }
+  const path = `devices/${device._supaId || device.id}-${Date.now()}.${ext}`;
+  const objectPath = path.split('/').map(encodeURIComponent).join('/');
+  try {
+    const resp = await fetch(`${SUPA_URL}/storage/v1/object/device-photos/${objectPath}`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPA_KEY,
+        Authorization: `Bearer ${SUPA_KEY}`,
+        'Content-Type': file.type,
+      },
+      body: file,
+    });
+    if(!resp.ok) throw new Error(await resp.text());
+    const photoUrl = `${SUPA_URL}/storage/v1/object/public/device-photos/${objectPath}`;
+    if(device.photoUrl) {
+      const marker = '/storage/v1/object/public/device-photos/';
+      const previousPath = device.photoUrl.includes(marker) ? device.photoUrl.split(marker)[1] : '';
+      if(previousPath) {
+        fetch(`${SUPA_URL}/storage/v1/object/device-photos/${previousPath}`, {
+          method:'DELETE', headers:{ apikey:SUPA_KEY, Authorization:`Bearer ${SUPA_KEY}` }
+        }).catch(() => {});
+      }
     }
-  };
-  reader.readAsDataURL(file);
+    await saveDeviceAsync({ ...device, photoUrl, updatedAt:new Date().toISOString() });
+    openDeviceDetail(id);
+    renderDevice();
+  } catch(e) {
+    console.error('Device photo upload failed', e);
+    alert('อัปโหลดรูปไม่สำเร็จ กรุณาลองอีกครั้ง');
+  }
+}
+
+async function removeDevicePhoto(id) {
+  const device = loadDevices().find(d => d.id === id);
+  if(!device?.photoUrl || !confirm('ลบรูปอุปกรณ์นี้หรือไม่?')) return;
+  const marker = '/storage/v1/object/public/device-photos/';
+  const objectPath = device.photoUrl.includes(marker) ? device.photoUrl.split(marker)[1] : '';
+  try {
+    if(objectPath) {
+      const resp = await fetch(`${SUPA_URL}/storage/v1/object/device-photos/${objectPath}`, {
+        method: 'DELETE',
+        headers: { apikey:SUPA_KEY, Authorization:`Bearer ${SUPA_KEY}` },
+      });
+      if(!resp.ok) throw new Error(await resp.text());
+    }
+    await saveDeviceAsync({ ...device, photoUrl:'', updatedAt:new Date().toISOString() });
+    openDeviceDetail(id);
+    renderDevice();
+  } catch(e) {
+    console.error('Device photo remove failed', e);
+    alert('ลบรูปไม่สำเร็จ กรุณาลองอีกครั้ง');
+  }
 }
 
 // ══════════════════════════════════════════

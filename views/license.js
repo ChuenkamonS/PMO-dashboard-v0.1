@@ -245,96 +245,6 @@ function downloadTemplate(type) {
   }
 }
 
-function importBulk(type) {
-  if (type === 'license') {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.csv,.xlsx,.xls';
-    input.onchange = e => _handleLicenseBulkUpload(e.target.files[0]);
-    input.click();
-  } else if (type === 'device') {
-    importDeviceBulk(null);
-  }
-}
-
-async function _handleLicenseBulkUpload(file) {
-  if (!file) return;
-  let rows = [];
-  try {
-    if (file.name.endsWith('.csv')) {
-      const text = await file.text();
-      const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim());
-      const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g,'').trim());
-      rows = lines.slice(1).map(line => {
-        const vals = line.match(/(".*?"|[^,]+|(?<=,)(?=,)|(?<=,)$|^(?=,))/g) || [];
-        const obj = {};
-        headers.forEach((h, i) => { obj[h] = (vals[i]||'').replace(/^"|"$/g,'').trim(); });
-        return obj;
-      });
-    } else if (typeof XLSX !== 'undefined') {
-      const buf = await file.arrayBuffer();
-      const wb  = XLSX.read(buf, { type:'array' });
-      const ws  = wb.Sheets[wb.SheetNames[0]];
-      rows      = XLSX.utils.sheet_to_json(ws, { defval:'' });
-    } else {
-      alert('กรุณาใช้ไฟล์ CSV สำหรับ import (ไม่พบ SheetJS สำหรับ Excel)');
-      return;
-    }
-  } catch(e) { alert('อ่านไฟล์ไม่ได้: ' + e.message); return; }
-
-  if (!rows.length) { alert('ไม่พบข้อมูลในไฟล์'); return; }
-
-  const get = (row, ...keys) => {
-    for (const k of keys) {
-      const found = Object.keys(row).find(rk => rk.toLowerCase().replace(/[\s_]/g,'') === k.toLowerCase().replace(/[\s_]/g,''));
-      if (found && row[found] !== '') return String(row[found]).trim();
-    }
-    return '';
-  };
-
-  const valid = [], errors = [];
-  rows.forEach((row, i) => {
-    const name  = get(row, 'name', 'licensename', 'software');
-    const seats = parseInt(get(row, 'seats', 'qty', 'quantity')) || 1;
-    const price = parseFloat(String(get(row, 'price_per_month', 'pricemonth', 'cost', 'price')).replace(/[^0-9.]/g,'')) || 0;
-    if (!name) { errors.push('Row ' + (i+2) + ': ไม่มีชื่อ Software'); return; }
-    valid.push({
-      id:            'lic_bulk_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
-      name,
-      vendor:        get(row,'vendor','company','provider'),
-      plan:          get(row,'plan','tier'),
-      seats,
-      pricePerMonth: price,
-      billingFreq:   get(row,'billing_freq','billingfreq','billing') || 'monthly',
-      expiry:        get(row,'expiry','expirydate','expire') || null,
-      project:       get(row,'project','projectname'),
-      owner:         get(row,'owner','assignee','contact'),
-      note:          get(row,'note','remark','comment'),
-      source:        'bulk-import',
-      createdAt:     new Date().toISOString(),
-      updatedAt:     new Date().toISOString(),
-    });
-  });
-
-  if (errors.length) {
-    alert('พบข้อผิดพลาด ' + errors.length + ' รายการ:\n' + errors.slice(0,5).join('\n'));
-    if (!valid.length) return;
-    if (!confirm('มีข้อมูลที่ถูกต้อง ' + valid.length + ' รายการ — ต้องการ import ต่อไหม?')) return;
-  } else {
-    if (!confirm('พบข้อมูล ' + valid.length + ' รายการ — ยืนยัน import?')) return;
-  }
-
-  const existing = loadManualLicenses();
-  const merged   = [...existing, ...valid.filter(v => !existing.find(e => e.name === v.name && e.project === v.project))];
-  storeManualLicenses(merged);
-  // Sync to Supabase
-  valid.forEach(lic => {
-    if (typeof saveLicenseAsync === 'function') saveLicenseAsync(lic).catch(e => console.warn('License bulk sync failed', e));
-  });
-  renderLicense();
-  alert('✓ Import License สำเร็จ — เพิ่ม ' + valid.length + ' รายการ');
-}
-
 function renderLicense() {
   // Load all async settings first, then render
   Promise.all([
@@ -437,7 +347,7 @@ function _renderLicMemoIndex() {
     <div id="lic-count-display" style="font-size:11px;color:var(--text-3);padding:6px 14px;border-bottom:1px solid var(--border)">
       แสดง — รายการ
     </div>
-    <div class="card" style="padding:0;overflow:hidden">
+    <div class="card" style="padding:0;overflow:hidden;overflow-x:auto;-webkit-overflow-scrolling:touch">
       <table class="hist-table">
         <thead><tr>
           <th style="width:12%;padding-left:16px">Software</th>
@@ -734,18 +644,36 @@ function _renderLicUsers() {
         ${allLicCols.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
       </select>
     </div>
+    <div style="font-size:11px;color:var(--text-2);margin-bottom:6px">
+      ✅ = ได้รับ license นี้ · — = ไม่ได้รับ (ตามที่กรอกใน memo) · กด Edit licenses เพื่อแก้หลายรายการพร้อมกัน
+    </div>
     <div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
       <table class="hist-table" style="min-width:500px" id="lic-usr-table">
         <thead><tr>
           <th style="padding-left:14px">Email</th>
           <th>Project</th>
           ${allLicCols.map(c=>`<th style="text-align:center;white-space:nowrap">${esc(c)}</th>`).join('')}
+          <th style="text-align:center;white-space:nowrap">Actions</th>
         </tr></thead>
         <tbody id="lic-usr-body"></tbody>
       </table>
     </div>
-    <div style="font-size:11px;color:var(--text-2);margin-top:6px">
-      ✅ = ได้รับ license นี้ · — = ไม่ได้รับ (ตามที่กรอกใน memo)
+    <div id="lic-usr-editor" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:300;align-items:center;justify-content:center">
+      <div class="card" style="width:480px;max-width:94vw;max-height:85vh;overflow-y:auto;padding:20px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px">
+          <div><div style="font-size:15px;font-weight:700">Edit licenses</div><div id="lic-usr-editor-name" style="font-size:11px;color:var(--text-2);margin-top:2px"></div></div>
+          <button class="btn-sm" onclick="_closeLicUserEditor()">✕</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:10px">
+          <button class="btn-sm" onclick="_setAllLicUserEditor(true)">✓ Select all</button>
+          <button class="btn-sm" onclick="_setAllLicUserEditor(false)">Clear all</button>
+        </div>
+        <div id="lic-usr-editor-options" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+          <button class="btn-ghost" onclick="_closeLicUserEditor()">Cancel</button>
+          <button class="btn-primary" onclick="_saveLicUserEditor()">Save licenses</button>
+        </div>
+      </div>
     </div>`;
 
   _renderLicUsersRows();
@@ -784,6 +712,7 @@ function _renderLicUsersRows() {
   // Load manual overrides from localStorage
   const overrides = _getLicUserOverrides();
   const mergedArr = Object.values(emailMap);
+  window._licUsrMerged = Object.fromEntries(mergedArr.map(row => [`${row.email}|${row.project}`, row]));
 
   tbody.innerHTML = mergedArr.map(r => {
     const initials = r.email.substring(0, 2).toUpperCase();
@@ -799,16 +728,9 @@ function _renderLicUsersRows() {
         const ovKey    = `${key}|${c}`;
         const override = overrides[ovKey]; // true = force on, false = force off, undefined = use memo
         const active   = override !== undefined ? override : fromMemo;
-        const icon     = active ? '✅' : '<span style="color:var(--text-3)">—</span>';
-        const btnStyle = `font-size:10px;padding:2px 5px;border-radius:3px;cursor:pointer;border:0.5px solid var(--border);background:var(--surface);color:var(--text-2);margin-left:4px;opacity:0.6`;
-        const btnTitle = override !== undefined ? 'แก้ไขด้วยตนเอง (คลิกเพื่อรีเซ็ต)' : 'คลิกเพื่อ override';
-        const btnIcon  = override !== undefined ? '↩' : '✎';
-        return `<td style="text-align:center;font-size:13px">
-          ${icon}
-          <button title="${btnTitle}" style="${btnStyle}"
-            onclick="_toggleLicUserOverride('${esc(ovKey)}', ${active})">${btnIcon}</button>
-        </td>`;
+        return `<td style="text-align:center;font-size:13px">${active ? '✅' : '<span style="color:var(--text-3)">—</span>'}</td>`;
       }).join('')}
+      <td style="text-align:center"><button class="btn-sm" onclick="_openLicUserEditor(decodeURIComponent('${encodeURIComponent(key)}'))">Edit licenses</button></td>
     </tr>`;
   }).join('');
 }
@@ -861,6 +783,52 @@ function _toggleLicUserOverride(ovKey, currentActive) {
   _renderLicUsersRows();
 }
 
+function _openLicUserEditor(key) {
+  const row = window._licUsrMerged?.[key];
+  const modal = document.getElementById('lic-usr-editor');
+  if(!row || !modal) return;
+  window._licUsrEditKey = key;
+  const overrides = _getLicUserOverrides();
+  document.getElementById('lic-usr-editor-name').textContent = `${row.email} · ${row.project || '—'}`;
+  document.getElementById('lic-usr-editor-options').innerHTML = (window._licUsrCols || []).map((license, index) => {
+    const ovKey = `${key}|${license}`;
+    const active = overrides[ovKey] !== undefined ? overrides[ovKey] : row.licenses[license] === true;
+    return `<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer">
+      <input type="checkbox" class="lic-usr-edit-check" data-license-index="${index}"${active ? ' checked' : ''} style="width:17px;height:17px;accent-color:var(--blue)">
+      <span style="font-size:12px">${esc(license)}</span>
+    </label>`;
+  }).join('');
+  modal.style.display = 'flex';
+}
+
+function _setAllLicUserEditor(checked) {
+  document.querySelectorAll('#lic-usr-editor-options .lic-usr-edit-check').forEach(input => { input.checked = checked; });
+}
+
+function _closeLicUserEditor() {
+  const modal = document.getElementById('lic-usr-editor');
+  if(modal) modal.style.display = 'none';
+  window._licUsrEditKey = null;
+}
+
+function _saveLicUserEditor() {
+  const key = window._licUsrEditKey;
+  const row = window._licUsrMerged?.[key];
+  if(!key || !row) return;
+  const licenses = window._licUsrCols || [];
+  const overrides = _getLicUserOverrides();
+  document.querySelectorAll('#lic-usr-editor-options .lic-usr-edit-check').forEach(input => {
+    const license = licenses[Number(input.dataset.licenseIndex)];
+    const ovKey = `${key}|${license}`;
+    const fromMemo = row.licenses[license] === true;
+    if(input.checked === fromMemo) delete overrides[ovKey];
+    else overrides[ovKey] = input.checked;
+  });
+  _saveLicUserOverrides(overrides);
+  _closeLicUserEditor();
+  _renderLicUsersRows();
+}
+
 // ── TAB 4: OTHER LICENSE ─────────────────────────────────
 function _renderLicOther() {
   // "Other" = manual licenses (not memo-derived) OR memo licenses with no seat-based plan
@@ -899,7 +867,7 @@ function _renderLicOther() {
         + Add License
       </button>
     </div>
-    <div class="card" style="padding:0;overflow:hidden">
+    <div class="card" style="padding:0;overflow:hidden;overflow-x:auto;-webkit-overflow-scrolling:touch">
       <table class="hist-table"><thead><tr>
         <th style="padding-left:14px">License</th>
         <th>ประเภท</th>

@@ -1016,6 +1016,19 @@ function _normalisePdfData(data) {
     return `<table style="width:100%;border-collapse:collapse"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
   }
 
+  // Account PDF: omit unnamed application columns and require a real email row.
+  d.sections = d.sections.flatMap(section => {
+    if(section.title !== 'ตาราง Account' || !section.html) return [section];
+    const doc = new DOMParser().parseFromString(section.html, 'text/html');
+    const headers = Array.from(doc.querySelectorAll('thead th')).map(th => th.textContent.trim());
+    const keep = headers.map((header, i) => i === 0 || header ? i : -1).filter(i => i >= 0);
+    const rows = Array.from(doc.querySelectorAll('tbody tr')).map(row =>
+      Array.from(row.querySelectorAll('td')).map(td => td.textContent.trim())
+    ).filter(row => row[0] && row[0] !== '-' && row[0] !== '—');
+    if(keep.length < 2 || !rows.length) return [];
+    return [{ title:section.title, html:_tbl(keep.map(i => headers[i]), rows.map(row => keep.map(i => row[i] || '')), []) }];
+  });
+
   // SL — rebuild from slItems if no software section
   if (d.type === 'sl' && !(d.sections.find(s => s.title === 'รายการ Software')) && (d.slItems||[]).length) {
     const rows = d.slItems.map((it, i) => [

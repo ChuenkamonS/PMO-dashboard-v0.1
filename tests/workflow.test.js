@@ -177,3 +177,15 @@ test('the initial SL row exposes the same fields used by collection and validati
     assert.match(addRowFunction, new RegExp(`class=\\"[^\\"]*${field}`), `added row is missing ${field}`);
   });
 });
+
+test('SL account table uses software-synced editable headers, checkboxes, and email-only PDF rows', () => {
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const createCode = fs.readFileSync(path.join(root, 'views/create.js'), 'utf8');
+
+  assert.match(html, /sl-name[^>]+oninput="syncAcctColsFromSoftware\(\)"/);
+  assert.match(createCode, /function syncAcctColsFromSoftware\(\)/);
+  assert.match(createCode, /type="checkbox" class="acct-val"/);
+  assert.match(createCode, /\.filter\(r=>r\[0\]\)/);
+  assert.match(createCode, /const softwareNames = getAcctCols\(\)/);
+  assert.match(appCode, /Account PDF: omit unnamed application columns and require a real email row/);
+});

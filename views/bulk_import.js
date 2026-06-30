@@ -148,8 +148,8 @@ async function importLicenses(rows) {
 // ─────────────────────────────────
 // DEVICE IMPORT
 // Template columns:
-// Name | Type | Serial No | Asset Tag | Owner | Assigned Date | Project |
-// Return Date | Warranty Expiry | Condition | Status | Memo Ref | Note
+// PBX Number | OS | Type | Brand / Model | Asset ACC | Serial | Assignee |
+// Position | Project | Received date | QA Owner | Remark | OS version
 // ─────────────────────────────────
 async function importDevices(rows) {
   const existing = loadDevices();
@@ -174,27 +174,23 @@ async function importDevices(rows) {
       name, type, platform,
       brand:        strVal(row['Brand / Model'] || ''),
       pbxNumber:    strVal(row['PBX Number'] || row['pbx_number'] || ''),
-      qty:          Number(row['QTY'] || row['qty'] || 1) || 1,
-      assetTag:     strVal(row['Asset IT'] || row['Asset Tag'] || ''),
-      assetAcc:     strVal(row['Asset ACC'] || ''),
+      assetTag:     strVal(row['Asset ACC'] || row['Asset IT'] || row['Asset Tag'] || ''),
       serial:       strVal(row['Serial'] || row['Serial No'] || ''),
       owner:        strVal(row['Assignee'] || row['Owner'] || ''),
       position:     strVal(row['Position'] || ''),
       project:      strVal(row['Project'] || ''),
       assignedDate: parseExcelDate(row['Received date'] || row['Assigned Date'] || ''),
       qaOwner:      strVal(row['QA Owner'] || ''),
-      updatedAt:    parseExcelDate(row['Updated Date'] || '') ? new Date(parseExcelDate(row['Updated Date'])).toISOString() : now,
+      updatedAt:    now,
       note:         strVal(row['Remark'] || row['Note'] || ''),
       osVersion:    strVal(row['OS version'] || row['OS Version'] || ''),
-      condition:    'good',
-      status:       'in-use',
+      status:       'not_identified',
       createdAt:    now,
     };
     const dupIdx = typeof findExistingDevice === 'function'
       ? findExistingDevice(existing, device)
       : existing.findIndex(d => {
           if(device.assetTag && d.assetTag && device.assetTag === d.assetTag) return true;
-          if(device.assetAcc && d.assetAcc && device.assetAcc === d.assetAcc) return true;
           if(device.serial   && d.serial   && device.serial   === d.serial)   return true;
           return false;
         });
@@ -295,9 +291,9 @@ function downloadTemplate(type) {
     },
     device: {
       filename: 'device_import_template.xlsx',
-      headers: ['PBX Number','OS','Type','Brand / Model','QTY','Asset IT','Asset ACC','Serial','Assignee','Position','Project','Received date','QA Owner','Updated Date','Remark','OS version'],
-      sample: [['PBX-001','iOS','Mobile','Apple iPhone 15',1,'IT-001','ACC-001','SN12345','Chuen K.','PMO','AOA-MP','2025-01-15','Best IT','2026-01-28','','iOS 17.4.1'],
-               ['PBX-002','Windows','Laptop','Dell Latitude 5540',1,'IT-002','','SN67890','Tom P.','Developer','TTB','2025-02-01','Best IT','2026-01-28','','Windows 11']]
+      headers: ['PBX Number','OS','Type','Brand / Model','Asset ACC','Serial','Assignee','Position','Project','Received date','QA Owner','Remark','OS version'],
+      sample: [['PBX-001','iOS','Mobile','Apple iPhone 15','ACC-001','SN12345','Chuen K.','PMO','AOA-MP','2025-01-15','Best IT','','iOS 17.4.1'],
+               ['PBX-002','Windows','Laptop','Dell Latitude 5540','ACC-002','SN67890','Tom P.','Developer','TTB','2025-02-01','Best IT','','Windows 11']]
     },
     budget: {
       filename: 'budget_import_template.xlsx',
@@ -323,5 +319,13 @@ function downloadTemplate(type) {
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Template');
+  if(type === 'device') {
+    const instructions = XLSX.utils.aoa_to_sheet([
+      ['Device Import Instructions'],
+      ['Each row represents one physical device. New devices default to status "not_identified". Condition and Updated Date are not imported.']
+    ]);
+    instructions['!cols'] = [{wch:110}];
+    XLSX.utils.book_append_sheet(wb, instructions, 'Instructions');
+  }
   XLSX.writeFile(wb, t.filename);
 }

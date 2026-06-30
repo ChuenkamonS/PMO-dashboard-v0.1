@@ -417,9 +417,19 @@ async function confirmApprove() {
         ...(evidenceUrl ? { approvalEvidenceUrl: evidenceUrl } : {}),
       });
     });
-    await Promise.all(updates);
-    closeApproveModal();
-    alert(`✓ Approved ${allowedTargets.length} รายการแล้ว`);
+    const results = await Promise.allSettled(updates);
+    const succeeded = [];
+    const failed = [];
+    results.forEach((result, i) => {
+      (result.status === 'fulfilled' ? succeeded : failed).push(allowedTargets[i]);
+      if(result.status === 'rejected') console.error(`Approval save failed for ${allowedTargets[i]}`, result.reason);
+    });
+    if(!failed.length) {
+      closeApproveModal();
+    } else {
+      document.getElementById('approve-modal').dataset.targets = JSON.stringify(failed);
+    }
+    alert(`Approved: ${succeeded.length ? succeeded.join(', ') : 'None'}\nFailed: ${failed.length ? failed.join(', ') : 'None'}${failed.length ? '\nกรุณาตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง' : ''}`);
   } catch(e) {
     console.error('Approval save failed', e);
     alert('บันทึกการอนุมัติไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง');
@@ -734,8 +744,6 @@ function openPmoEditApproversModal(memoNo) {
   if (!memo) return;
   const approvers = memo.approvers || [];
   const profiles  = typeof getApprovers === 'function' ? getApprovers() : [];
-  const names     = profiles.map(profile => profile.full_name).filter(Boolean);
-  const titles    = [...new Set(profiles.map(profile => profile.title).filter(Boolean))];
 
   const existing = document.getElementById('pmo-approvers-modal');
   if (existing) existing.remove();
@@ -744,8 +752,14 @@ function openPmoEditApproversModal(memoNo) {
   modal.id = 'pmo-approvers-modal';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:400;display:flex;align-items:center;justify-content:center';
 
-  const nameOpts  = names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
-  const titleOpts = titles.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  const approverOptions = (selectedName, locked) => {
+    const hasSelected = profiles.some(profile => profile.full_name === selectedName);
+    const missingLocked = locked && selectedName && !hasSelected
+      ? `<option value="${esc(selectedName)}" selected>${esc(selectedName)}</option>` : '';
+    return `<option value="">-- เลือกผู้อนุมัติ --</option>${missingLocked}${profiles.map(profile =>
+      `<option value="${esc(profile.full_name || '')}" data-title="${esc(profile.title || '')}"${profile.full_name === selectedName ? ' selected' : ''}>${esc(profile.full_name || '')}</option>`
+    ).join('')}`;
+  };
 
   const renderApproverRow = (a, idx) => `
     <div class="approver-edit-row" style="border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:8px">
@@ -755,11 +769,11 @@ function openPmoEditApproversModal(memoNo) {
       <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end">
         <div>
           <label style="font-size:11px;color:var(--text-3)">ชื่อ</label>
-          <input class="ri appr-name" list="pmo-approver-names" style="margin-top:3px;font-size:12px" value="${esc(a.name||'')}" ${a.status==='approved'?'disabled':''}>
+          <select class="ri appr-name" style="margin-top:3px;font-size:12px" onchange="this.closest('.approver-edit-row').querySelector('.appr-title').value=this.selectedOptions[0]?.dataset.title||''" ${a.status==='approved'?'disabled':''}>${approverOptions(a.name || '', a.status === 'approved')}</select>
         </div>
         <div>
           <label style="font-size:11px;color:var(--text-3)">ตำแหน่ง</label>
-          <input class="ri appr-title" list="pmo-approver-titles" style="margin-top:3px;font-size:12px" value="${esc(a.title||'')}" ${a.status==='approved'?'disabled':''}>
+          <input class="ri appr-title" style="margin-top:3px;font-size:12px;background:var(--bg)" value="${esc(a.title||'')}" readonly>
         </div>
         ${a.status !== 'approved' && idx > 0 ? `<button class="btn-sm" onclick="this.closest('.approver-edit-row').remove()" style="color:var(--red);padding:6px 8px">✕</button>` : '<div></div>'}
       </div>
@@ -774,8 +788,6 @@ function openPmoEditApproversModal(memoNo) {
       <div style="font-size:12px;color:var(--text-2);margin-bottom:14px">
         Memo: <strong>${esc(memo.memoNo)}</strong>
       </div>
-      <datalist id="pmo-approver-names">${nameOpts}</datalist>
-      <datalist id="pmo-approver-titles">${titleOpts}</datalist>
       <div id="approver-rows">${approvers.map(renderApproverRow).join('')}</div>
       ${approvers.length < 3 ? `
         <button class="add-btn" onclick="addApproverRow()" style="margin-bottom:14px">+ เพิ่ม Approver</button>` : ''}
@@ -797,14 +809,16 @@ function addApproverRow() {
   if (!container) return;
   const idx = container.querySelectorAll('.approver-edit-row').length;
   if (idx >= 3) { alert('มี Approver ได้สูงสุด 3 คน'); return; }
+  const profiles = typeof getApprovers === 'function' ? getApprovers() : [];
+  const options = profiles.map(profile => `<option value="${esc(profile.full_name || '')}" data-title="${esc(profile.title || '')}">${esc(profile.full_name || '')}</option>`).join('');
   const row = document.createElement('div');
   row.className = 'approver-edit-row';
   row.style.cssText = 'border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:8px';
   row.innerHTML = `
     <div style="font-size:10px;font-weight:600;color:var(--text-3);margin-bottom:6px">A${idx+1}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end">
-      <div><label style="font-size:11px;color:var(--text-3)">ชื่อ</label><input class="ri appr-name" list="pmo-approver-names" style="margin-top:3px;font-size:12px" placeholder="ชื่อ-นามสกุล"></div>
-      <div><label style="font-size:11px;color:var(--text-3)">ตำแหน่ง</label><input class="ri appr-title" list="pmo-approver-titles" style="margin-top:3px;font-size:12px" placeholder="ตำแหน่ง"></div>
+      <div><label style="font-size:11px;color:var(--text-3)">ชื่อ</label><select class="ri appr-name" style="margin-top:3px;font-size:12px" onchange="this.closest('.approver-edit-row').querySelector('.appr-title').value=this.selectedOptions[0]?.dataset.title||''"><option value="">-- เลือกผู้อนุมัติ --</option>${options}</select></div>
+      <div><label style="font-size:11px;color:var(--text-3)">ตำแหน่ง</label><input class="ri appr-title" style="margin-top:3px;font-size:12px;background:var(--bg)" placeholder="ตำแหน่ง" readonly></div>
       <button class="btn-sm" onclick="this.closest('.approver-edit-row').remove()" style="color:var(--red);padding:6px 8px">✕</button>
     </div>`;
   container.appendChild(row);
