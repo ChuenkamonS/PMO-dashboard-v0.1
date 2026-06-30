@@ -556,6 +556,7 @@ body {
   min-width: 200px; flex: 1 1 200px;
 }
 .filter-row input[type="date"],
+.filter-row input[type="month"],
 .filter-row input[type="number"] {
   font-family: 'IBM Plex Sans Thai', 'Noto Sans Thai', Sarabun, system-ui, sans-serif;
   font-size: 12px; padding: 6px 10px;
@@ -1492,12 +1493,12 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <!-- ── TAB: ACTUAL SPEND ── -->
         <div id="bgt-tab-actual-spend" class="cost-tab-panel" style="display:none">
 
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+          <div class="filter-row">
             <div style="display:flex;align-items:center;gap:6px">
               <label style="font-size:11px;color:var(--text-3)">จาก</label>
-              <input type="month" id="as-from" onchange="renderActualSpend()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+              <input type="month" id="as-from" onchange="renderActualSpend()">
               <label style="font-size:11px;color:var(--text-3)">ถึง</label>
-              <input type="month" id="as-to" onchange="renderActualSpend()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+              <input type="month" id="as-to" onchange="renderActualSpend()">
             </div>
             <select id="as-project" onchange="renderActualSpend()">
               <option value="all">ทุกโปรเจค</option>
@@ -1528,11 +1529,11 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <div id="bgt-tab-forecast" class="cost-tab-panel" style="display:none">
           <div style="padding:10px 0 12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <span style="font-size:11px;color:var(--text-3)">Forecast = avg actual (SL memo) · คลิก Actual cell เพื่อดู memo</span>
-            <div style="display:flex;gap:8px;align-items:center">
-              <select id="sl-forecast-proj" onchange="renderBudgetSLInfra()" style="font-size:11px;padding:3px 8px">
+            <div class="filter-row" style="margin-bottom:0">
+              <select id="sl-forecast-proj" onchange="renderBudgetSLInfra()">
                 <option value="all">ทุกโปรเจค</option>
               </select>
-              <select id="sl-forecast-months" onchange="renderBudgetSLInfra()" style="font-size:11px;padding:3px 8px">
+              <select id="sl-forecast-months" onchange="renderBudgetSLInfra()">
                 <option value="6">6 เดือน</option>
                 <option value="12">12 เดือน</option>
               </select>
@@ -1565,13 +1566,13 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <!-- ── TAB: BUDGET VS ACTUAL ── -->
         <div id="bgt-tab-bva" class="cost-tab-panel" style="display:none">
 
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
-            <select id="bva-year" onchange="renderBudgetVsActual()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+          <div class="filter-row">
+            <select id="bva-year" onchange="renderBudgetVsActual()">
               <option value="2568">2568</option>
               <option value="2569" selected>2569</option>
               <option value="2570">2570</option>
             </select>
-            <select id="bva-project" onchange="renderBudgetVsActual()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+            <select id="bva-project" onchange="renderBudgetVsActual()">
               <option value="all">ทุกโปรเจค</option>
             </select>
             <span id="bva-untagged-alert" style="display:none;font-size:11px;color:var(--amber);margin-left:8px"></span>
@@ -1646,17 +1647,17 @@ svg.icon { display: inline-block; vertical-align: middle; }
 
         <!-- ── TAB: OTHERS (HW / INT / ENT / DEP) ── -->
         <div id="bgt-tab-others" class="cost-tab-panel" style="display:none">
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
-            <select id="oth-range" onchange="renderBudgetOthers()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+          <div class="filter-row">
+            <select id="oth-range" onchange="renderBudgetOthers()">
               <option value="3">3 เดือน</option>
               <option value="6">6 เดือน</option>
               <option value="12" selected>12 เดือน</option>
               <option value="all">ทั้งหมด</option>
             </select>
-            <select id="oth-project" onchange="renderBudgetOthers()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+            <select id="oth-project" onchange="renderBudgetOthers()">
               <option value="all">ทุกโปรเจค</option>
             </select>
-            <select id="oth-type" onchange="renderBudgetOthers()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+            <select id="oth-type" onchange="renderBudgetOthers()">
               <option value="all">ทุกประเภท</option>
               <option value="hw">Hardware</option>
               <option value="int">Team Activity</option>

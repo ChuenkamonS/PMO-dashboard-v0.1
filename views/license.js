@@ -715,17 +715,16 @@ function _renderLicUsers() {
     <div style="background:var(--bg-2,#F8F8F6);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:12px;font-size:11px;color:var(--text-2)">
       ℹ ข้อมูลมาจาก "ตาราง Account" ใน SL Memo — email + ✓/- ต่อโปรแกรม
     </div>
-    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <div class="filter-row" style="margin-bottom:12px">
       <input id="lic-usr-search" type="text" placeholder="ค้นหา email..."
-        style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px"
         oninput="_renderLicUsersRows()">
       <select id="lic-usr-proj" onchange="_renderLicUsersRows()"
-        style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+        >
         <option value="all">ทุก project</option>
         ${projects.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
       </select>
       <select id="lic-usr-lic" onchange="_renderLicUsersRows()"
-        style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+        >
         <option value="all">ทุก license</option>
         ${allLicCols.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
       </select>
@@ -871,20 +870,20 @@ function _renderLicOther() {
   if (!el) return;
 
   el.innerHTML = `
-    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;justify-content:space-between">
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <div class="filter-row" style="margin-bottom:12px;justify-content:space-between">
+      <div class="filter-row" style="margin-bottom:0">
         <select id="lic-ot-type" onchange="_renderLicOtherRows()"
-          style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+          >
           <option value="all">ทุกประเภท</option>
           ${licTypes.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}
         </select>
         <select id="lic-ot-proj" onchange="_renderLicOtherRows()"
-          style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+          >
           <option value="all">ทุก project</option>
           ${projects.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
         </select>
         <select id="lic-ot-status" onchange="_renderLicOtherRows()"
-          style="font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+          >
           <option value="all">ทุกสถานะ</option>
           <option value="active">Active</option>
           <option value="expiring">Expiring</option>
