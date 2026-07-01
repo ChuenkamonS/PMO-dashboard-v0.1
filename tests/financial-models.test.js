@@ -381,6 +381,26 @@ test('forecast carries the latest coverage monthly cost into future months and e
   ]);
 });
 
+test('canonical Software detail lines do not change Forecast, Forecast export, or BvA totals', () => {
+  const ctx = context();
+  const input = { ...base, amount:2550, startDate:'2026-01', endDate:'2026-12', vendorProgram:'Product A, Product B' };
+  const parentOnly = ctx.createActualSpendRecord(input);
+  const withDetails = ctx.createActualSpendRecord({ ...input, detailLines:[
+    { program:'Product A', plan:'Business', quantity:2, unitCost:100, monthlyCost:200, coverageStart:'2026-01', coverageEnd:'2026-12', coverageMonths:12, lineAmount:2400 },
+    { program:'Product B', plan:'Pro', quantity:1, unitCost:50, monthlyCost:50, coverageStart:'2026-01', coverageEnd:'2026-03', coverageMonths:3, lineAmount:150 },
+  ] });
+
+  const baselineForecast = ctx.calculateForecast([parentOnly], new Date(2026, 6, 15));
+  const detailedForecast = ctx.calculateForecast([withDetails], new Date(2026, 6, 15));
+  assert.deepEqual(JSON.parse(JSON.stringify(detailedForecast)), JSON.parse(JSON.stringify(baselineForecast)));
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(ctx.forecastExportDataset(detailedForecast))),
+    JSON.parse(JSON.stringify(ctx.forecastExportDataset(baselineForecast))),
+  );
+  assert.equal(ctx.calculateBudgetVsActualDataset([], [withDetails], { year:'2569' }).totals.actual, 2550);
+  assert.equal(ctx.calculateActualSpend([withDetails]), 2550);
+});
+
 test('Infra Cost entered through Actual Spend remains canonical for BvA, Forecast, export, and Unbudgeted', () => {
   const ctx = context();
   const validation = ctx.validateActualSpendRecord({

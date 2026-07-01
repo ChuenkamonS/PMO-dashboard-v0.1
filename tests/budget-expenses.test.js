@@ -763,6 +763,51 @@ test('Phase 4 Actual Spend Report detail displays the canonical final Budget Poo
   assert.deepEqual(Array.from(detail.find(([label]) => label === 'Notes')), ['Notes','Canonical note']);
 });
 
+test('Report Detail displays canonical Software detail lines with authoritative parent amount', () => {
+  const context = createActualSpendContext();
+  context.storeActualSpendRecords([context.createActualSpendRecord({
+    id:'software-detail-report', source:'Approved Memo', referenceNo:'MEMO-SOFTWARE', memoId:'MEMO-SOFTWARE',
+    project:'AOA-MP', spendType:'Software', amount:2550, startDate:'2026-01', endDate:'2026-12',
+    detailLines:[
+      { program:'Product A', plan:'Business', quantity:2, unitCost:100, monthlyCost:200, coverageStart:'2026-01', coverageEnd:'2026-12', coverageMonths:12, lineAmount:2400 },
+      { program:'Product B', plan:'Pro', quantity:1, unitCost:50, monthlyCost:50, coverageStart:'2026-01', coverageEnd:'2026-03', coverageMonths:3, lineAmount:100 },
+    ],
+  })]);
+  context.openMemoReadOnly = () => { throw new Error('Report Detail must not read Memo data'); };
+  let shown;
+  context.showActualSpendDetailModal = (title, fields, helper, details) => { shown = { title, fields, helper, details }; };
+
+  context.showActualSpendRecord('software-detail-report');
+
+  assert.equal(shown.title, 'Actual Spend Detail');
+  assert.deepEqual(Array.from(shown.fields.find(([label]) => label === 'Amount')), ['Amount','฿2,550']);
+  assert.match(shown.details, /Software Details/);
+  assert.match(shown.details, /Product A[\s\S]*Business[\s\S]*Product B[\s\S]*Pro/);
+  assert.match(shown.details, /Parent Actual Spend Amount \(Authoritative\)[\s\S]*฿2,550/);
+  assert.match(shown.details, /Detail Subtotal \(Informational Only\)[\s\S]*฿2,500/);
+  assert.match(shown.details, /Differs from the authoritative parent amount/);
+  assert.doesNotMatch(shown.details, /memo\.sections|memo\.slItems/);
+  assert.equal(context.loadActualSpendRecords().length, 1);
+  assert.equal(context.loadActualSpendRecords()[0].amount, 2550);
+});
+
+test('Software detail section is absent for empty, Manual, and Infra records', () => {
+  const context = createActualSpendContext();
+  const records = [
+    context.createActualSpendRecord({ id:'legacy-software', source:'Approved Memo', referenceNo:'LEGACY', project:'AOA-MP', spendType:'Software', amount:100, startDate:'2026-01', endDate:'2026-01' }),
+    context.createActualSpendRecord({ id:'manual-software', source:'Manual / Historical Expense', referenceNo:'MANUAL', project:'AOA-MP', spendType:'Software', amount:100, startDate:'2026-01', endDate:'2026-01', detailLines:[{ program:'Ignore', lineAmount:100 }] }),
+    context.createActualSpendRecord({ id:'infra-detail', source:'Infra Cost', referenceNo:'INFRA', project:'AOA-MP', spendType:'Infra', amount:100, startDate:'2026-01', endDate:'2026-01', detailLines:[{ program:'Ignore', lineAmount:100 }] }),
+  ];
+  context.storeActualSpendRecords(records);
+  const details = [];
+  context.showActualSpendDetailModal = (_title, _fields, _helper, extra) => details.push(extra);
+
+  records.forEach(record => context.showActualSpendRecord(record.id));
+
+  assert.deepEqual(details, ['', '', '']);
+  assert.equal(context.calculateActualSpend(context.loadActualSpendRecords()), 300);
+});
+
 test('Manual Entries is a filtered management table backed only by active manual expenses', () => {
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   const renderer = budgetCode.match(/function renderManualEntries[\s\S]*?function showActualSpendDetailModal/)[0];
@@ -914,6 +959,7 @@ test('Actual Spend export aligns canonical fields and totals for all three sourc
       id:'actual-spend-memo-1', source:'Approved Memo', referenceNo:'MEMO-1', spendType:'Software',
       project:'AOA-MP', amount:1200, currency:'THB', startDate:'2026-01', endDate:'2026-03',
       vendorProgram:'Product A', finalBudgetPoolId:'POOL-1', budgetStatus:'Mapped', createdBy:'Requester', description:'Memo spend',
+      detailLines:[{ program:'Product A', plan:'Pro', quantity:1, unitCost:400, monthlyCost:400, coverageStart:'2026-01', coverageEnd:'2026-03', coverageMonths:3, lineAmount:1200 }],
     }),
     context.createActualSpendRecord({
       id:'actual-spend-manual-1', source:'Manual / Historical Expense', referenceNo:'HIST-1', spendType:'Hardware',
@@ -945,6 +991,7 @@ test('Actual Spend export aligns canonical fields and totals for all three sourc
   assert.equal(exported.rows[2][11], 'AWS');
   assert.equal(exported.rows[0][12], 'POOL-1');
   assert.equal(exported.rows[1][16], '');
+  assert.equal(exported.rows.length, 3);
   assert.equal(exported.rows.reduce((total, row) => total + row[5], 0), context.calculateActualSpend(records));
 });
 
