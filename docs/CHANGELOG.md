@@ -22,6 +22,22 @@
 
 ## Current Baseline
 
+### Phase 6 - Budget vs Actual
+#### Added
+- Shared Budget vs Actual dataset and CSV serializer for KPI, chart, pool table, drill-down, export, and Unbudgeted totals.
+- Canonical Actual Spend drill-down for all spend, individual Budget Pools, and Unbudgeted items.
+- Focused behavioral tests for utilization parity, remaining-budget calculation, drill-down/export total parity, and Unbudgeted selection.
+
+#### Changed
+- Budget vs Actual now consumes canonical Actual Spend and the shared Budget Utilization calculation instead of recalculating from memos and manual expenses.
+- Remaining Budget is consistently derived as Budget minus Actual Spend; the page and export reuse the same totals.
+
+#### Data Flow
+- Canonical Actual Spend + Budget Pools → shared Budget vs Actual dataset → KPI, comparison chart, pool table, drill-down, Unbudgeted section, and CSV export.
+
+#### Remaining Work
+- Later cleanup phases remain unchanged.
+
 ### Phase 5 - Forecast
 #### Added
 - Shared rolling forecast calculation and Forecast CSV export.

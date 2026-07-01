@@ -527,23 +527,14 @@ function handleActualSpendImport(event) {
 }
 
 function exportBudgetVsActualCSV() {
-  const pools   = loadBudgetPools();
-  const memos   = loadMemos().filter(m => m.status === 'completed');
-  if (!pools.length) { alert('ไม่มี Budget Pool'); return; }
-  const headers = ['Pool ID','โครงการ','ชื่อ Pool','ปี','ประเภท Memo','งบประมาณ',
-    'ใช้ไปจริง','คงเหลือ','% ใช้ไป','เริ่ม','สิ้นสุด'];
-  const rows = pools.map(pool => {
-    const actual    = typeof getPoolActual === 'function' ? getPoolActual(pool, memos, pools) : 0;
-    const remaining = pool.budget - actual;
-    const pct       = pool.budget > 0 ? Math.round(actual / pool.budget * 100) : 0;
-    return [
-      pool.id, pool.project, pool.name, pool.year,
-      (pool.memoTypes||[]).join('+') || 'ทุกประเภท',
-      pool.budget, actual, remaining, pct + '%',
-      pool.startMonth||'', pool.endMonth||''
-    ];
-  });
-  _downloadCSV('Budget_vs_Actual', headers, rows);
+  if (!_bvaDataset) { alert('กรุณาเปิดหน้า Budget vs Actual ก่อน Export'); return; }
+  const exported = budgetVsActualExportDataset(_bvaDataset);
+  const rows = [...exported.rows, [
+    '', 'TOTAL', '', _bvaDataset.filters.year || '', '',
+    exported.totals.budget, exported.totals.actual, exported.totals.remaining,
+    exported.totals.utilizationPercent, '', 'Total',
+  ]];
+  _downloadCSV('Budget_vs_Actual', exported.headers, rows);
 }
 
 function exportBudgetPoolsCSV() {
@@ -2433,6 +2424,8 @@ function getPoolActual(pool, approvedMemos, allPools) {
 // ══════════════════════════════════════════
 // TAB: BUDGET VS ACTUAL
 // ══════════════════════════════════════════
+let _bvaDataset = null;
+
 function renderBudgetVsActual() {
   loadBudgetPoolsAsync().then(_renderBvaWith).catch(() => _renderBvaWith(loadBudgetPools()));
 }
@@ -2443,32 +2436,31 @@ function _renderBvaWith(pools) {
   const container = document.getElementById('bva-content');
   if (!container) return;
 
+  const canonicalPools = pools.map(createBudgetPoolRecord);
+  const canonical = reconcileActualSpendSources(loadMemos(), activeManualExpenses(), loadInfraCosts(), canonicalPools);
+
   // Populate project dropdown
   const projSel = document.getElementById('bva-project');
   if (projSel && projSel.options.length <= 1) {
     const projs = [...new Set([
-      ...pools.map(p => p.project),
-      ...loadMemos().filter(m => memoStatusKey(m) === 'completed').map(m => m.project || '(ไม่ระบุ)')
+      ...canonicalPools.map(p => p.project),
+      ...canonical.map(record => record.project || '(ไม่ระบุ)')
     ])].filter(Boolean).sort();
     projs.forEach(p => { const o = document.createElement('option'); o.value = o.textContent = p; projSel.appendChild(o); });
   }
 
-  const filteredPools = pools.filter(p => p.year === yearVal && (projVal === 'all' || p.project === projVal));
-  const approved      = loadMemos().filter(m => memoStatusKey(m) === 'completed');
-
-  // Count unmatched memos
-  const allPoolsThisYear = pools.filter(p => p.year === yearVal);
-  const unmatched = approved.filter(m =>
-    (projVal === 'all' || (m.project || '(ไม่ระบุ)') === projVal) &&
-    !matchMemoToPool(m, allPoolsThisYear)
-  );
+  _bvaDataset = calculateBudgetVsActualDataset(canonicalPools, canonical, {
+    year: yearVal,
+    project: projVal === 'all' ? '' : projVal,
+  });
+  const { rows, unbudgetedRecords, totals } = _bvaDataset;
   const alertEl = document.getElementById('bva-untagged-alert');
   if (alertEl) {
-    alertEl.style.display = unmatched.length ? '' : 'none';
-    alertEl.textContent   = unmatched.length ? `⚠ ${unmatched.length} memo ไม่ match pool ไหนเลย` : '';
+    alertEl.style.display = unbudgetedRecords.length ? '' : 'none';
+    alertEl.textContent = unbudgetedRecords.length ? `⚠ ${unbudgetedRecords.length} Actual Spend items are Unbudgeted` : '';
   }
 
-  if (!filteredPools.length) {
+  if (!rows.length && !unbudgetedRecords.length) {
     container.innerHTML = `
       <div class="card" style="padding:32px;text-align:center">
         <div style="font-size:32px;margin-bottom:12px">📋</div>
@@ -2480,42 +2472,39 @@ function _renderBvaWith(pools) {
   }
 
   const tdS = 'padding:9px 14px;border-bottom:1px solid var(--border);font-size:12px';
-  const byProj = {};
-  filteredPools.forEach(p => { if (!byProj[p.project]) byProj[p.project] = []; byProj[p.project].push(p); });
-
-  // Group unmatched memos by their effective project so they surface under the right section
-  // (or under a synthetic "(ไม่มี Pool)" section if their project has no pool)
-  const unmatchedMemos = approved.filter(m => !matchMemoToPool(m, allPoolsThisYear));
-  const unmatchedByProj = {};
-  unmatchedMemos.forEach(m => {
-    const key = m.budgetSource || m.project || '(ไม่ระบุ)';
-    if (!unmatchedByProj[key]) unmatchedByProj[key] = [];
-    unmatchedByProj[key].push(m);
+  const pct = totals.utilizationPercent;
+  const totalColor = pct > 100 ? 'var(--red)' : pct >= 90 ? 'var(--amber)' : 'var(--green)';
+  const byProj = new Map();
+  rows.forEach(row => {
+    if (!byProj.has(row.pool.project)) byProj.set(row.pool.project, []);
+    byProj.get(row.pool.project).push(row);
   });
 
-  // Synthetic sections for projects that have unmatched memos but no pool in this view
-  const nopoolProjs = Object.keys(unmatchedByProj).filter(k => !byProj[k]);
-  nopoolProjs.forEach(k => { byProj[k] = []; });
-
-  container.innerHTML = Object.entries(byProj).map(([proj, projPools]) => {
-    const projBudget = projPools.reduce((s, p) => s + (p.budget || 0), 0);
-    const projActual = projPools.reduce((s, p) => s + getPoolActual(p, approved, filteredPools), 0);
-    const projPct    = projBudget > 0 ? Math.round(projActual / projBudget * 100) : null;
-    const pctColor   = projPct === null ? 'var(--text-3)' : projPct > 100 ? 'var(--red)' : projPct >= 90 ? 'var(--amber)' : 'var(--green)';
-
-    // Use budgetSource || project (same logic as matchMemoToPool) so the right memos land here
-    const projUnbudgeted = (unmatchedByProj[proj] || [])
-      .reduce((s, m) => s + (Number(m.total) || 0), 0);
-
-    return `
-      <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
-        <div style="padding:10px 14px;background:var(--bg);display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)">
-          <span style="font-size:13px;font-weight:600">${esc(proj)}</span>
-          <span style="font-size:12px;color:var(--text-2)">
-            Budget: ${money(Math.round(projBudget))} · Actual: ${money(Math.round(projActual))}
-            ${projPct !== null ? `· <span style="font-weight:600;color:${pctColor}">${projPct}%</span>` : ''}
-          </span>
+  container.innerHTML = `
+    <div class="metric-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:12px">
+      <div class="metric-card"><div class="metric-label">Budget</div><div class="metric-val">${money(Math.round(totals.budget))}</div></div>
+      <div class="metric-card" onclick="showBvaActualSpend('all')" style="cursor:pointer"><div class="metric-label">Actual Spend</div><div class="metric-val" style="color:var(--blue)">${money(Math.round(totals.actual))}</div><div class="metric-sub">Click to drill down</div></div>
+      <div class="metric-card"><div class="metric-label">Remaining Budget</div><div class="metric-val" style="color:${totals.remaining < 0 ? 'var(--red)' : 'var(--green)'}">${totals.remaining < 0 ? '-' : ''}${money(Math.abs(Math.round(totals.remaining)))}</div><div class="metric-sub">Budget minus Actual Spend</div></div>
+      <div class="metric-card"><div class="metric-label">Budget Utilization</div><div class="metric-val" style="color:${totalColor}">${pct.toFixed(1)}%</div></div>
+    </div>
+    <div class="card" style="padding:14px 16px;margin-bottom:12px">
+      <div style="font-size:12px;font-weight:600;margin-bottom:10px">Budget vs Actual</div>
+      <div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:6px;font-size:11px">
+        <span>Actual <strong style="color:${totalColor}">${money(Math.round(totals.actual))}</strong></span>
+        <span>Budget <strong>${money(Math.round(totals.budget))}</strong></span>
+      </div>
+      <div style="height:10px;background:var(--border);border-radius:5px;overflow:hidden"><div style="height:100%;width:${Math.min(pct,100)}%;background:${totalColor};border-radius:5px"></div></div>
+    </div>
+    ${unbudgetedRecords.length ? `
+      <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px;border-color:var(--amber)">
+        <div onclick="showBvaActualSpend('unbudgeted')" style="padding:12px 14px;cursor:pointer;display:flex;justify-content:space-between;background:var(--amber-50,#FFFBEB)">
+          <strong style="color:var(--amber)">Unbudgeted Actual Spend (${unbudgetedRecords.length} items)</strong>
+          <strong style="color:var(--amber)">${money(Math.round(totals.unbudgetedActual))} →</strong>
         </div>
+      </div>` : ''}
+    ${[...byProj.entries()].map(([proj, projectRows]) => `
+      <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
+        <div style="padding:10px 14px;background:var(--bg);font-size:13px;font-weight:600;border-bottom:1px solid var(--border)">${esc(proj)}</div>
         <table class="hist-table">
           <thead><tr>
             <th style="${tdS};text-align:left">Pool</th>
@@ -2527,56 +2516,56 @@ function _renderBvaWith(pools) {
             <th style="${tdS}">Utilization</th>
           </tr></thead>
           <tbody>
-            ${projPools.map(pool => {
-              const actual    = getPoolActual(pool, approved);
-              const memos     = getPoolMemos(pool, approved);
-              const remaining = (pool.budget || 0) - actual;
-              const pct       = pool.budget > 0 ? Math.round(actual / pool.budget * 100) : 0;
-              const color     = pct > 100 ? 'var(--red)' : pct >= 90 ? 'var(--amber)' : 'var(--green)';
+            ${projectRows.map(row => {
+              const pool = row.pool;
+              const rowPct = row.utilizationPercent;
+              const color = rowPct > 100 ? 'var(--red)' : rowPct >= 90 ? 'var(--amber)' : 'var(--green)';
               const typeLabels = (pool.memoTypes || []).map(t => BGT_TYPE_LABELS[t] || t).join(', ') || 'ทุกประเภท';
-              return `<tr style="cursor:${memos.length ? 'pointer' : 'default'}" onclick="${memos.length ? `showPoolMemos('${pool.id}')` : ''}">
+              return `<tr style="cursor:${row.records.length ? 'pointer' : 'default'}" onclick="${row.records.length ? `showBvaActualSpend('${pool.id}')` : ''}">
                 <td style="${tdS};font-weight:500">${esc(pool.name)}</td>
                 <td style="${tdS};font-size:11px;color:var(--blue)">${esc(typeLabels)}</td>
                 <td style="${tdS};color:var(--text-3);font-size:11px">${pool.startMonth || '—'} → ${pool.endMonth || '—'}</td>
                 <td style="${tdS};text-align:right">${money(pool.budget || 0)}</td>
                 <td style="${tdS};text-align:right;color:var(--blue);font-weight:500">
-                  ${money(Math.round(actual))}
-                  ${memos.length ? `<span style="font-size:10px;color:var(--text-3);margin-left:4px">(${memos.length} memos)</span>` : ''}
+                  ${money(Math.round(row.actual))}
+                  ${row.records.length ? `<span style="font-size:10px;color:var(--text-3);margin-left:4px">(${row.records.length} items)</span>` : ''}
                 </td>
-                <td style="${tdS};text-align:right;color:${remaining >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:500">
-                  ${remaining >= 0 ? '' : '-'}${money(Math.abs(Math.round(remaining)))}
+                <td style="${tdS};text-align:right;color:${row.remaining >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:500">
+                  ${row.remaining >= 0 ? '' : '-'}${money(Math.abs(Math.round(row.remaining)))}
                 </td>
                 <td style="${tdS}">
                   <div style="display:flex;align-items:center;gap:8px">
                     <div style="flex:1;background:var(--border);border-radius:4px;height:6px;overflow:hidden">
-                      <div style="width:${Math.min(pct,100)}%;height:100%;background:${color};border-radius:4px"></div>
+                      <div style="width:${Math.min(rowPct,100)}%;height:100%;background:${color};border-radius:4px"></div>
                     </div>
-                    <span style="font-size:11px;font-weight:500;color:${color};min-width:32px">${pct}%</span>
+                    <span style="font-size:11px;font-weight:500;color:${color};min-width:40px">${rowPct.toFixed(1)}%</span>
                   </div>
                 </td>
               </tr>`;
             }).join('')}
-            ${projUnbudgeted > 0 ? `
-            <tr style="background:var(--amber-50,#FFFBEB)">
-              <td style="${tdS};color:var(--amber);font-weight:500" colspan="3">⚠ Unbudgeted — ไม่ match pool ไหน</td>
-              <td style="${tdS};text-align:right;color:var(--text-3)">—</td>
-              <td style="${tdS};text-align:right;color:var(--amber);font-weight:500">${money(Math.round(projUnbudgeted))}</td>
-              <td style="${tdS}" colspan="2"><span style="font-size:11px;color:var(--text-3)">ตั้ง pool และ memo types ใน Settings</span></td>
-            </tr>` : ''}
           </tbody>
         </table>
-      </div>`;
-  }).join('');
+      </div>`).join('')}`;
 }
 
-// ── Show memos in a pool (drill-down) ──
-function showPoolMemos(poolId) {
-  const pools    = loadBudgetPools();
-  const pool     = pools.find(p => p.id === poolId);
-  if (!pool) return;
-  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
-  const memos    = getPoolMemos(pool, approved);
-  const total    = memos.reduce((s, m) => s + (Number(m.total) || 0), 0);
+// ── Canonical Actual Spend drill-down ──
+function showBvaActualSpend(scope) {
+  if (!_bvaDataset) return;
+  let records;
+  let title;
+  if (scope === 'all') {
+    records = [..._bvaDataset.rows.flatMap(row => row.records), ..._bvaDataset.unbudgetedRecords];
+    title = 'Actual Spend';
+  } else if (scope === 'unbudgeted') {
+    records = _bvaDataset.unbudgetedRecords;
+    title = 'Unbudgeted Actual Spend';
+  } else {
+    const row = _bvaDataset.rows.find(item => item.pool.id === scope);
+    if (!row) return;
+    records = row.records;
+    title = row.pool.name;
+  }
+  const total = calculateActualSpend(records);
 
   // Remove existing panel
   document.getElementById('bva-memo-panel')?.remove();
@@ -2590,30 +2579,28 @@ function showPoolMemos(poolId) {
     <div class="card" style="width:680px;max-width:95vw;max-height:85vh;overflow-y:auto;padding:0">
       <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--surface)">
         <div>
-          <div style="font-size:14px;font-weight:600">${esc(pool.name)}</div>
-          <div style="font-size:11px;color:var(--text-3)">${esc(pool.project)} · ${pool.startMonth || '—'} → ${pool.endMonth || '—'} · ${memos.length} memos · ${money(Math.round(total))}</div>
+          <div style="font-size:14px;font-weight:600">${esc(title)}</div>
+          <div style="font-size:11px;color:var(--text-3)">${records.length} items · ${money(Math.round(total))}</div>
         </div>
         <button class="btn-sm" onclick="document.getElementById('bva-memo-panel').remove()" style="padding:4px 10px">✕</button>
       </div>
-      ${memos.length ? `
+      ${records.length ? `
       <table class="hist-table">
         <thead><tr>
-          <th style="${tdS};text-align:left">Memo No.</th>
-          <th style="${tdS};text-align:left">วันที่</th>
-          <th style="${tdS};text-align:left">ประเภท</th>
-          <th style="${tdS};text-align:left">รายการ</th>
+          <th style="${tdS};text-align:left">Reference</th>
+          <th style="${tdS};text-align:left">Source</th>
+          <th style="${tdS};text-align:left">Project</th>
+          <th style="${tdS};text-align:left">Spend Type</th>
           <th style="${tdS};text-align:right">Amount</th>
         </tr></thead>
         <tbody>
-          ${memos.sort((a,b) => (b.date||'').localeCompare(a.date||'')).map(m => {
-            const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
-            const dateStr = d.toLocaleDateString('th-TH', {day:'numeric',month:'short',year:'2-digit'});
-            return `<tr style="cursor:pointer" onclick="document.getElementById('bva-memo-panel').remove();openMemoReadOnly('${esc(m.memoNo)}')">
-              <td style="${tdS};color:var(--blue);font-weight:500">${esc(m.memoNo)}</td>
-              <td style="${tdS};color:var(--text-3)">${dateStr}</td>
-              <td style="${tdS}"><span style="font-size:10px;padding:2px 7px;border-radius:4px;background:var(--bg)">${BGT_TYPE_LABELS[m.type] || m.type}</span></td>
-              <td style="${tdS};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px">${esc(m.subject || m.memoNo)}</td>
-              <td style="${tdS};text-align:right;font-weight:500">${money(Number(m.total)||0)}</td>
+          ${records.sort((a,b) => String(b.startDate||'').localeCompare(String(a.startDate||''))).map(record => {
+            return `<tr>
+              <td style="${tdS};color:var(--blue);font-weight:500">${esc(record.referenceNo)}</td>
+              <td style="${tdS};color:var(--text-3)">${esc(record.source)}</td>
+              <td style="${tdS}">${esc(record.project)}</td>
+              <td style="${tdS}">${esc(record.spendType)}</td>
+              <td style="${tdS};text-align:right;font-weight:500">${money(Number(record.amount)||0)}</td>
             </tr>`;
           }).join('')}
           <tr style="background:var(--bg)">
@@ -2621,7 +2608,7 @@ function showPoolMemos(poolId) {
             <td style="${tdS};text-align:right;font-weight:700;color:var(--blue)">${money(Math.round(total))}</td>
           </tr>
         </tbody>
-      </table>` : `<div style="padding:32px;text-align:center;color:var(--text-3)">ยังไม่มี memo ที่ match pool นี้</div>`}
+      </table>` : `<div style="padding:32px;text-align:center;color:var(--text-3)">ยังไม่มี Actual Spend</div>`}
     </div>`;
   document.body.appendChild(panel);
   panel.addEventListener('click', e => { if (e.target === panel) panel.remove(); });

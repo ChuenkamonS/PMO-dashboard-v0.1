@@ -476,6 +476,80 @@ function calculateBudgetUtilization(pool, records = []) {
   };
 }
 
+function financialYearToGregorian(year) {
+  const numeric = Number(year);
+  return numeric > 2400 ? String(numeric - 543) : String(numeric || '');
+}
+
+function actualSpendOverlapsYear(record = {}, year) {
+  const target = financialYearToGregorian(year);
+  if (!target) return true;
+  const start = String(record.startDate || record.month || record.year || record.createdAt || '').slice(0, 4);
+  const end = String(record.endDate || record.month || record.year || record.updatedAt || record.createdAt || '').slice(0, 4);
+  return (!start || start <= target) && (!end || end >= target);
+}
+
+function calculateBudgetVsActualDataset(pools = [], records = [], filters = {}) {
+  const selectedPools = pools.filter(pool =>
+    (!filters.year || String(pool.year || '') === String(filters.year)) &&
+    (!filters.project || pool.project === filters.project)
+  );
+  const selectedPoolIds = new Set(selectedPools.map(pool => pool.id));
+  const scopedRecords = records.filter(record =>
+    (!filters.project || record.project === filters.project) &&
+    actualSpendOverlapsYear(record, filters.year)
+  );
+  const rows = selectedPools.map(pool => ({
+    pool,
+    records: scopedRecords.filter(record =>
+      getFinalBudgetPoolId(record) === pool.id && record.project === pool.project
+    ),
+    ...calculateBudgetUtilization(pool, scopedRecords),
+  }));
+  const unbudgetedRecords = scopedRecords.filter(record =>
+    !getFinalBudgetPoolId(record) && record.budgetStatus === BUDGET_STATUSES.UNBUDGETED
+  );
+  const mappedActual = rows.reduce((sum, row) => sum + row.actual, 0);
+  const unbudgetedActual = calculateActualSpend(unbudgetedRecords);
+  const budget = rows.reduce((sum, row) => sum + row.budget, 0);
+  const actual = mappedActual + unbudgetedActual;
+  return {
+    filters: { ...filters },
+    rows,
+    unbudgetedRecords,
+    totals: {
+      budget,
+      actual,
+      mappedActual,
+      unbudgetedActual,
+      remaining: budget - actual,
+      utilizationPercent: budget > 0 ? actual / budget * 100 : 0,
+    },
+  };
+}
+
+function budgetVsActualExportDataset(dataset = { rows:[], unbudgetedRecords:[], totals:{} }) {
+  const rows = dataset.rows || [];
+  const unbudgeted = dataset.unbudgetedRecords || [];
+  const detailRows = rows.map(row => [
+    row.pool.id, row.pool.project, row.pool.name, row.pool.year,
+    (row.pool.spendTypes || []).join(' + '), row.budget, row.actual, row.remaining,
+    row.utilizationPercent, row.records.length, 'Budgeted',
+  ]);
+  if (unbudgeted.length) {
+    detailRows.push([
+      '', dataset.filters?.project || 'All Projects', 'Unbudgeted', dataset.filters?.year || '',
+      '', 0, dataset.totals.unbudgetedActual, -dataset.totals.unbudgetedActual,
+      0, unbudgeted.length, 'Unbudgeted',
+    ]);
+  }
+  return {
+    headers: ['Pool ID','Project','Pool','Year','Spend Types','Budget','Actual Spend','Remaining Budget','Budget Utilization %','Items','Budget Status'],
+    rows: detailRows,
+    totals: { ...dataset.totals },
+  };
+}
+
 const FINANCIAL_HELPERS = Object.freeze({
   queryActualSpend,
   queryBudgetPools,
@@ -491,6 +565,8 @@ const FINANCIAL_HELPERS = Object.freeze({
   calculateForecast,
   forecastExportDataset,
   calculateBudgetUtilization,
+  calculateBudgetVsActualDataset,
+  budgetVsActualExportDataset,
 });
 
 function importActualSpendRecords(rows) {

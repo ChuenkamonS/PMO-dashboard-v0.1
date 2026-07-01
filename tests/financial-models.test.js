@@ -223,6 +223,45 @@ test('shared calculation engine totals spend and budget utilization', () => {
   );
 });
 
+test('Phase 6 Budget vs Actual uses one canonical dataset for KPI, rows, drill-down, and export', () => {
+  const ctx = context();
+  const pools = [ctx.createBudgetPoolRecord({
+    id:'pool-1', project:'AOA-MP', name:'Software 2569', year:'2569', budget:10000,
+    spendTypes:['Software'], startDate:'2026-01', endDate:'2026-12',
+  })];
+  const records = [
+    ctx.createActualSpendRecord({ ...base, id:'mapped-1', amount:2500, finalBudgetPoolId:'pool-1', budgetStatus:'Mapped' }),
+    ctx.createActualSpendRecord({ ...base, id:'unbudgeted-1', referenceNo:'HW-1', spendType:'Hardware', amount:500, budgetStatus:'Unbudgeted' }),
+    ctx.createActualSpendRecord({ ...base, id:'same-id-other-project', referenceNo:'TTB-1', project:'TTB', amount:900, finalBudgetPoolId:'pool-1', budgetStatus:'Mapped' }),
+  ];
+  const dataset = ctx.calculateBudgetVsActualDataset(pools, records, { year:'2569', project:'AOA-MP' });
+  const drillDownTotal = ctx.calculateActualSpend([
+    ...dataset.rows.flatMap(row => row.records), ...dataset.unbudgetedRecords,
+  ]);
+  assert.equal(dataset.rows[0].actual, 2500);
+  assert.deepEqual(Array.from(dataset.rows[0].records, record => record.id), ['mapped-1']);
+  assert.equal(dataset.rows[0].utilizationPercent, ctx.calculateBudgetUtilization(pools[0], records).utilizationPercent);
+  assert.equal(dataset.totals.actual, 3000);
+  assert.equal(dataset.totals.remaining, dataset.totals.budget - dataset.totals.actual);
+  assert.equal(drillDownTotal, dataset.totals.actual);
+
+  const exported = ctx.budgetVsActualExportDataset(dataset);
+  assert.equal(exported.totals.actual, dataset.totals.actual);
+  assert.equal(exported.rows.reduce((sum, row) => sum + Number(row[6]), 0), dataset.totals.actual);
+});
+
+test('Phase 6 Unbudgeted includes only Actual Spend with no matched budget', () => {
+  const ctx = context();
+  const records = [
+    ctx.createActualSpendRecord({ ...base, id:'none', amount:700, budgetStatus:'Unbudgeted' }),
+    ctx.createActualSpendRecord({ ...base, id:'review', referenceNo:'R-1', amount:800, budgetStatus:'Needs PMO Review' }),
+    ctx.createActualSpendRecord({ ...base, id:'mapped', referenceNo:'M-1', amount:900, finalBudgetPoolId:'pool-1', budgetStatus:'Mapped' }),
+  ];
+  const dataset = ctx.calculateBudgetVsActualDataset([], records, { year:'2569' });
+  assert.deepEqual(Array.from(dataset.unbudgetedRecords, record => record.id), ['none']);
+  assert.equal(dataset.totals.unbudgetedActual, 700);
+});
+
 test('shared calculation engine allocates canonical Actual Spend across coverage months', () => {
   const ctx = context();
   const records = [ctx.createActualSpendRecord({
