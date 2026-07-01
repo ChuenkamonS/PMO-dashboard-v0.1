@@ -236,6 +236,54 @@ test('shared calculation engine allocates canonical Actual Spend across coverage
   assert.equal(ctx.calculateActualSpendInRange(records, '2026-02', '2026-03', { project:'TTB' }), 0);
 });
 
+test('forecast uses only Software and Infra with inclusive monthly allocation and a fixed rolling window', () => {
+  const ctx = context();
+  const records = [
+    ctx.createActualSpendRecord({ ...base, amount:12000, startDate:'2026-01', endDate:'2026-12', vendorProgram:'Suite' }),
+    ctx.createActualSpendRecord({ ...base, referenceNo:'INF-1', source:'Infra Cost', spendType:'Infra', amount:6000, startDate:'2026-04', endDate:'2026-09', vendorProgram:'Cloud' }),
+    ctx.createActualSpendRecord({ ...base, referenceNo:'HW-1', spendType:'Hardware', amount:9000, startDate:'2026-01', endDate:'2026-12' }),
+    ctx.createActualSpendRecord({ ...base, referenceNo:'NO-COVERAGE', amount:5000, startDate:null, endDate:null }),
+  ];
+  const forecast = ctx.calculateForecast(records, new Date(2026, 6, 15));
+  assert.equal(forecast.months.length, 12);
+  assert.equal(forecast.months[0].key, '2026-02');
+  assert.equal(forecast.months[5].kind, 'actual');
+  assert.equal(forecast.months[6].key, '2026-08');
+  assert.equal(forecast.months[6].kind, 'forecast');
+  assert.deepEqual(Array.from(new Set(forecast.rows.map(row => row.spendType))).sort(), ['Infra','Software']);
+  assert.equal(forecast.rows.find(row => row.spendType === 'Software').values['2026-08'], 1000);
+  assert.equal(forecast.rows.find(row => row.spendType === 'Infra').values['2026-08'], 1000);
+  assert.equal(forecast.rows.some(row => row.program === 'NO-COVERAGE'), false);
+});
+
+test('forecast carries the latest coverage monthly cost into future months and export matches UI data', () => {
+  const ctx = context();
+  const record = ctx.createActualSpendRecord({
+    ...base, source:'Infra Cost', spendType:'Infra', amount:24000,
+    startDate:'2026-06', endDate:'2026-08', vendorProgram:'aws',
+  });
+  const forecast = ctx.calculateForecast([record], new Date(2026, 6, 15));
+  const row = forecast.rows[0];
+  assert.equal(row.values['2026-05'], 0);
+  assert.equal(row.values['2026-06'], 8000);
+  assert.equal(row.values['2026-07'], 8000);
+  assert.equal(row.values['2026-08'], 8000);
+  assert.equal(row.values['2026-09'], 8000);
+  assert.equal(row.values['2027-01'], 8000);
+
+  const exported = ctx.forecastExportDataset(forecast);
+  assert.deepEqual(Array.from(exported.headers), [
+    'Project','Program','Spend Type',
+    ...forecast.months.map(month => `${month.key} ${month.kind}`),
+    'Total',
+  ]);
+  assert.deepEqual(Array.from(exported.rows[0]), [
+    row.project, row.program, row.spendType,
+    ...forecast.months.map(month => row.values[month.key] || 0),
+    row.total,
+  ]);
+});
+
 test('batch mapping re-evaluates unbudgeted records without replacing manual overrides', () => {
   const ctx = context();
   const pool = ctx.createBudgetPoolRecord({

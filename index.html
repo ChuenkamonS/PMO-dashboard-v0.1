@@ -1549,15 +1549,15 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <!-- ── TAB: FORECAST ── -->
         <div id="bgt-tab-forecast" class="cost-tab-panel" style="display:none">
           <div style="padding:10px 0 12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-            <span style="font-size:11px;color:var(--text-3)">Forecast = avg actual (SL memo) · คลิก Actual cell เพื่อดู memo</span>
+            <span style="font-size:11px;color:var(--text-3)">Rolling 6 months Actual + 6 months Forecast · Software และ Infra</span>
             <div class="filter-row" style="margin-bottom:0">
               <select id="sl-forecast-proj" onchange="renderBudgetSLInfra()">
                 <option value="all">ทุกโปรเจค</option>
               </select>
               <select id="sl-forecast-months" onchange="renderBudgetSLInfra()">
                 <option value="6">6 เดือน</option>
-                <option value="12">12 เดือน</option>
               </select>
+              <button class="btn-export" onclick="exportForecastCSV()">⬇ Export CSV</button>
             </div>
           </div>
           <div class="card" style="padding:0;overflow:hidden">

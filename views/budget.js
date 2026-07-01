@@ -1122,83 +1122,36 @@ function getActualInRange(proj, fromKey, toKey) {
 }
 
 // ── Forecast vs Actual ──
-function _renderForecastTable(allProjects, infraEntries, licByProj) {
+let _forecastView = { months:[], rows:[] };
+
+function _renderForecastTable() {
   const body   = document.getElementById('sl-forecast-body');
   const thead  = document.getElementById('sl-forecast-thead');
   if(!body || !thead) return;
 
+  const forecast = calculateForecast(loadActualSpendRecords(), new Date());
+  const allProjects = [...new Set(forecast.rows.map(row => row.project))].sort();
+
   // Project dropdown
   const projSel = document.getElementById('sl-forecast-proj');
-  if(projSel && projSel.options.length <= 1) {
+  if(projSel) {
+    const selected = projSel.value || 'all';
+    projSel.innerHTML = '<option value="all">ทุกโปรเจค</option>';
     allProjects.forEach(p => {
       const opt = document.createElement('option');
       opt.value = opt.textContent = p;
       projSel.appendChild(opt);
     });
+    projSel.value = allProjects.includes(selected) ? selected : 'all';
   }
   const selProj = projSel?.value || 'all';
-  const showProjects = selProj === 'all' ? allProjects : [selProj];
-
-  // Month range: past N + 3 future
-  const monthCount = parseInt(document.getElementById('sl-forecast-months')?.value || '6');
-  const now = new Date();
-  const months = [];
-  for(let i = monthCount - 1; i >= 0; i--) {
-    months.push(new Date(now.getFullYear(), now.getMonth() - i, 1));
-  }
-  for(let i = 1; i <= 6; i++) {
-    months.push(new Date(now.getFullYear(), now.getMonth() + i, 1));
-  }
-
-  const isFuture  = m => m > now;
-  const monthKey  = m => `${m.getFullYear()}-${String(m.getMonth()+1).padStart(2,'0')}`;
-  const monthLbl  = m => m.toLocaleString('th-TH', { month:'short', year:'2-digit' });
-
-  // Build actual per project/program per month
-  const actualByProjProg = {}; // { proj: { prog: { 'YYYY-MM': amount } } }
-  const approved = loadMemos().filter(m => memoStatusKey(m)==='completed' && m.type==='sl');
-
-  approved.forEach(memo => {
-    const proj = memo.project || '(ไม่ระบุ)';
-    const startDate = parseThaiDate(memo.date) || parseThaiDate(memo.createdAt) || new Date();
-    const startMo = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
-    const slItems = memo.slItems || [];
-    const parsedItems = !slItems.length
-      ? _parseSLSectionHTML((memo.sections||[]).find(s=>s.title?.includes('Software'))?.html || '')
-      : slItems;
-
-    if(!parsedItems.length) {
-      const mo = 12;
-      const monthly = (Number(memo.total)||0) / mo;
-      if(monthly > 0) {
-        const prog = 'SL รวม';
-        for(let i = 0; i < mo; i++) {
-          const d = new Date(startMo.getFullYear(), startMo.getMonth() + i, 1);
-          const key = monthKey(d);
-          if(!actualByProjProg[proj]) actualByProjProg[proj] = {};
-          if(!actualByProjProg[proj][prog]) actualByProjProg[proj][prog] = {};
-          actualByProjProg[proj][prog][key] = (actualByProjProg[proj][prog][key]||0) + monthly;
-        }
-      }
-      return;
-    }
-    parsedItems.forEach(item => {
-      const prog = item.name || 'SL';
-      const mo   = item.months || 12;
-      const monthly = (item.price||0) * (item.qty||1);
-      // Use item.startMonth if available, else fall back to memo.date
-      const itemStart = item.startMonth
-        ? new Date(item.startMonth + '-01')
-        : startMo;
-      for(let i = 0; i < mo; i++) {
-        const d = new Date(itemStart.getFullYear(), itemStart.getMonth() + i, 1);
-        const key = monthKey(d);
-        if(!actualByProjProg[proj]) actualByProjProg[proj] = {};
-        if(!actualByProjProg[proj][prog]) actualByProjProg[proj][prog] = {};
-        actualByProjProg[proj][prog][key] = (actualByProjProg[proj][prog][key]||0) + monthly;
-      }
-    });
-  });
+  _forecastView = {
+    months: forecast.months,
+    rows: forecast.rows.filter(row => selProj === 'all' || row.project === selProj),
+  };
+  const months = _forecastView.months;
+  const monthDate = key => new Date(`${key}-01T00:00:00`);
+  const monthLbl = month => monthDate(month.key).toLocaleString('th-TH', { month:'short', year:'2-digit' });
 
   // Build thead
   const thBg = 'background:var(--bg)';
@@ -1208,7 +1161,7 @@ function _renderForecastTable(allProjects, infraEntries, licByProj) {
     <th style="${thS};text-align:left;min-width:90px">Project</th>
     <th style="${thS};text-align:left;min-width:80px">Program</th>
     <th style="${thS};text-align:center;min-width:60px">Type</th>
-    ${months.map(m => `<th style="${isFuture(m) ? thFS : thS}">${esc(monthLbl(m))}${isFuture(m) ? '<br><span style="font-size:9px;opacity:.7">F</span>' : ''}</th>`).join('')}
+    ${months.map(m => `<th style="${m.kind === 'forecast' ? thFS : thS}">${esc(monthLbl(m))}${m.kind === 'forecast' ? '<br><span style="font-size:9px;opacity:.7">F</span>' : ''}</th>`).join('')}
     <th style="${thS};color:var(--blue)">Total</th>
   </tr>`;
 
@@ -1218,62 +1171,24 @@ function _renderForecastTable(allProjects, infraEntries, licByProj) {
   const subFS= 'padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600;text-align:right;background:#EEF5FF;color:#185FA5';
 
   let rows = '';
-  showProjects.forEach(proj => {
-    const licProgs = actualByProjProg[proj] || {};
-    const projInfraEntries = infraEntries.filter(e => e.project === proj);
-    const infraProgNames   = [...new Set(projInfraEntries.map(e => e.program))];
-    const allProgs = [...new Set([...Object.keys(licProgs), ...infraProgNames])];
-
-    if(!allProgs.length) return;
-
+  [...new Set(_forecastView.rows.map(row => row.project))].forEach(proj => {
+    const projectRows = _forecastView.rows.filter(row => row.project === proj);
     let projTotal = 0;
     const projMonthTotals = months.map(() => 0);
-
-    // License rows
-    Object.entries(licProgs).forEach(([prog, monthData]) => {
-      const pastVals = months.filter(m => !isFuture(m)).map(m => monthData[monthKey(m)]||0).filter(v=>v>0);
-      const progForecast = pastVals.length ? pastVals.reduce((s,v)=>s+v,0)/pastVals.length : 0;
-
+    projectRows.forEach(row => {
       let rowTotal = 0;
       const cells = months.map((m, mi) => {
-        const key = monthKey(m);
-        if(isFuture(m)) {
-          const fv = progForecast;
-          rowTotal += fv; projMonthTotals[mi] += fv; projTotal += fv;
-          return `<td style="${tdFS}">${fv > 0 ? money(Math.round(fv)) : '<span style=\"color:var(--text-3)\">—</span>'}</td>`;
-        }
-        const v = monthData[key]||0;
+        const v = row.values[m.key] || 0;
         rowTotal += v; projMonthTotals[mi] += v; projTotal += v;
-        if(v > 0) return `<td style="${tdS};cursor:pointer;color:var(--blue);text-decoration:underline;text-decoration-color:var(--blue)" onclick="showMemoBreakdown('${esc(proj)}','${esc(key)}')">${money(Math.round(v))}</td>`;
-        return `<td style="${tdS};color:var(--text-3)">—</td>`;
+        if(v > 0) return `<td style="${m.kind === 'forecast' ? tdFS : tdS}">${money(Math.round(v))}</td>`;
+        return `<td style="${m.kind === 'forecast' ? tdFS : tdS};color:var(--text-3)">—</td>`;
       }).join('');
       rows += `<tr>
         <td style="${tdS};text-align:left;font-weight:500">${esc(proj)}</td>
-        <td style="${tdS};text-align:left">${esc(prog)}</td>
-        <td style="${tdS};text-align:center"><span style="font-size:10px;background:#E6F1FB;color:#0C447C;padding:1px 6px;border-radius:3px">License</span></td>
+        <td style="${tdS};text-align:left">${esc(row.program)}</td>
+        <td style="${tdS};text-align:center"><span style="font-size:10px;background:${row.spendType === 'Infra' ? '#FAEEDA' : '#E6F1FB'};color:${row.spendType === 'Infra' ? '#633806' : '#0C447C'};padding:1px 6px;border-radius:3px">${esc(row.spendType)}</span></td>
         ${cells}
         <td style="${tdS};font-weight:600;color:var(--blue)">${money(Math.round(rowTotal))}</td>
-      </tr>`;
-    });
-
-    // Infra rows — respect start/end month
-    infraProgNames.forEach(prog => {
-      let rowTotal = 0;
-      const cells = months.map((m, mi) => {
-        const key = monthKey(m);
-        const cost = projInfraEntries
-          .filter(e => e.program === prog && infraActiveInMonth(e, key))
-          .reduce((s, e) => s + (e.monthly_cost || 0), 0);
-        rowTotal += cost; projMonthTotals[mi] += cost; projTotal += cost;
-        if(cost > 0) return `<td style="${isFuture(m) ? tdFS : tdS}">${money(cost)}</td>`;
-        return `<td style="${isFuture(m) ? tdFS : tdS};color:var(--text-3)">—</td>`;
-      }).join('');
-      rows += `<tr>
-        <td style="${tdS};text-align:left;color:var(--text-3);font-size:11px">${esc(proj)}</td>
-        <td style="${tdS};text-align:left;color:var(--text-3);font-size:11px">${esc(prog)}</td>
-        <td style="${tdS};text-align:center"><span style="font-size:10px;background:#FAEEDA;color:#633806;padding:1px 6px;border-radius:3px">Infra</span></td>
-        ${cells}
-        <td style="${tdS};font-weight:600;color:var(--amber)">${money(Math.round(rowTotal))}</td>
       </tr>`;
     });
 
@@ -1281,13 +1196,18 @@ function _renderForecastTable(allProjects, infraEntries, licByProj) {
     rows += `<tr style="background:var(--bg)">
       <td style="${subS};text-align:left" colspan="2">${esc(proj)} — Subtotal</td>
       <td style="${subS}"></td>
-      ${projMonthTotals.map((v, mi) => `<td style="${isFuture(months[mi]) ? subFS : subS}">${money(Math.round(v))}</td>`).join('')}
+      ${projMonthTotals.map((v, mi) => `<td style="${months[mi].kind === 'forecast' ? subFS : subS}">${money(Math.round(v))}</td>`).join('')}
       <td style="${subS};color:var(--blue)">${money(Math.round(projTotal))}</td>
     </tr>
     <tr style="height:6px"><td colspan="${months.length+4}" style="background:var(--color-background-tertiary,#F4F3EF)"></td></tr>`;
   });
 
   body.innerHTML = rows || `<tr><td colspan="${months.length+4}" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล</td></tr>`;
+}
+
+function exportForecastCSV() {
+  const dataset = forecastExportDataset(_forecastView);
+  _downloadCSV('forecast', dataset.headers, dataset.rows);
 }
 
 

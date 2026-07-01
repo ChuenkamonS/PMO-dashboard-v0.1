@@ -22,6 +22,22 @@
 
 ## Current Baseline
 
+### Phase 5 - Forecast
+#### Added
+- Shared rolling forecast calculation and Forecast CSV export.
+- Focused coverage for Software/Infra filtering, inclusive monthly allocation, and the fixed rolling window.
+
+#### Changed
+- Forecast now consumes canonical Actual Spend only and displays six actual months plus six forecast months.
+- UI and export reuse the same filtered forecast dataset and shared calculation engine.
+- Actual months remain coverage-bound; forecast months now carry the latest calculable monthly cost forward after coverage ends.
+- Forecast CSV serialization now comes from the same shared Forecast dataset rendered by the table.
+
+#### Remaining Work
+- Records with missing coverage remain excluded from monthly Forecast allocation.
+
+---
+
 ### Phase 0
 #### Added
 - Master Specification

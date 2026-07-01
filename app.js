@@ -404,6 +404,64 @@ function calculateActualSpendInRange(records = [], fromMonth, toMonth, filters =
   }, 0);
 }
 
+function calculateForecast(records = [], asOfDate = new Date(), filters = {}) {
+  const anchor = new Date(asOfDate);
+  const anchorYear = anchor.getFullYear();
+  const anchorMonth = anchor.getMonth();
+  const months = [];
+  for (let offset = -5; offset <= 6; offset++) {
+    const date = new Date(anchorYear, anchorMonth + offset, 1);
+    months.push({
+      key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
+      kind: offset <= 0 ? 'actual' : 'forecast',
+    });
+  }
+  const eligible = queryActualSpend(filters, records).filter(record =>
+    (record.spendType === SPEND_TYPES.SOFTWARE || record.spendType === SPEND_TYPES.INFRA) &&
+    record.coverageStatus === 'Complete'
+  );
+  const grouped = new Map();
+  eligible.forEach(record => {
+    const program = record.vendorProgram || record.description || record.referenceNo || record.spendType;
+    const key = [record.project, program, record.spendType].join('\u0000');
+    if (!grouped.has(key)) grouped.set(key, {
+      project: record.project,
+      program,
+      spendType: record.spendType,
+      values: Object.fromEntries(months.map(month => [month.key, 0])),
+    });
+    const row = grouped.get(key);
+    const allocations = actualSpendMonthlyAllocations(record);
+    const coverageEnd = String(record.endDate).slice(0, 7);
+    const monthlyCost = (Number(record.amount) || 0) / record.coverageMonths;
+    months.forEach(month => {
+      const allocated = Number(allocations[month.key]) || 0;
+      const carriedForecast = month.kind === 'forecast' && month.key > coverageEnd ? monthlyCost : 0;
+      row.values[month.key] += allocated || carriedForecast;
+    });
+  });
+  const rows = [...grouped.values()].sort((a, b) =>
+    a.project.localeCompare(b.project) || a.spendType.localeCompare(b.spendType) || a.program.localeCompare(b.program)
+  ).map(row => ({
+    ...row,
+    total: months.reduce((sum, month) => sum + row.values[month.key], 0),
+  }));
+  return { months, rows };
+}
+
+function forecastExportDataset(forecast = { months:[], rows:[] }) {
+  const months = forecast.months || [];
+  const rows = forecast.rows || [];
+  return {
+    headers: ['Project','Program','Spend Type', ...months.map(month => `${month.key} ${month.kind}`), 'Total'],
+    rows: rows.map(row => [
+      row.project, row.program, row.spendType,
+      ...months.map(month => row.values[month.key] || 0),
+      row.total,
+    ]),
+  };
+}
+
 function calculateBudgetUtilization(pool, records = []) {
   const actual = calculateActualSpend(
     records.filter(record => getFinalBudgetPoolId(record) === pool.id),
@@ -430,6 +488,8 @@ const FINANCIAL_HELPERS = Object.freeze({
   calculateActualSpend,
   actualSpendMonthlyAllocations,
   calculateActualSpendInRange,
+  calculateForecast,
+  forecastExportDataset,
   calculateBudgetUtilization,
 });
 
