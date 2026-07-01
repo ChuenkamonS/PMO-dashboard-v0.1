@@ -50,6 +50,67 @@ function createActualSpendContext() {
   return context;
 }
 
+function createOverviewContext() {
+  const context = createActualSpendContext();
+  const elements = new Map();
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, {
+      id, value:'', textContent:'', innerHTML:'', style:{}, options:[],
+      classList:{ add() {}, remove() {} },
+      appendChild(child) { this.options.push(child); },
+    });
+    return elements.get(id);
+  };
+  [
+    'ov-from-sel','ov-to-sel','ov-custom-range','ov-period-label','ov-period-label-a','ov-bva-period-label',
+    'ov-donut-title','ov-proj-chips','ov-type-chips','ov-type-count','ov-type-col','bgt-kpi-total',
+    'bgt-kpi-actual-sub','bgt-kpi-budget','bgt-kpi-budget-sub','bgt-kpi-remaining',
+    'bgt-kpi-remaining-sub','bgt-kpi-forecast','bgt-kpi-forecast-sub','ov-main-chart',
+    'ov-donut-chart','ov-donut-legend','ov-bva-rows','ov-bva-proj-chips','ov-bva-formula',
+    'ov-pbtn-3','ov-pbtn-6','ov-pbtn-12','ov-pbtn-0',
+  ].forEach(element);
+  context.document.getElementById = id => elements.get(id) || null;
+  context.document.createElement = () => ({ value:'', textContent:'', style:{}, addEventListener() {} });
+  context.chartConfigs = [];
+  context.Chart = function Chart(target, config) {
+    context.chartConfigs.push(config);
+    this.destroy = () => {};
+  };
+  context.__elements = elements;
+  return context;
+}
+
+function monthKey(offset) {
+  const now = new Date();
+  const date = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function seedOverview(context) {
+  context.storeActualSpendRecords([
+    context.createActualSpendRecord({ id:'overview-software', source:'Approved Memo', referenceNo:'SW-1', project:'Alpha', spendType:'Software', amount:12000, startDate:monthKey(-11), endDate:monthKey(0) }),
+    context.createActualSpendRecord({ id:'overview-hardware', source:'Manual / Historical Expense', referenceNo:'HW-1', project:'Beta', spendType:'Hardware', amount:12000, startDate:monthKey(-5), endDate:monthKey(0) }),
+    context.createActualSpendRecord({ id:'overview-infra', source:'Infra Cost', referenceNo:'INFRA-1', project:'Alpha', spendType:'Infra', amount:9000, startDate:monthKey(-2), endDate:monthKey(0) }),
+  ]);
+  context.renderBudgetOverview();
+}
+
+function overviewTotals(context) {
+  const parseMoney = value => Number(String(value).replace(/[^\d.-]/g, ''));
+  const bar = [...context.chartConfigs].reverse().find(config => config.type === 'bar');
+  const donut = [...context.chartConfigs].reverse().find(config => config.type === 'doughnut');
+  const chart = bar.data.datasets.reduce((sum, dataset) => sum + dataset.data.reduce((a, b) => a + b, 0), 0);
+  const donutTotal = donut.data.datasets[0].data.reduce((sum, value) => sum + value, 0);
+  const comparison = [...context.__elements.get('ov-bva-rows').innerHTML.matchAll(/฿([\d,.]+) \/ — \(ไม่มีงบ\)/g)]
+    .reduce((sum, match) => sum + parseMoney(match[1]), 0);
+  return { kpi:parseMoney(context.__elements.get('bgt-kpi-total').textContent), chart, donut:donutTotal, comparison };
+}
+
+function assertOverviewTotals(context, expected) {
+  const totals = overviewTotals(context);
+  assert.deepEqual(totals, { kpi:expected, chart:expected, donut:expected, comparison:expected });
+}
+
 test('one-time manual expense contributes once in its expense month', () => {
   const context = createBudgetContext();
   const occurrences = context.manualExpenseOccurrences({
@@ -146,11 +207,35 @@ test('Actual Spend provides an Excel import template matching accepted columns a
   assert.match(budgetCode, /Source \+ Reference No \+ Project \+ Spend Type \+ Amount \+ Start Date \+ End Date/);
 });
 
-test('Overview KPI, charts, and filters consume canonical Actual Spend calculations', () => {
-  assert.match(budgetCode, /function renderBudgetOverview\(\) \{\s*reconcileActualSpendSources\(\)/);
-  assert.match(budgetCode, /const total = calculateActualSpendInRange\(records, fromKey, toKey\)/);
-  assert.match(budgetCode, /data: months\.map\(m => calculateActualSpendInRange\(records, m\.key, m\.key/);
-  assert.match(budgetCode, /typeKeys\.includes\(SPEND_TYPE_TO_MEMO_TYPE\[record\.spendType\]\)/);
+test('Overview KPI, chart, donut, and project comparison stay equal for 3M, 6M, and 12M filters', () => {
+  const context = createOverviewContext();
+  seedOverview(context);
+  assertOverviewTotals(context, 33000);
+  context.ovSetPreset(6);
+  assertOverviewTotals(context, 27000);
+  context.ovSetPreset(3);
+  assertOverviewTotals(context, 18000);
+});
+
+test('Overview totals stay equal after project and Spend Type filters', () => {
+  const projectContext = createOverviewContext();
+  seedOverview(projectContext);
+  projectContext.ovToggleProj('Beta');
+  assertOverviewTotals(projectContext, 21000);
+
+  const typeContext = createOverviewContext();
+  seedOverview(typeContext);
+  typeContext.ovToggleType('infra');
+  assertOverviewTotals(typeContext, 24000);
+});
+
+test('Overview totals stay equal for a custom period', () => {
+  const context = createOverviewContext();
+  seedOverview(context);
+  context.__elements.get('ov-from-sel').value = '12';
+  context.__elements.get('ov-to-sel').value = '14';
+  context.ovApplyCustomRange();
+  assertOverviewTotals(context, 3000);
 });
 
 test('historical expense migration is additive, RLS-enabled, and forbids delete access', () => {

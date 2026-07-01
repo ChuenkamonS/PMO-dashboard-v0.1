@@ -144,7 +144,7 @@
 - Approved Memo + Historical/Manual Expense + Infra Cost → canonical Actual Spend → shared monthly allocation/range calculation → Overview filters → KPI cards and charts.
 
 #### Tests
-- Added focused shared-engine allocation and Overview canonical-source regression coverage.
+- Added behavioral parity coverage proving Overview KPI, chart, donut, and project comparison totals remain equal for project and Spend Type filters plus 3M, 6M, 12M, and custom periods.
 
 #### Remaining Work
 - Standalone Budget vs Actual, Forecast, Settings, exports, and cleanup remain unchanged.
