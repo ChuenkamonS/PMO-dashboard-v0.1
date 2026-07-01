@@ -424,19 +424,24 @@ function mapBudgetPool(actualSpend, pools = []) {
   if (actualSpend.manualBudgetPoolId) {
     const selectedPool = pools.find(pool => pool.id === actualSpend.manualBudgetPoolId);
     if (selectedPool) {
+      // Manual Override must match both project and year (docs/BvA_REQUIREMENT.md
+      // "Phase 7A-1" §2/§4). A cross-project override otherwise "succeeds" but never appears in
+      // BvA, which groups by project/pool scope — the amount looks silently missing rather than
+      // Unbudgeted. Checked before year so the flag reports whichever mismatch is present.
+      const sameProject = !actualSpend.project || !selectedPool.project || selectedPool.project === actualSpend.project;
       const mappingDate = actualSpendMappingDate(actualSpend);
       const sameYear = !mappingDate || String(selectedPool.year || '') === gregorianYearToBuddhistEra(mappingDate);
-      if (!sameYear) {
-        // Cross-year Manual Override is blocked (docs/BvA_REQUIREMENT.md "Phase 7A-1" §2/§4):
-        // clear every override/mapping field so getFinalBudgetPoolId() cannot resurrect the
-        // blocked pool, and flag it so this is detected/warned rather than silently normalized.
+      if (!sameProject || !sameYear) {
+        // Cross-project or cross-year Manual Override is blocked: clear every override/mapping
+        // field so getFinalBudgetPoolId() cannot resurrect the blocked pool, and flag it so this
+        // is detected/warned rather than silently normalized.
         return {
           ...actualSpend,
           manualBudgetPoolId: null,
           autoBudgetPoolId: null,
           finalBudgetPoolId: null,
           budgetStatus: BUDGET_STATUSES.UNBUDGETED,
-          mappingWarning: 'blocked-cross-year-override',
+          mappingWarning: !sameProject ? 'blocked-cross-project-override' : 'blocked-cross-year-override',
         };
       }
     }

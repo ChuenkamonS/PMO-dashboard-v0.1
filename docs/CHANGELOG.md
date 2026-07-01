@@ -23,6 +23,38 @@
 ## Current Baseline
 
 ### Phase 7A-3 - Same-Year Budget Pool Mapping Contract
+#### Follow-up fixes (cross-project Manual Override guard)
+- Manual Override must now match both project and year, not year alone. Previously
+  `mapBudgetPool()` only checked year, so Manual Entry could select a Budget Pool from a different
+  project — the save "succeeded" but the record never appeared under that pool in Budget vs Actual
+  (which groups by project/pool scope), making the amount look silently missing rather than
+  Unbudgeted.
+- `mapBudgetPool()` now also rejects a `manualBudgetPoolId` whose pool's `project` differs from the
+  Actual Spend record's own `project`: it clears `manualBudgetPoolId`/`autoBudgetPoolId`/
+  `finalBudgetPoolId`, sets `budgetStatus: "Unbudgeted"`, and flags
+  `mappingWarning: "blocked-cross-project-override"` (mirroring the existing cross-year block,
+  which still applies independently and still sets `"blocked-cross-year-override"` when the
+  project matches but the year does not). `updateActualSpendBudgetOverride()` inherits this for
+  free since it already delegates to `mapBudgetPool()`.
+- `saveManualExpenseFromModal()` (`views/budget.js`) now blocks the save at save time with a clear
+  error and does not persist the invalid `budgetPoolId` if the selected pool's project differs from
+  the manual expense's project — checked alongside, and before, the existing same-year check.
+- `saveBudgetTag()` (`views/history.js`) now applies the same project guard for memo Tag Budget,
+  comparing the pool's canonical `project` against the memo's `project` before writing anything,
+  ahead of the existing cross-year guard.
+
+##### Tests
+- Added to `tests/financial-models.test.js`: same-year-but-cross-project Manual Override blocked
+  and flagged (`mapBudgetPool`); blocked cross-project override still visible as Unbudgeted in BvA
+  totals (not silently missing); same-project/same-year control still works;
+  `updateActualSpendBudgetOverride` blocking a cross-project Tag Budget selection; a structural
+  check that `saveBudgetTag()`'s project guard exists and runs before both the cross-year guard and
+  `updateActualSpendBudgetOverride`.
+- Added to `tests/budget-expenses.test.js`: a behavioral test proving
+  `saveManualExpenseFromModal()` blocks a cross-project pool selection with a clear error and does
+  not persist the invalid `budgetPoolId`, with a same-project/same-year control proving the save
+  still succeeds.
+
 #### Follow-up fixes (pre-commit clarification pass)
 - `saveBudgetTag()`'s cross-year guard no longer fails open when no canonical Actual Spend record
   exists yet for the memo (e.g. stale/unrefreshed canonical storage) — it now falls back to

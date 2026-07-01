@@ -635,6 +635,50 @@ test('Phase 7A-3: Manual Entry save-time validation uses the canonical derived B
   assert.equal(context.loadManualExpenses().length, 1, 'a same-canonical-year expense must save successfully');
 });
 
+test('Phase 7A-3: Manual Entry save-time validation blocks a cross-project Budget Pool selection', async () => {
+  const context = createActualSpendContext();
+  context.isPMO = () => true;
+  context.storeBudgetPools([{
+    id:'pool-other-project', project:'OTHER-PRJ', name:'Other Project Pool', budget:100000,
+    year:'2569', startMonth:'2026-01', endMonth:'2026-12', memoTypes:['sl'],
+  }]);
+
+  const elements = new Map();
+  const setField = (id, value) => elements.set(id, { id, value, textContent:'' });
+  setField('me-id', '');
+  setField('me-frequency', 'one_time');
+  setField('me-reference', '');
+  setField('me-project', 'AOA-MP');
+  setField('me-pool', 'pool-other-project'); // pool belongs to a different project
+  setField('me-type', 'sl');
+  setField('me-description', 'Cross-project check');
+  setField('me-date', '2026-03-15');
+  setField('me-start', '');
+  setField('me-end', '');
+  setField('me-amount-input', '1000');
+  setField('me-vendor-program', '');
+  setField('me-notes', '');
+  context.document.getElementById = id => elements.get(id) || null;
+
+  let alertMessage = null;
+  context.alert = message => { alertMessage = message; };
+
+  await context.saveManualExpenseFromModal();
+  assert.ok(alertMessage && /คนละ Project/.test(alertMessage), 'save must be blocked with a clear cross-project error');
+  assert.equal(context.loadManualExpenses().length, 0, 'the invalid budget_pool_id must not be persisted');
+
+  // Control: the SAME project, same year -> must save successfully.
+  alertMessage = null;
+  context.storeBudgetPools([{
+    id:'pool-same-project', project:'AOA-MP', name:'Same Project Pool', budget:100000,
+    year:'2569', startMonth:'2026-01', endMonth:'2026-12', memoTypes:['sl'],
+  }]);
+  setField('me-pool', 'pool-same-project');
+  await context.saveManualExpenseFromModal();
+  assert.equal(alertMessage, null, 'a same-project, same-year selection must not be blocked');
+  assert.equal(context.loadManualExpenses().length, 1, 'a same-project, same-year selection must save successfully');
+});
+
 test('Phase 4 schema-lag reload preserves locally saved Vendor Program without using Notes', async () => {
   const context = createActualSpendContext();
   await context.saveManualExpenseAsync({

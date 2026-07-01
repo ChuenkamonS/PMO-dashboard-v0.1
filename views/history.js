@@ -1134,6 +1134,13 @@ function saveBudgetTag(memoNo) {
     // save — block before writing anything, with a clear error. Compare against the pool's
     // CANONICAL derived year, not its raw stored year (loadBudgetPools() is unnormalized).
     const canonicalPool = typeof createBudgetPoolRecord === 'function' ? createBudgetPoolRecord(pool) : pool;
+    // Manual Override must match both project and year (Phase 7A-3). A cross-project pool
+    // otherwise "saves" but never appears in BvA (grouped by project/pool scope) — block before
+    // writing anything, same as the cross-year guard below.
+    if (canonicalPool.project && memo.project && canonicalPool.project !== memo.project) {
+      alert(`Budget Pool ที่เลือกอยู่คนละ Project กับ Memo นี้ (Pool: ${canonicalPool.project}, Memo: ${memo.project})\nไม่สามารถ Tag Budget ข้าม Project ได้ กรุณาเลือก Budget Pool ของ Project เดียวกับ Memo`);
+      return;
+    }
     const existingRecord = typeof loadActualSpendRecords === 'function'
       ? loadActualSpendRecords().find(r => r.memoId === memoNo) : null;
     let mappingDate = existingRecord && typeof actualSpendMappingDate === 'function'

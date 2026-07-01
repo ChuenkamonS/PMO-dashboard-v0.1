@@ -1865,6 +1865,13 @@ async function saveManualExpenseFromModal() {
     // mapping actually uses.
     const rawPool = loadBudgetPools().find(p => p.id === expense.budgetPoolId);
     const selectedPool = rawPool ? createBudgetPoolRecord(rawPool) : null;
+    // Manual Override must match both project and year. A cross-project pool otherwise "saves"
+    // but never appears in BvA (which groups by project/pool scope), so the amount looks silently
+    // missing. Block before persisting rather than letting the invalid budget_pool_id through.
+    if (selectedPool && selectedPool.project && selectedPool.project !== expense.project) {
+      alert(`Budget Pool ที่เลือกอยู่คนละ Project กับรายการนี้ (Pool: ${selectedPool.project}, รายการ: ${expense.project})\nกรุณาเลือก Budget Pool ของ Project เดียวกับรายการ`);
+      return;
+    }
     const coverageDate = frequency === 'monthly' ? expense.startMonth : expense.expenseDate;
     const expenseYear = gregorianYearToBuddhistEra(coverageDate);
     if (selectedPool && expenseYear && String(selectedPool.year || '') !== expenseYear) {

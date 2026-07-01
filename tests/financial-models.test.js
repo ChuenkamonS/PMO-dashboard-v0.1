@@ -417,6 +417,56 @@ test('Phase 7A-3: Manual Actual Spend with a cross-year selected Budget Pool is 
   assert.equal(ctx.getFinalBudgetPoolId(mapped), null);
 });
 
+test('Phase 7A-3: Manual Actual Spend with a same-year but cross-project selected Budget Pool is blocked and flagged, not silently normalized', () => {
+  const ctx = context();
+  const otherProjectPool = ctx.createBudgetPoolRecord({ id:'pool-otherproj', project:'OTHER-PRJ', name:'Pool Other', budget:100000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const record = ctx.createActualSpendRecord({
+    id:'as-manual-5', source:'Manual / Historical Expense', referenceNo:'MAN-5', project:'AOA-MP',
+    spendType:'Software', amount:5000, startDate:'2026-03-15', endDate:'2026-03-15',
+    manualBudgetPoolId:'pool-otherproj',
+  });
+  const mapped = ctx.mapBudgetPool(record, [otherProjectPool]);
+  assert.equal(mapped.budgetStatus, 'Unbudgeted', 'a same-year pool from a different project must still be blocked');
+  assert.equal(mapped.manualBudgetPoolId, null);
+  assert.equal(mapped.finalBudgetPoolId, null);
+  assert.equal(mapped.autoBudgetPoolId, null);
+  assert.equal(mapped.mappingWarning, 'blocked-cross-project-override');
+  assert.equal(ctx.getFinalBudgetPoolId(mapped), null);
+});
+
+test('Phase 7A-3: blocked cross-project override appears as Unbudgeted in BvA totals, not silently missing', () => {
+  const ctx = context();
+  const poolAOA = ctx.createBudgetPoolRecord({ id:'pool-aoa-1', project:'AOA-MP', name:'Pool AOA', budget:100000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const poolOther = ctx.createBudgetPoolRecord({ id:'pool-other-1', project:'OTHER-PRJ', name:'Pool Other', budget:100000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const record = ctx.createActualSpendRecord({
+    id:'as-manual-6', source:'Manual / Historical Expense', referenceNo:'MAN-6', project:'AOA-MP',
+    spendType:'Software', amount:8000, startDate:'2026-03-15', endDate:'2026-03-15',
+    manualBudgetPoolId:'pool-other-1',
+  });
+  const mapped = ctx.mapBudgetPool(record, [poolAOA, poolOther]);
+  const dataset = ctx.calculateBudgetVsActualDataset([poolAOA, poolOther], [mapped], { year:'2569', project:'AOA-MP' });
+  assert.equal(dataset.unbudgetedRecords.length, 1);
+  assert.equal(dataset.unbudgetedRecords[0].mappingWarning, 'blocked-cross-project-override');
+  assert.equal(dataset.totals.actual, 8000, 'blocked cross-project override amount must still be visible in BvA totals, never silently missing');
+});
+
+test('Phase 7A-3 control: existing same-project/same-year Manual Override still works', () => {
+  const ctx = context();
+  const pool = ctx.createBudgetPoolRecord({
+    id:'pool-manual-control', project:'AOA-MP', name:'Software Pool', budget:100000,
+    startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'],
+  });
+  const record = ctx.createActualSpendRecord({
+    id:'as-manual-control-1', source:'Manual / Historical Expense', referenceNo:'MAN-CONTROL-1', project:'AOA-MP',
+    spendType:'Software', amount:5000, startDate:'2026-03-15', endDate:'2026-03-15',
+    manualBudgetPoolId:'pool-manual-control',
+  });
+  const mapped = ctx.mapBudgetPool(record, [pool]);
+  assert.equal(mapped.budgetStatus, 'Manual Override');
+  assert.equal(mapped.finalBudgetPoolId, 'pool-manual-control');
+  assert.equal(mapped.mappingWarning, null);
+});
+
 test('Phase 7A-3: Approved Memo-created Actual Spend still auto-maps to a same-year matching pool', () => {
   const ctx = context();
   const pool = ctx.createBudgetPoolRecord({ id:'pool-memo-sameyear', project:'AOA-MP', budget:10000, spendTypes:['Software'], startMonth:'2026-01', endMonth:'2026-12' });
@@ -534,6 +584,26 @@ test('Phase 7A-3: updateActualSpendBudgetOverride (the function Tag Budget calls
   assert.equal(validOverride.finalBudgetPoolId, 'pool-tag-A');
 });
 
+test('Phase 7A-3: updateActualSpendBudgetOverride blocks a cross-project override and flags it, matching mapBudgetPool', () => {
+  const ctx = context();
+  const poolSameProject = ctx.createBudgetPoolRecord({ id:'pool-tag-sameproj', project:'AOA-MP', name:'Pool Same', budget:100000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const poolOtherProject = ctx.createBudgetPoolRecord({ id:'pool-tag-otherproj', project:'OTHER-PRJ', name:'Pool Other', budget:100000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const memoRecord = ctx.createActualSpendRecord({
+    id:'actual-spend-memo-TAG-2', source:'Approved Memo', referenceNo:'TAG-2', memoId:'TAG-2',
+    project:'AOA-MP', spendType:'Software', amount:9000, startDate:'2026-05-01', endDate:'2026-05-01',
+  });
+  ctx.storeActualSpendRecords([memoRecord]);
+
+  const overridden = ctx.updateActualSpendBudgetOverride('TAG-2', 'pool-tag-otherproj', [poolSameProject, poolOtherProject]);
+  assert.equal(overridden.budgetStatus, 'Unbudgeted', 'Tag Budget\'s underlying mechanism must not silently accept a cross-project assignment as Manual Override');
+  assert.equal(overridden.mappingWarning, 'blocked-cross-project-override');
+  assert.equal(ctx.getFinalBudgetPoolId(overridden), null);
+
+  const validOverride = ctx.updateActualSpendBudgetOverride('TAG-2', 'pool-tag-sameproj', [poolSameProject, poolOtherProject]);
+  assert.equal(validOverride.budgetStatus, 'Manual Override');
+  assert.equal(validOverride.finalBudgetPoolId, 'pool-tag-sameproj');
+});
+
 test('Phase 7A-3: Budget Pool deletion remains blocked by persisted manual expense / memo references even after a cross-year override is cleared from the canonical record', () => {
   const ctx = context();
   const poolB = ctx.createBudgetPoolRecord({ id:'pool-del-B', project:'AOA-MP', name:'Pool B', budget:100000, startMonth:'2025-01', endMonth:'2025-12', spendTypes:['Software'] });
@@ -580,6 +650,17 @@ test('Phase 7A-3: saveBudgetTag guards against a cross-year selection before cal
   // (e.g. stale/unrefreshed canonical storage) -- it must fall back to deriving the memo's own
   // coverage date directly, using the same fallback chain actualSpendFromMemo() uses.
   assert.match(saveBudgetTagSource, /memoCoveragePeriod/, 'must fall back to the memo\'s own coverage period when no canonical record is found yet, instead of silently skipping the check');
+});
+
+test('Phase 7A-3: saveBudgetTag guards against a cross-project selection before calling the override, rather than saving and discovering it silently later', () => {
+  const saveBudgetTagSource = (historyCode.match(/function saveBudgetTag[\s\S]*?\n}/) || [''])[0];
+  assert.ok(saveBudgetTagSource, 'saveBudgetTag() must still exist in views/history.js');
+  const projectGuardIndex = saveBudgetTagSource.search(/if \(canonicalPool\.project[\s\S]*?return;\s*\n\s*}/);
+  const yearGuardIndex = saveBudgetTagSource.search(/if \(memoYear[\s\S]*?return;\s*\n\s*}/);
+  const overrideCallIndex = saveBudgetTagSource.indexOf('updateActualSpendBudgetOverride(memoNo');
+  assert.ok(projectGuardIndex >= 0, 'a cross-project guard comparing canonicalPool.project against memo.project must exist');
+  assert.ok(projectGuardIndex < yearGuardIndex && projectGuardIndex < overrideCallIndex,
+    'the cross-project guard must run and return before both the cross-year guard and updateActualSpendBudgetOverride, so an invalid cross-project selection is never persisted');
 });
 
 test('Phase 7A-3: mappingWarning survives createActualSpendRecord normalization (a store/reload cycle), not just mapBudgetPool\'s immediate return value', () => {
