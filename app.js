@@ -111,6 +111,22 @@ function generateFinancialRecordId(prefix = 'record') {
   return `${prefix}-${uuid}`;
 }
 
+function normalizeActualSpendDetailLines(detailLines) {
+  if (!Array.isArray(detailLines)) return [];
+  return detailLines.filter(line => line && typeof line === 'object' && !Array.isArray(line)).map(line => ({
+    program: String(line.program || ''),
+    plan: String(line.plan || ''),
+    description: String(line.description || ''),
+    quantity: Number(line.quantity) || 0,
+    unitCost: Number(line.unitCost) || 0,
+    monthlyCost: Number(line.monthlyCost) || 0,
+    coverageStart: line.coverageStart || null,
+    coverageEnd: line.coverageEnd || null,
+    coverageMonths: Number(line.coverageMonths) > 0 ? Number(line.coverageMonths) : null,
+    lineAmount: Number(line.lineAmount) || 0,
+  }));
+}
+
 function createActualSpendRecord(input = {}) {
   const now = new Date().toISOString();
   const startDate = input.startDate || null;
@@ -137,6 +153,7 @@ function createActualSpendRecord(input = {}) {
     vendorProgram: input.vendorProgram || '',
     description: input.description || '',
     notes: input.notes || '',
+    detailLines: normalizeActualSpendDetailLines(input.detailLines),
     autoBudgetPoolId: input.autoBudgetPoolId || null,
     manualBudgetPoolId: input.manualBudgetPoolId || null,
     finalBudgetPoolId: input.manualBudgetPoolId || input.finalBudgetPoolId || input.autoBudgetPoolId || null,
@@ -628,10 +645,35 @@ function memoCoveragePeriod(memo = {}) {
   return { startDate: null, endDate: null };
 }
 
+function softwareMemoDetailLines(slItems) {
+  if (!Array.isArray(slItems)) return [];
+  return slItems.map(item => {
+    const quantity = Number(item.qty) || 0;
+    const unitCost = Number(item.price) || 0;
+    const enteredMonths = Number(item.months);
+    const coverageMonths = enteredMonths > 0
+      ? enteredMonths
+      : inclusiveCoverageMonths(item.startMonth, item.endMonth);
+    return {
+      program: String(item.name || ''),
+      plan: String(item.plan || ''),
+      description: '',
+      quantity,
+      unitCost,
+      monthlyCost: unitCost * quantity,
+      coverageStart: item.startMonth || null,
+      coverageEnd: item.endMonth || null,
+      coverageMonths,
+      lineAmount: unitCost * (coverageMonths || 0) * quantity,
+    };
+  });
+}
+
 function actualSpendFromMemo(memo, existing = null) {
   if (!memo || memo.status !== 'completed') return null;
   const coverage = memoCoveragePeriod(memo);
   const effectiveDate = String(memo.approvedAt || memo.updatedAt || memo.createdAt || '').slice(0, 10);
+  const hasStructuredSoftwareItems = memo.type === 'sl' && Array.isArray(memo.slItems) && memo.slItems.length > 0;
   return createActualSpendRecord({
     ...existing,
     id: existing?.id || `actual-spend-memo-${memo.memoNo}`,
@@ -647,6 +689,9 @@ function actualSpendFromMemo(memo, existing = null) {
     date: parseStrictCalendarValue(effectiveDate) ? effectiveDate : null,
     vendorProgram: (memo.slItems || []).map(item => item.name).filter(Boolean).join(', '),
     description: memo.subject || memo.reason || '',
+    detailLines: memo.type === 'sl'
+      ? (hasStructuredSoftwareItems ? softwareMemoDetailLines(memo.slItems) : existing?.detailLines)
+      : [],
     manualBudgetPoolId: memo.manualBudgetPoolId || memo.budgetPoolId || existing?.manualBudgetPoolId || null,
     createdBy: memo.requesterName || existing?.createdBy || '',
     createdAt: existing?.createdAt || memo.createdAt,

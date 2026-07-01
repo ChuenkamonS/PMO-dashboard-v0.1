@@ -157,6 +157,72 @@ test('Phase 3 canonical Actual Spend combines memo, historical, and infra exactl
   assert.deepEqual(Array.from(new Set(rows.map(row => row.source))).sort(), [
     'Approved Memo', 'Infra Cost', 'Manual / Historical Expense',
   ].sort());
+  assert.deepEqual(Array.from(rows.filter(row => row.source !== 'Approved Memo'), row => row.detailLines.length), [0, 0]);
+});
+
+test('Software memo detail lines persist under one canonical record without changing the memo total', () => {
+  const context = createActualSpendContext();
+  const memo = {
+    memoNo:'SOFTWARE-DETAIL-1', status:'completed', project:'AOA-MP', type:'sl', total:2550,
+    createdAt:'2026-01-01', slItems:[
+      { name:'Product A', plan:'Business', price:100, months:12, qty:2, startMonth:'2026-01', endMonth:'2026-12' },
+      { name:'Product B', plan:'Pro', price:50, qty:1, startMonth:'2026-01', endMonth:'2026-03' },
+    ],
+  };
+
+  const first = context.reconcileActualSpendSources([memo], [], [], []);
+  const second = context.reconcileActualSpendSources([memo], [], [], []);
+  const loaded = context.loadActualSpendRecords();
+
+  assert.equal(first.length, 1);
+  assert.equal(second.length, 1);
+  assert.equal(loaded.length, 1);
+  assert.equal(loaded[0].id, 'actual-spend-memo-SOFTWARE-DETAIL-1');
+  assert.equal(loaded[0].amount, memo.total);
+  assert.equal(loaded[0].detailLines.length, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded[0].detailLines)), [
+    {
+      program:'Product A', plan:'Business', description:'', quantity:2, unitCost:100,
+      monthlyCost:200, coverageStart:'2026-01', coverageEnd:'2026-12', coverageMonths:12, lineAmount:2400,
+    },
+    {
+      program:'Product B', plan:'Pro', description:'', quantity:1, unitCost:50,
+      monthlyCost:50, coverageStart:'2026-01', coverageEnd:'2026-03', coverageMonths:3, lineAmount:150,
+    },
+  ]);
+});
+
+test('legacy and malformed detail lines load safely and legacy Software reconciliation retains valid existing details', () => {
+  const context = createActualSpendContext();
+  const base = {
+    id:'actual-spend-memo-LEGACY-SL', source:'Approved Memo', referenceNo:'LEGACY-SL', memoId:'LEGACY-SL',
+    project:'AOA-MP', spendType:'Software', amount:500, startDate:'2026-01', endDate:'2026-01',
+  };
+  context.storeActualSpendRecords([
+    context.createActualSpendRecord({ ...base, detailLines:[null, 'bad', {
+      program:'Legacy Product', plan:'Pro', quantity:1, unitCost:500, monthlyCost:500,
+      coverageStart:'2026-01', coverageEnd:'2026-01', coverageMonths:1, lineAmount:500,
+    }] }),
+  ]);
+
+  const reconciled = context.reconcileActualSpendSources([
+    { memoNo:'LEGACY-SL', status:'completed', project:'AOA-MP', type:'sl', total:500, createdAt:'2026-01-01' },
+  ], [], [], []);
+
+  assert.equal(reconciled.length, 1);
+  assert.equal(reconciled[0].detailLines.length, 1);
+  assert.equal(reconciled[0].detailLines[0].program, 'Legacy Product');
+  assert.deepEqual(JSON.parse(JSON.stringify(context.createActualSpendRecord(base).detailLines)), []);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.createActualSpendRecord({ ...base, detailLines:'invalid' }).detailLines)), []);
+});
+
+test('legacy Software memo without structured items receives empty details when none already exist', () => {
+  const context = createActualSpendContext();
+  const rows = context.reconcileActualSpendSources([
+    { memoNo:'LEGACY-EMPTY', status:'completed', project:'AOA-MP', type:'sl', total:500, createdAt:'2026-01-01', sections:[{ title:'รายการ Software', html:'legacy' }] },
+  ], [], [], []);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(rows[0].detailLines)), []);
 });
 
 test('Phase 3 historical and infra projections use inclusive coverage and shared validation', () => {
@@ -173,6 +239,8 @@ test('Phase 3 historical and infra projections use inclusive coverage and shared
   assert.equal(infra.amount, 800);
   assert.equal(context.validateActualSpendRecord(historical).valid, true);
   assert.equal(context.validateActualSpendRecord(infra).valid, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(historical.detailLines)), []);
+  assert.deepEqual(JSON.parse(JSON.stringify(infra.detailLines)), []);
 });
 
 test('Phase 3 reconciliation skips invalid legacy source rows without hiding valid spend', () => {
