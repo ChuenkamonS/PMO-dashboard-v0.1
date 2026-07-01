@@ -1,5 +1,51 @@
 # CHANGELOG
 
+## Phase 4 completion verification (2026-07-01)
+
+### Completed
+- Preserved Manual Notes independently in canonical Actual Spend records and Report Detail.
+- Preserved locally saved Vendor / Program during reloads from Supabase environments whose schema cache does not yet expose `vendor_program`.
+- Displayed the already-mapped final Budget Pool name in read-only Actual Spend Report Detail without changing mapping or Budget vs Actual behavior.
+
+### Tests
+- Added behavioral create/edit/reload persistence, schema-lag compatibility, canonical Notes, and Report Detail Budget Pool coverage.
+
+### Unchanged
+- Budget Pool mapping and validation, Budget vs Actual, Forecast, import contract, Report calculations, and canonical financial calculations.
+
+## Actual Spend import frequency inference fix (2026-07-01)
+
+### Fixed
+- Manual Entries imports now infer frequency from normalized calendar-month coverage, so both `YYYY-MM` and full-date ranges spanning multiple inclusive months persist as Monthly.
+- Same-day and single-month records remain One-time.
+- Monthly imported Amount continues to be divided by inclusive coverage months before manual persistence, preserving canonical Report and Forecast totals.
+
+### Unchanged
+- Import template, columns, parser contract, Report, Forecast, Budget vs Actual, Budget Pool mapping, and canonical financial calculations.
+
+### Tests
+- Added month-only, full-date, Excel serial, Date-object, one-day, Manual frequency, canonical total, and Forecast parity coverage.
+
+## Phase 4 — Manual Actual Spend modal and amount alignment (2026-07-01)
+
+### Changed
+- Renamed the manual add/edit workflow to Manual Actual Spend and aligned its Reference No, Spend Type, Description, Frequency, and save labels.
+- Removed Entry Type, Quantity, and Unit Cost from the modal while retaining their compatible persistence values internally.
+- Added frequency-aware Amount / Monthly Amount entry and an inclusive-month live Estimated Total preview.
+- Added an independent Vendor / Program field to manual persistence and canonical Actual Spend projection.
+
+### Compatibility
+- Existing stored `amount` remains authoritative; one-time records store the total and monthly records store the monthly amount.
+- New saves continue writing `quantity = 1` and `unitCost = amount` for the existing Supabase schema.
+- Import columns, template, parser, and coverage-total semantics remain unchanged.
+- Manual saves retry without `vendor_program` only when Supabase reports the specific PGRST204 missing-column schema-cache error, while retaining Vendor / Program locally until the migration is visible.
+
+### Migration
+- Added an additive `vendor_program` column to `budget_manual_expenses`.
+
+### Tests
+- Added modal contract, single-path preview calculation, legacy amount, Vendor / Program persistence, schema-cache fallback, import compatibility, parity, and additive migration coverage.
+
 ## Manual Entries import routing fix (2026-07-01)
 
 ### Fixed

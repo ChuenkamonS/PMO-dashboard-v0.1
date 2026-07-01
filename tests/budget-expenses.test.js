@@ -288,10 +288,10 @@ test('Actual Spend import preserves matching date precision validation', () => {
   assert.deepEqual(Array.from(result.errors[0].errors), ['Invalid coverage period']);
 });
 
-test('Manual Historical form distinguishes monthly amount from one-time total', () => {
-  assert.match(budgetCode, /monthly \? 'Monthly amount' : 'One-time total amount'/);
-  assert.match(budgetCode, /Monthly total = monthly amount × inclusive coverage months\./);
-  assert.match(budgetCode, /This amount is recorded once as the one-time total\./);
+test('Manual Actual Spend form distinguishes Monthly Amount and previews its coverage total', () => {
+  assert.match(budgetCode, /frequency === 'monthly' \? 'Monthly Amount \(THB\) \*' : 'Amount \(THB\) \*'/);
+  assert.match(budgetCode, /Estimated Total = Monthly Amount × Inclusive Coverage Months/);
+  assert.match(budgetCode, /total: enteredAmount \* coverageMonths/);
 });
 
 test('Actual Spend import rejects invalid Source and Spend Type with row-level field errors', () => {
@@ -362,6 +362,52 @@ test('Excel import of Manual / Historical rows creates editable manual expense r
   assert.ok(rawImported.every(record => String(record.id).startsWith('actual-spend-manual-')));
 });
 
+test('Manual Entries import infers monthly frequency from month-only and full-date multi-month ranges', () => {
+  const context = createActualSpendContext();
+  const rows = [
+    { Source:'Manual / Historical', 'Reference No':'MONTH-ONLY', 'Spend Type':'Software', Project:'AOA-MP', Amount:3000, 'Start Date':'2026-06', 'End Date':'2026-08' },
+    { Source:'Manual / Historical', 'Reference No':'FULL-DATES', 'Spend Type':'Software', Project:'AOA-MP', Amount:6000, 'Start Date':'2026-06-01', 'End Date':'2026-08-31' },
+    { Source:'Manual / Historical', 'Reference No':'ONE-DAY', 'Spend Type':'Hardware', Project:'AOA-MP', Amount:900, 'Start Date':'2026-07-01', 'End Date':'2026-07-01' },
+  ].map(context.manualEntriesImportRow).map(context.manualExpenseFromImportedActualSpend);
+  const monthOnly = rows.find(row => row.referenceNo === 'MONTH-ONLY');
+  const fullDates = rows.find(row => row.referenceNo === 'FULL-DATES');
+  const oneDay = rows.find(row => row.referenceNo === 'ONE-DAY');
+  assert.deepEqual([monthOnly.frequency, monthOnly.startMonth, monthOnly.endMonth, monthOnly.amount], ['monthly','2026-06','2026-08',1000]);
+  assert.deepEqual([fullDates.frequency, fullDates.startMonth, fullDates.endMonth, fullDates.amount], ['monthly','2026-06','2026-08',2000]);
+  assert.deepEqual([oneDay.frequency, oneDay.expenseDate, oneDay.amount], ['one_time','2026-07-01',900]);
+});
+
+test('Excel serial and Date-object multi-month imports infer monthly frequency after normalization', () => {
+  const context = createActualSpendContext();
+  const serial = (year, month, day) => (Date.UTC(year, month - 1, day) - Date.UTC(1899, 11, 30)) / 86400000;
+  const serialRecord = context.manualExpenseFromImportedActualSpend(context.manualEntriesImportRow({
+    'Reference No':'SERIAL-RANGE', 'Spend Type':'Software', Project:'AOA-MP', Amount:3000,
+    'Start Date':serial(2026,6,1), 'End Date':serial(2026,8,31),
+  }));
+  const dateRecord = context.manualExpenseFromImportedActualSpend(context.manualEntriesImportRow({
+    'Reference No':'DATE-RANGE', 'Spend Type':'Software', Project:'AOA-MP', Amount:4500,
+    'Start Date':new Date(2026,5,1), 'End Date':new Date(2026,7,31),
+  }));
+  assert.deepEqual([serialRecord.frequency, serialRecord.startMonth, serialRecord.endMonth, serialRecord.amount], ['monthly','2026-06','2026-08',1000]);
+  assert.deepEqual([dateRecord.frequency, dateRecord.startMonth, dateRecord.endMonth, dateRecord.amount], ['monthly','2026-06','2026-08',1500]);
+});
+
+test('Imported frequency inference preserves canonical Report and Forecast totals', () => {
+  const context = createActualSpendContext();
+  const manual = context.manualExpenseFromImportedActualSpend(context.manualEntriesImportRow({
+    'Reference No':'PARITY-RANGE', 'Spend Type':'Software', Project:'AOA-MP', Amount:3000,
+    'Start Date':'2026-06-01', 'End Date':'2026-08-31', 'Vendor / Program':'Suite',
+  }));
+  const canonical = context.manualExpenseToActualSpend(manual);
+  assert.equal(manual.frequency, 'monthly');
+  assert.equal(canonical.amount, 3000);
+  assert.equal(context.calculateActualSpend([canonical]), 3000);
+  const forecast = context.calculateForecast([canonical], new Date(2026, 6, 15));
+  assert.equal(forecast.rows[0].values['2026-06'], 1000);
+  assert.equal(forecast.rows[0].values['2026-07'], 1000);
+  assert.equal(forecast.rows[0].values['2026-08'], 1000);
+});
+
 test('An imported manual expense record can be edited and the change flows into canonical Actual Spend', async () => {
   const context = createActualSpendContext();
   const rows = [
@@ -378,6 +424,168 @@ test('An imported manual expense record can be edited and the change flows into 
 
   const after = context.reconcileActualSpendSources();
   assert.equal(context.calculateActualSpend(after.filter(record => record.referenceNo === 'IMP-EDIT')), 4500);
+});
+
+test('Phase 4 Manual Actual Spend modal exposes the final fields and hides legacy amount inputs', () => {
+  const modal = budgetCode.match(/function openManualExpenseModal[\s\S]*?function toggleManualExpenseSchedule/)[0];
+  assert.match(modal, /Manual Actual Spend/);
+  assert.match(modal, /Save Actual Spend/);
+  assert.match(modal, /<label>Reference No<\/label>/);
+  assert.match(modal, /<label>Spend Type \*<\/label>/);
+  assert.match(modal, /<label>Description \*<\/label>/);
+  assert.match(modal, /<label>Frequency \*<\/label>/);
+  assert.match(modal, /id="me-amount-input"/);
+  assert.match(modal, /id="me-vendor-program"/);
+  assert.doesNotMatch(modal, /id="me-kind"|id="me-qty"|id="me-unit-cost"/);
+});
+
+test('Phase 4 amount summary uses inclusive coverage and matches canonical manual totals', () => {
+  const context = createActualSpendContext();
+  const oneTime = context.manualExpenseAmountSummary('one_time', 1250, null, null);
+  assert.deepEqual(JSON.parse(JSON.stringify(oneTime)), { amount:1250, coverageMonths:1, total:1250 });
+  const monthly = context.manualExpenseAmountSummary('monthly', 800, '2026-01', '2026-03');
+  assert.deepEqual(JSON.parse(JSON.stringify(monthly)), { amount:800, coverageMonths:3, total:2400 });
+  const canonical = context.manualExpenseToActualSpend({
+    id:'monthly-preview', project:'AOA-MP', expenseType:'sl', description:'Monthly service',
+    frequency:'monthly', startMonth:'2026-01', endMonth:'2026-03', amount:monthly.amount,
+  });
+  assert.equal(canonical.amount, monthly.total);
+});
+
+test('Phase 4 manualExpenseRecalculate has one path and returns the rendered monthly preview summary', () => {
+  const context = createActualSpendContext();
+  const elements = new Map(Object.entries({
+    'me-frequency': { value:'monthly' }, 'me-amount-input': { value:'750' },
+    'me-start': { value:'2026-02' }, 'me-end': { value:'2026-05' },
+    'me-amount-input-label': { textContent:'' }, 'me-coverage-months': { textContent:'' },
+    'me-preview-monthly': { textContent:'' }, 'me-preview-total': { textContent:'' },
+  }));
+  context.document.getElementById = id => elements.get(id) || null;
+  const summary = context.manualExpenseRecalculate();
+  assert.deepEqual(JSON.parse(JSON.stringify(summary)), { amount:750, coverageMonths:4, total:3000 });
+  assert.equal(elements.get('me-coverage-months').textContent, '4 months');
+  assert.equal(elements.get('me-preview-monthly').textContent, '฿750');
+  assert.equal(elements.get('me-preview-total').textContent, '฿3,000');
+  const implementation = budgetCode.match(/function manualExpenseRecalculate[\s\S]*?\n}/)[0];
+  assert.equal((implementation.match(/return summary;/g) || []).length, 1);
+  assert.doesNotMatch(implementation, /return amount;/);
+});
+
+test('Phase 4 manual persistence keeps Vendor Program separate and legacy amount authoritative', () => {
+  const context = createActualSpendContext();
+  const legacy = {
+    id:'legacy-manual', entryKind:'adjustment', referenceNo:'LEGACY-1', project:'AOA-MP',
+    expenseType:'hw', description:'Legacy hardware', frequency:'one_time', expenseDate:'2026-07-01',
+    quantity:9, unitCost:999, amount:1500, vendorProgram:'Vendor A', notes:'Independent note',
+  };
+  const db = context.manualExpenseToDb(legacy);
+  assert.equal(db.vendor_program, 'Vendor A');
+  assert.equal(db.notes, 'Independent note');
+  const loaded = context.manualExpenseFromDb(db);
+  assert.equal(loaded.amount, 1500);
+  assert.equal(loaded.vendorProgram, 'Vendor A');
+  assert.equal(loaded.notes, 'Independent note');
+  const canonical = context.manualExpenseToActualSpend(loaded);
+  assert.equal(canonical.amount, 1500);
+  assert.equal(canonical.vendorProgram, 'Vendor A');
+  assert.equal(canonical.notes, 'Independent note');
+});
+
+test('Phase 4 create, edit, and reload preserve amount, schedule, pool, Vendor Program, and Notes', async () => {
+  const context = createActualSpendContext();
+  const created = await context.saveManualExpenseAsync({
+    id:'phase4-lifecycle', entryKind:'historical', referenceNo:'P4-LIFE', project:'AOA-MP', budgetPoolId:'pool-1',
+    expenseType:'sl', description:'Lifecycle', frequency:'monthly', startMonth:'2026-06', endMonth:'2026-08',
+    quantity:1, unitCost:1000, amount:1000, vendorProgram:'Suite A', notes:'Original note',
+  });
+  await context.saveManualExpenseAsync({ ...created, amount:1200, unitCost:1200, vendorProgram:'Suite B', notes:'Edited note' });
+  const local = context.loadManualExpenses()[0];
+  assert.deepEqual(
+    [local.amount, local.frequency, local.startMonth, local.endMonth, local.budgetPoolId, local.vendorProgram, local.notes],
+    [1200,'monthly','2026-06','2026-08','pool-1','Suite B','Edited note'],
+  );
+
+  context.checkSupa = async () => true;
+  context.supaFetch = async () => [context.manualExpenseToDb(local)];
+  const reloaded = (await context.loadManualExpensesAsync())[0];
+  assert.deepEqual(
+    [reloaded.amount, reloaded.frequency, reloaded.startMonth, reloaded.endMonth, reloaded.budgetPoolId, reloaded.vendorProgram, reloaded.notes],
+    [1200,'monthly','2026-06','2026-08','pool-1','Suite B','Edited note'],
+  );
+  const canonical = context.manualExpenseToActualSpend(reloaded);
+  assert.equal(canonical.amount, 3600);
+  assert.equal(canonical.manualBudgetPoolId, 'pool-1');
+  assert.equal(canonical.notes, 'Edited note');
+});
+
+test('Phase 4 schema-lag reload preserves locally saved Vendor Program without using Notes', async () => {
+  const context = createActualSpendContext();
+  await context.saveManualExpenseAsync({
+    id:'schema-reload', entryKind:'historical', referenceNo:'SCHEMA-RELOAD', project:'AOA-MP',
+    expenseType:'hw', description:'Reload', frequency:'one_time', expenseDate:'2026-07-01',
+    quantity:1, unitCost:500, amount:500, vendorProgram:'Vendor Local', notes:'Real note',
+  });
+  context.checkSupa = async () => true;
+  context.supaFetch = async () => [{
+    id:'schema-reload', entry_kind:'historical', reference_no:'SCHEMA-RELOAD', project:'AOA-MP',
+    expense_type:'hw', description:'Reload', frequency:'one_time', expense_date:'2026-07-01',
+    quantity:1, unit_cost:500, amount:500, notes:'Real note',
+  }];
+  const reloaded = (await context.loadManualExpensesAsync())[0];
+  assert.equal(reloaded.vendorProgram, 'Vendor Local');
+  assert.equal(reloaded.notes, 'Real note');
+});
+
+test('Phase 4 imported manual Vendor Program uses its dedicated field without changing import totals', async () => {
+  const context = createActualSpendContext();
+  const result = context.importActualSpendRecords([context.manualEntriesImportRow({
+    Source:'Manual / Historical', 'Reference No':'VENDOR-IMPORT', 'Spend Type':'Software', Project:'AOA-MP',
+    Amount:3600, 'Start Date':'2026-01', 'End Date':'2026-03', 'Vendor / Program':'Suite A', Description:'Subscription',
+  })]);
+  await context.promoteImportedManualExpenses(result.records);
+  const manual = context.loadManualExpenses()[0];
+  assert.equal(manual.vendorProgram, 'Suite A');
+  assert.equal(manual.notes, '');
+  assert.equal(manual.amount, 1200);
+  const canonical = context.reconcileActualSpendSources()[0];
+  assert.equal(canonical.vendorProgram, 'Suite A');
+  assert.equal(canonical.amount, 3600);
+});
+
+test('Phase 4 retries a manual save without vendor_program when Supabase schema cache returns PGRST204', async () => {
+  const context = createActualSpendContext();
+  const payloads = [];
+  context.checkSupa = async () => true;
+  context.supaFetch = async (_table, _method, body) => {
+    payloads.push(body);
+    if (payloads.length === 1) {
+      const error = new Error('PGRST204 Could not find the vendor_program column in the schema cache');
+      error.code = 'PGRST204';
+      throw error;
+    }
+    return [body];
+  };
+  const saved = await context.saveManualExpenseAsync({
+    id:'schema-lag', entryKind:'historical', referenceNo:'SCHEMA-LAG', project:'AOA-MP',
+    expenseType:'sl', description:'Schema lag save', frequency:'one_time', expenseDate:'2026-07-01',
+    quantity:1, unitCost:900, amount:900, vendorProgram:'Vendor B', notes:'Keep separate',
+  });
+  assert.equal(payloads.length, 2);
+  assert.equal(payloads[0].vendor_program, 'Vendor B');
+  assert.equal(Object.hasOwn(payloads[1], 'vendor_program'), false);
+  assert.equal(saved.vendorProgram, 'Vendor B');
+  assert.equal(context.loadManualExpenses()[0].vendorProgram, 'Vendor B');
+  assert.equal(context.loadManualExpenses()[0].notes, 'Keep separate');
+});
+
+test('Phase 4 does not hide unrelated Supabase manual-save failures', async () => {
+  const context = createActualSpendContext();
+  context.checkSupa = async () => true;
+  context.supaFetch = async () => { throw new Error('PGRST204 Could not find a different column in the schema cache'); };
+  await assert.rejects(() => context.saveManualExpenseAsync({
+    id:'real-failure', project:'AOA-MP', expenseType:'sl', description:'Must fail',
+    frequency:'one_time', expenseDate:'2026-07-01', quantity:1, unitCost:100, amount:100,
+  }), /different column/);
 });
 
 test('Soft-deleting an imported manual expense excludes it from canonical Actual Spend, Forecast, and Budget vs Actual totals', async () => {
@@ -466,6 +674,25 @@ test('Actual Spend Report drill-down is read-only and directs manual edits to Ma
   assert.doesNotMatch(detail, /voidManualExpense|openManualExpenseModal/);
   assert.match(detail, /To modify this record, go to Actual Spend → Manual Entries\./);
   assert.match(budgetCode, /actual-spend-group-panel[\s\S]*overflow-x:hidden/);
+});
+
+test('Phase 4 Actual Spend Report detail displays the canonical final Budget Pool name', () => {
+  const context = createActualSpendContext();
+  context.storeBudgetPools([{
+    id:'pool-report', project:'AOA-MP', name:'Software 2569', budget:10000, year:'2569',
+    startMonth:'2026-01', endMonth:'2026-12', memoTypes:['sl'],
+  }]);
+  context.storeActualSpendRecords([context.createActualSpendRecord({
+    id:'actual-report-pool', source:'Manual / Historical Expense', referenceNo:'POOL-REPORT',
+    project:'AOA-MP', spendType:'Software', amount:1200, startDate:'2026-06', endDate:'2026-06',
+    manualBudgetPoolId:'pool-report', budgetStatus:'Manual Override', notes:'Canonical note',
+  })]);
+  let detail;
+  context.showActualSpendDetailModal = (_title, fields) => { detail = fields; };
+  context.showActualSpendRecord('actual-report-pool');
+  assert.deepEqual(Array.from(detail.find(([label]) => label === 'Budget Pool')), ['Budget Pool','Software 2569']);
+  assert.deepEqual(Array.from(detail.find(([label]) => label === 'Budget Status')), ['Budget Status','Manual Override']);
+  assert.deepEqual(Array.from(detail.find(([label]) => label === 'Notes')), ['Notes','Canonical note']);
 });
 
 test('Manual Entries is a filtered management table backed only by active manual expenses', () => {
@@ -694,6 +921,16 @@ test('historical expense migration is additive, RLS-enabled, and forbids delete 
   assert.match(migration, /grant select, insert, update/);
   assert.doesNotMatch(migration, /grant[^;]*delete/i);
   assert.doesNotMatch(migration, /drop\s+table/i);
+});
+
+test('Phase 4 Vendor Program migration is additive', () => {
+  const migration = fs.readFileSync(
+    path.join(root, 'supabase/migrations/20260701090000_add_manual_expense_vendor_program.sql'),
+    'utf8'
+  );
+  assert.match(migration, /alter table public\.budget_manual_expenses/);
+  assert.match(migration, /add column if not exists vendor_program text/);
+  assert.doesNotMatch(migration, /drop\s+(?:table|column)/i);
 });
 
 test('PMO controls use cancellation, view-only settings, and deactivation instead of deletion', () => {

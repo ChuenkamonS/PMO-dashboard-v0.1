@@ -50,6 +50,7 @@ function manualExpenseFromDb(r) {
     quantity: Number(r.quantity) || 1,
     unitCost: Number(r.unit_cost) || 0,
     amount: Number(r.amount) || 0,
+    vendorProgram: r.vendor_program || '',
     notes: r.notes || '',
     createdBy: r.created_by || '',
     updatedBy: r.updated_by || '',
@@ -77,6 +78,7 @@ function manualExpenseToDb(e) {
     quantity: Number(e.quantity) || 1,
     unit_cost: Number(e.unitCost) || 0,
     amount: Number(e.amount) || 0,
+    vendor_program: e.vendorProgram || null,
     notes: e.notes || null,
     created_by: e.createdBy || null,
     updated_by: e.updatedBy || null,
@@ -106,11 +108,23 @@ async function loadManualExpensesAsync() {
   if (await checkSupa()) {
     try {
       const rows = await supaFetch('budget_manual_expenses', 'GET', null, '?order=created_at.desc');
-      storeManualExpenses((rows || []).map(manualExpenseFromDb));
+      const localById = new Map(loadManualExpenses().map(expense => [expense.id, expense]));
+      storeManualExpenses((rows || []).map(row => {
+        const expense = manualExpenseFromDb(row);
+        if (!expense.vendorProgram) expense.vendorProgram = localById.get(expense.id)?.vendorProgram || '';
+        return expense;
+      }));
       return _manualExpenseCache;
     } catch(e) { console.warn('Manual expenses load failed, using local backup', e.message); }
   }
   return loadManualExpenses();
+}
+
+function isMissingVendorProgramColumnError(error) {
+  const detail = `${error?.code || ''} ${error?.message || error || ''}`.toLowerCase();
+  return detail.includes('pgrst204')
+    && detail.includes('vendor_program')
+    && (detail.includes('column') || detail.includes('schema cache'));
 }
 
 async function saveManualExpenseAsync(expense) {
@@ -125,7 +139,15 @@ async function saveManualExpenseAsync(expense) {
   if (idx >= 0) rows[idx] = saved; else rows.unshift(saved);
   storeManualExpenses(rows);
   if (await checkSupa()) {
-    await supaFetch('budget_manual_expenses', 'POST', manualExpenseToDb(saved), '?on_conflict=id');
+    const dbRecord = manualExpenseToDb(saved);
+    try {
+      await supaFetch('budget_manual_expenses', 'POST', dbRecord, '?on_conflict=id');
+    } catch (error) {
+      if (!isMissingVendorProgramColumnError(error)) throw error;
+      const compatibleRecord = { ...dbRecord };
+      delete compatibleRecord.vendor_program;
+      await supaFetch('budget_manual_expenses', 'POST', compatibleRecord, '?on_conflict=id');
+    }
   }
   return saved;
 }
@@ -366,7 +388,9 @@ function manualExpenseToActualSpend(expense) {
     spendType: spendTypeFromMemoType(expense.expenseType),
     amount: (Number(expense.amount) || 0) * (months || 1),
     startDate, endDate,
+    vendorProgram: expense.vendorProgram || '',
     description: expense.description || expense.notes || '',
+    notes: expense.notes || '',
     manualBudgetPoolId: expense.budgetPoolId || null,
     createdBy: expense.createdBy || '', createdAt: expense.createdAt,
     updatedBy: expense.updatedBy || '', updatedAt: expense.updatedAt,
@@ -376,9 +400,16 @@ function manualExpenseToActualSpend(expense) {
 // Converts a validated Excel-imported "Manual / Historical" Actual Spend row into
 // the same shape the manual expense form saves, so imported rows become editable
 // and soft-deletable through the existing manual expense store.
+function importedManualCoverage(startDate, endDate) {
+  const startMonth = String(startDate || '').slice(0, 7);
+  const endMonth = String(endDate || '').slice(0, 7);
+  const months = inclusiveCoverageMonths(startMonth, endMonth);
+  return { startMonth, endMonth, months, monthly: Number(months) > 1 };
+}
+
 function manualExpenseFromImportedActualSpend(record) {
-  const months = inclusiveCoverageMonths(record.startDate, record.endDate);
-  const monthly = months != null && months > 1;
+  const coverage = importedManualCoverage(record.startDate, record.endDate);
+  const { months, monthly } = coverage;
   const totalAmount = Number(record.amount) || 0;
   // Import Amount is the total for the coverage period; when spread across
   // months we must store the per-month amount so manualExpenseToActualSpend's
@@ -394,12 +425,13 @@ function manualExpenseFromImportedActualSpend(record) {
     description: record.description || record.vendorProgram || '',
     frequency: monthly ? 'monthly' : 'one_time',
     expenseDate: monthly ? null : (record.startDate ? (String(record.startDate).length === 7 ? `${record.startDate}-01` : record.startDate) : null),
-    startMonth: monthly ? String(record.startDate).slice(0, 7) : null,
-    endMonth: monthly ? String(record.endDate).slice(0, 7) : null,
+    startMonth: monthly ? coverage.startMonth : null,
+    endMonth: monthly ? coverage.endMonth : null,
     quantity: 1,
     unitCost: perUnitAmount,
     amount: perUnitAmount,
-    notes: record.vendorProgram || '',
+    vendorProgram: record.vendorProgram || '',
+    notes: '',
     createdBy: record.createdBy || currentUser(),
     updatedBy: record.createdBy || currentUser(),
     voidedAt: null,
@@ -1654,7 +1686,7 @@ function _renderSpendBreakdown() {
 // TAB: ACTUAL SPEND
 // ══════════════════════════════════════════
 function openManualExpenseModal(editId = null) {
-  if (!isPMO()) { alert('เฉพาะ PMO เท่านั้นที่เพิ่มหรือแก้ไข Historical Expense ได้'); return; }
+  if (!isPMO()) { alert('เฉพาะ PMO เท่านั้นที่เพิ่มหรือแก้ไข Manual Actual Spend ได้'); return; }
   const expense = editId ? loadManualExpenses().find(e => e.id === editId) : null;
   if (expense?.voidedAt) { alert('รายการที่ void แล้วแก้ไขไม่ได้'); return; }
   document.getElementById('manual-expense-modal')?.remove();
@@ -1677,21 +1709,14 @@ function openManualExpenseModal(editId = null) {
     <div class="card" style="width:680px;max-width:96vw;max-height:92vh;overflow-y:auto;padding:22px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
         <div>
-          <div style="font-size:15px;font-weight:700">${expense ? 'Edit' : 'Add'} Historical Expense</div>
+          <div style="font-size:15px;font-weight:700">${expense ? 'Edit' : 'Add'} Manual Actual Spend</div>
           <div style="font-size:11px;color:var(--text-3)">ใช้สำหรับ Memo หรือค่าใช้จ่ายก่อนเริ่มใช้งานระบบ</div>
         </div>
         <button class="btn-sm" onclick="document.getElementById('manual-expense-modal').remove()">✕</button>
       </div>
       <input type="hidden" id="me-id" value="${esc(g('id'))}">
       <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px">
-        <div class="fg"><label>ประเภทการบันทึก *</label>
-          <select id="me-kind" class="ri">
-            <option value="historical" ${g('entryKind','historical')==='historical'?'selected':''}>Historical</option>
-            <option value="adjustment" ${g('entryKind')==='adjustment'?'selected':''}>Adjustment</option>
-            <option value="other" ${g('entryKind')==='other'?'selected':''}>Other</option>
-          </select>
-        </div>
-        <div class="fg"><label>เลข Memo / Reference เดิม</label>
+        <div class="fg"><label>Reference No</label>
           <input id="me-reference" class="ri" value="${esc(g('referenceNo'))}" placeholder="เช่น OLD-SL-2025-001">
         </div>
         <div class="fg"><label>Project *</label>
@@ -1706,15 +1731,15 @@ function openManualExpenseModal(editId = null) {
             ${pools.map(p=>`<option value="${esc(p.id)}" ${g('budgetPoolId')===p.id?'selected':''}>${esc(p.project)} · ${esc(p.name)}</option>`).join('')}
           </select>
         </div>
-        <div class="fg"><label>Expense Type *</label>
+        <div class="fg"><label>Spend Type *</label>
           <select id="me-type" class="ri">
             ${[['sl','Software License'],['hw','Hardware'],['int','Team Activity'],['ent','Client Expense'],['dep','Deployment'],['infra','Infrastructure'],['other','Other']].map(([v,l])=>`<option value="${v}" ${g('expenseType','sl')===v?'selected':''}>${l}</option>`).join('')}
           </select>
         </div>
-        <div class="fg"><label>รายการ *</label>
+        <div class="fg"><label>Description *</label>
           <input id="me-description" class="ri" value="${esc(g('description'))}" placeholder="ชื่อ Software / อุปกรณ์ / รายการ">
         </div>
-        <div class="fg"><label>รูปแบบค่าใช้จ่าย *</label>
+        <div class="fg"><label>Frequency *</label>
           <select id="me-frequency" class="ri" onchange="toggleManualExpenseSchedule()">
             <option value="one_time" ${g('frequency','one_time')==='one_time'?'selected':''}>One-time</option>
             <option value="monthly" ${g('frequency')==='monthly'?'selected':''}>Monthly</option>
@@ -1724,29 +1749,33 @@ function openManualExpenseModal(editId = null) {
           <input id="me-date" class="ri" type="date" value="${esc(g('expenseDate',today))}">
         </div>
         <div class="fg" id="me-start-wrap"><label>Start Month *</label>
-          <input id="me-start" class="ri" type="month" value="${esc(g('startMonth'))}">
+          <input id="me-start" class="ri" type="month" value="${esc(g('startMonth'))}" oninput="manualExpenseRecalculate()">
         </div>
         <div class="fg" id="me-end-wrap"><label>End Month *</label>
-          <input id="me-end" class="ri" type="month" value="${esc(g('endMonth'))}">
+          <input id="me-end" class="ri" type="month" value="${esc(g('endMonth'))}" oninput="manualExpenseRecalculate()">
         </div>
-        <div class="fg"><label>Quantity *</label>
-          <input id="me-qty" class="ri" type="number" min="0.01" step="0.01" value="${g('quantity',1)}" oninput="manualExpenseRecalculate()">
+        <div class="fg"><label id="me-amount-input-label">Amount (THB) *</label>
+          <input id="me-amount-input" class="ri" type="number" min="0.01" step="0.01" value="${g('amount',0)}" oninput="manualExpenseRecalculate()">
         </div>
-        <div class="fg"><label>Unit Cost (THB) *</label>
-          <input id="me-unit-cost" class="ri" type="number" min="0" step="0.01" value="${g('unitCost',0)}" oninput="manualExpenseRecalculate()">
+        <div class="fg"><label>Vendor / Program</label>
+          <input id="me-vendor-program" class="ri" value="${esc(g('vendorProgram'))}" placeholder="Vendor or program name">
         </div>
       </div>
-      <div style="margin-top:10px;padding:10px 12px;background:var(--blue-50);border-radius:var(--r-sm);display:flex;justify-content:space-between">
-        <span id="me-amount-label" style="font-size:12px;color:var(--blue-800)">Amount</span>
-        <strong id="me-amount" style="color:var(--blue)">${money(g('amount',0))}</strong>
+      <div id="me-monthly-preview" style="display:none;margin-top:10px;padding:10px 12px;background:var(--blue-50);border-radius:var(--r-sm)">
+        <div style="font-size:12px;font-weight:600;color:var(--blue-800);margin-bottom:6px">Coverage</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:11px">
+          <div><span style="color:var(--text-3)">Coverage</span><br><strong id="me-coverage-months">0 months</strong></div>
+          <div><span style="color:var(--text-3)">Monthly Amount</span><br><strong id="me-preview-monthly">${money(g('amount',0))}</strong></div>
+          <div><span style="color:var(--text-3)">Estimated Total</span><br><strong id="me-preview-total">${money(0)}</strong></div>
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text-3)">Estimated Total = Monthly Amount × Inclusive Coverage Months</div>
       </div>
-      <div id="me-amount-help" style="margin-top:5px;font-size:11px;color:var(--text-3)"></div>
       <div class="fg" style="margin-top:10px"><label>Notes</label>
         <textarea id="me-notes" class="ri" rows="2" placeholder="เหตุผลหรือรายละเอียดเพิ่มเติม">${esc(g('notes'))}</textarea>
       </div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
         <button class="btn-ghost" onclick="document.getElementById('manual-expense-modal').remove()">Cancel</button>
-        <button class="btn-primary" onclick="saveManualExpenseFromModal()">💾 Save Historical Expense</button>
+        <button class="btn-primary" onclick="saveManualExpenseFromModal()">💾 Save Actual Spend</button>
       </div>
     </div>`;
   document.body.appendChild(modal);
@@ -1760,26 +1789,37 @@ function toggleManualExpenseSchedule() {
   const dateWrap = document.getElementById('me-date-wrap');
   const startWrap = document.getElementById('me-start-wrap');
   const endWrap = document.getElementById('me-end-wrap');
+  const preview = document.getElementById('me-monthly-preview');
   if (dateWrap) dateWrap.style.display = monthly ? 'none' : '';
   if (startWrap) startWrap.style.display = monthly ? '' : 'none';
   if (endWrap) endWrap.style.display = monthly ? '' : 'none';
+  if (preview) preview.style.display = monthly ? '' : 'none';
   manualExpenseRecalculate();
 }
 
+function manualExpenseAmountSummary(frequency, amount, startMonth, endMonth) {
+  const enteredAmount = Number(amount) || 0;
+  const coverageMonths = frequency === 'monthly' ? (inclusiveCoverageMonths(startMonth, endMonth) || 0) : 1;
+  return { amount: enteredAmount, coverageMonths, total: enteredAmount * coverageMonths };
+}
+
 function manualExpenseRecalculate() {
-  const qty = Number(document.getElementById('me-qty')?.value) || 0;
-  const unitCost = Number(document.getElementById('me-unit-cost')?.value) || 0;
-  const amount = qty * unitCost;
-  const monthly = document.getElementById('me-frequency')?.value === 'monthly';
-  const amountEl = document.getElementById('me-amount');
-  const labelEl = document.getElementById('me-amount-label');
-  const helpEl = document.getElementById('me-amount-help');
-  if (amountEl) amountEl.textContent = money(amount);
-  if (labelEl) labelEl.textContent = monthly ? 'Monthly amount' : 'One-time total amount';
-  if (helpEl) helpEl.textContent = monthly
-    ? 'Monthly total = monthly amount × inclusive coverage months.'
-    : 'This amount is recorded once as the one-time total.';
-  return amount;
+  const frequency = document.getElementById('me-frequency')?.value || 'one_time';
+  const summary = manualExpenseAmountSummary(
+    frequency,
+    document.getElementById('me-amount-input')?.value,
+    document.getElementById('me-start')?.value,
+    document.getElementById('me-end')?.value,
+  );
+  const labelEl = document.getElementById('me-amount-input-label');
+  const monthsEl = document.getElementById('me-coverage-months');
+  const monthlyEl = document.getElementById('me-preview-monthly');
+  const totalEl = document.getElementById('me-preview-total');
+  if (labelEl) labelEl.textContent = frequency === 'monthly' ? 'Monthly Amount (THB) *' : 'Amount (THB) *';
+  if (monthsEl) monthsEl.textContent = `${summary.coverageMonths} month${summary.coverageMonths === 1 ? '' : 's'}`;
+  if (monthlyEl) monthlyEl.textContent = money(summary.amount);
+  if (totalEl) totalEl.textContent = money(summary.total);
+  return summary;
 }
 
 async function saveManualExpenseFromModal() {
@@ -1788,12 +1828,13 @@ async function saveManualExpenseFromModal() {
   const id = get('me-id') || `manual-${Date.now().toString(36).toUpperCase()}`;
   const frequency = get('me-frequency') || 'one_time';
   const referenceNo = get('me-reference');
-  const amount = manualExpenseRecalculate();
+  const amountSummary = manualExpenseRecalculate();
+  const amount = amountSummary.amount;
   const existing = loadManualExpenses().find(e => e.id === id);
   const expense = {
     ...existing,
     id,
-    entryKind: get('me-kind') || 'historical',
+    entryKind: existing?.entryKind || 'historical',
     referenceNo,
     project: get('me-project'),
     budgetPoolId: get('me-pool') || null,
@@ -1803,15 +1844,16 @@ async function saveManualExpenseFromModal() {
     expenseDate: frequency === 'one_time' ? get('me-date') : null,
     startMonth: frequency === 'monthly' ? get('me-start') : null,
     endMonth: frequency === 'monthly' ? get('me-end') : null,
-    quantity: Number(get('me-qty')) || 0,
-    unitCost: Number(get('me-unit-cost')) || 0,
+    quantity: 1,
+    unitCost: amount,
     amount,
+    vendorProgram: get('me-vendor-program'),
     notes: get('me-notes'),
     createdBy: existing?.createdBy || currentUser(),
     updatedBy: currentUser(),
   };
-  if (!expense.project || !expense.description) { alert('กรุณากรอก Project และรายการ'); return; }
-  if (!(expense.quantity > 0) || !(expense.unitCost >= 0) || !(expense.amount > 0)) { alert('Quantity และ Unit Cost ต้องมากกว่า 0'); return; }
+  if (!expense.project || !expense.description) { alert('กรุณากรอก Project และ Description'); return; }
+  if (!(expense.amount > 0)) { alert('Amount ต้องมากกว่า 0'); return; }
   if (frequency === 'one_time' && !expense.expenseDate) { alert('กรุณาระบุ Expense Date'); return; }
   if (frequency === 'monthly' && (!expense.startMonth || !expense.endMonth || expense.startMonth > expense.endMonth)) {
     alert('กรุณาระบุ Start/End Month ให้ถูกต้อง'); return;
@@ -2026,11 +2068,14 @@ function showActualSpendRecord(id) {
   if (!record) return;
   if (record.source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO && record.memoId) { openMemoReadOnly(record.memoId); return; }
   const helper = record.source === ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE ? 'To modify this record, go to Actual Spend → Manual Entries.' : '';
+  const poolId = getFinalBudgetPoolId(record);
+  const pool = loadBudgetPools().find(item => item.id === poolId);
+  const poolLabel = pool?.name || pool?.poolName || poolId || '—';
   showActualSpendDetailModal('Actual Spend Detail', [
     ['Reference No', record.referenceNo || '—'], ['Source', record.source], ['Project', record.project],
     ['Spend Type', record.spendType], ['Description', record.description || '—'], ['Amount', money(record.amount)],
     ['Coverage', `${record.startDate || '—'} → ${record.endDate || '—'}`], ['Vendor / Program', record.vendorProgram || '—'],
-    ['Budget Status', record.budgetStatus || '—'], ['Created By', record.createdBy || '—'],
+    ['Budget Pool', poolLabel], ['Budget Status', record.budgetStatus || '—'], ['Created By', record.createdBy || '—'],
     ['Created Date', formatActualSpendDateTime(record.createdAt)], ['Updated At', formatActualSpendDateTime(record.updatedAt)], ['Notes', record.notes || '—'],
   ], helper);
 }

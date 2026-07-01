@@ -136,6 +136,7 @@ function createActualSpendRecord(input = {}) {
     coverageStatus,
     vendorProgram: input.vendorProgram || '',
     description: input.description || '',
+    notes: input.notes || '',
     autoBudgetPoolId: input.autoBudgetPoolId || null,
     manualBudgetPoolId: input.manualBudgetPoolId || null,
     finalBudgetPoolId: input.manualBudgetPoolId || input.finalBudgetPoolId || input.autoBudgetPoolId || null,
