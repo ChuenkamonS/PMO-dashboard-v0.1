@@ -377,6 +377,33 @@ function calculateActualSpend(records = [], filters = {}) {
   return queryActualSpend(filters, records).reduce((sum, record) => sum + (Number(record.amount) || 0), 0);
 }
 
+function actualSpendMonthlyAllocations(record = {}) {
+  const start = String(record.startDate || record.month || '').slice(0, 7);
+  const end = String(record.endDate || record.month || start).slice(0, 7);
+  const months = inclusiveCoverageMonths(start, end);
+  if (!months) {
+    const fallback = String(record.createdAt || record.updatedAt || '').slice(0, 7);
+    return fallback ? { [fallback]: Number(record.amount) || 0 } : {};
+  }
+  const result = {};
+  const startParts = start.split('-').map(Number);
+  const monthlyAmount = (Number(record.amount) || 0) / months;
+  for (let index = 0; index < months; index++) {
+    const date = new Date(Date.UTC(startParts[0], startParts[1] - 1 + index, 1));
+    const key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+    result[key] = monthlyAmount;
+  }
+  return result;
+}
+
+function calculateActualSpendInRange(records = [], fromMonth, toMonth, filters = {}) {
+  return queryActualSpend(filters, records).reduce((sum, record) => {
+    const allocations = actualSpendMonthlyAllocations(record);
+    return sum + Object.entries(allocations).reduce((subtotal, [month, amount]) =>
+      subtotal + ((!fromMonth || month >= fromMonth) && (!toMonth || month <= toMonth) ? amount : 0), 0);
+  }, 0);
+}
+
 function calculateBudgetUtilization(pool, records = []) {
   const actual = calculateActualSpend(
     records.filter(record => getFinalBudgetPoolId(record) === pool.id),
@@ -401,6 +428,8 @@ const FINANCIAL_HELPERS = Object.freeze({
   mapBudgetPool,
   mapActualSpendRecords,
   calculateActualSpend,
+  actualSpendMonthlyAllocations,
+  calculateActualSpendInRange,
   calculateBudgetUtilization,
 });
 

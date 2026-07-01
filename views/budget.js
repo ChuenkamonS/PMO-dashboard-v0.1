@@ -475,6 +475,35 @@ function actualSpendImportRow(row) {
   };
 }
 
+function downloadActualSpendTemplate() {
+  if (typeof XLSX === 'undefined') { alert('ไม่พบ SheetJS library'); return; }
+  const headers = ['Source','Reference No','Spend Type','Project','Amount','Start Date','End Date','Vendor / Program','Description'];
+  const samples = [
+    ['Manual / Historical Expense','HIST-2025-001','Hardware','AOA-MP',75000,'2025-11-15','2025-11-15','Vendor A','Historical laptop purchase'],
+    ['Infra Cost','INFRA-2026-001','Infra','TTB',24000,'2026-06','2026-08','AWS','Total infrastructure cost for the coverage period'],
+  ];
+  const template = XLSX.utils.aoa_to_sheet([headers, ...samples]);
+  template['!cols'] = [24,22,20,18,16,16,16,24,42].map(wch => ({ wch }));
+  template['!autofilter'] = { ref:`A1:I${samples.length + 1}` };
+
+  const instructions = XLSX.utils.aoa_to_sheet([
+    ['Actual Spend Import Instructions'],
+    ['Required columns','Source, Reference No, Spend Type, Project, Amount'],
+    ['Allowed Source','Manual / Historical Expense or Infra Cost. Approved Memo must come from the All Memo workflow.'],
+    ['Allowed Spend Type','Software, Hardware, Team Activity, Client Expense, Deployment, Infra, Others'],
+    ['Amount','Positive total amount in THB for the full coverage period.'],
+    ['Dates','Use YYYY-MM or YYYY-MM-DD. Start Date and End Date must use the same format.'],
+    ['Duplicate rule','Source + Reference No + Project + Spend Type + Amount + Start Date + End Date. Duplicate rows are skipped.'],
+    ['Validation','If any non-duplicate row is invalid, the complete import is rejected and nothing is saved.'],
+  ]);
+  instructions['!cols'] = [{ wch:24 }, { wch:110 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, template, 'Actual Spend Template');
+  XLSX.utils.book_append_sheet(workbook, instructions, 'Instructions');
+  XLSX.writeFile(workbook, 'actual_spend_import_template.xlsx');
+}
+
 function handleActualSpendImport(event) {
   if (!isPMO()) { alert('เฉพาะ PMO เท่านั้นที่ import Actual Spend ได้'); event.target.value = ''; return; }
   const file = event.target.files?.[0];
@@ -565,6 +594,7 @@ const _ov = {
 };
 
 function renderBudgetOverview() {
+  reconcileActualSpendSources();
   _ovBuildMonths();
   _ovInitState();
   _ovUpdateKPIs();
@@ -597,13 +627,10 @@ function _ovBuildMonths() {
 function _ovInitState() {
   if (_ov.initialized) return;
   _ov.initialized = true;
-  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
-  const projKeys  = [...new Set([
-    ...approved.map(m => m.project || '(ไม่ระบุ)'),
-    ...activeManualExpenses().filter(e => ['sl','hw','int','ent','dep'].includes(e.expenseType)).map(e => e.project || '(ไม่ระบุ)'),
-  ])].sort();
+  const records = loadActualSpendRecords();
+  const projKeys = [...new Set(records.map(record => record.project || '(ไม่ระบุ)'))].sort();
   _ov.activeProjKeys = new Set(projKeys);
-  _ov.activeTypeKeys = new Set(['sl','hw','int','ent','dep']);
+  _ov.activeTypeKeys = new Set([...new Set(records.map(record => SPEND_TYPE_TO_MEMO_TYPE[record.spendType]).filter(Boolean))]);
   _ovApplyPresetIdxs(12);
 }
 
@@ -685,17 +712,14 @@ function ovToggleProj(k) {
 function ovToggleType(k) {
   if (_ov.activeTypeKeys.has(k)) { if (_ov.activeTypeKeys.size > 1) _ov.activeTypeKeys.delete(k); }
   else _ov.activeTypeKeys.add(k);
-  _ovRenderChips(); _ovUpdateKPIs(); _ovRenderChart();
+  _ovRenderChips(); _ovUpdateKPIs(); _ovRenderChart(); _ovRenderBvA();
 }
 
 // ── Chips ──
 function _ovRenderChips() {
-  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
-  const projKeys = [...new Set([
-    ...approved.map(m => m.project || '(ไม่ระบุ)'),
-    ...activeManualExpenses().filter(e => ['sl','hw','int','ent','dep'].includes(e.expenseType)).map(e => e.project || '(ไม่ระบุ)'),
-  ])].sort();
-  const typeKeys = ['sl','hw','int','ent','dep'];
+  const records = loadActualSpendRecords();
+  const projKeys = [...new Set(records.map(record => record.project || '(ไม่ระบุ)'))].sort();
+  const typeKeys = [...new Set(records.map(record => SPEND_TYPE_TO_MEMO_TYPE[record.spendType]).filter(Boolean))];
   const chip = (label, on, onclick) =>
     `<span onclick="${onclick}" style="display:inline-flex;align-items:center;font-size:11px;padding:4px 11px;border-radius:20px;cursor:pointer;user-select:none;margin-bottom:3px;transition:all 0.12s;border:0.5px solid ${on ? 'transparent' : 'var(--border)'};background:${on ? 'var(--blue)' : 'transparent'};color:${on ? '#fff' : 'var(--text-2)'}">${label}</span>`;
 
@@ -718,38 +742,10 @@ function _ovUpdateKPIs() {
   const projArr   = [..._ov.activeProjKeys];
   const typeArr   = [..._ov.activeTypeKeys];
 
-  // ── Actual: SL memos distributed by duration, all other types by memo date ──
-  let total = 0;
-
-  // SL: distribute by month using buildActualByMonth
-  if (typeArr.includes('sl')) {
-    projArr.forEach(proj => {
-      const byMonth = buildActualByMonth(proj);
-      Object.entries(byMonth).forEach(([k, v]) => {
-        if (k >= fromKey && k <= toKey) total += v.total;
-      });
-    });
-  }
-
-  // Non-SL types: use memo date directly (one-time purchases)
-  const nonSLTypes = typeArr.filter(t => t !== 'sl');
-  if (nonSLTypes.length) {
-    loadMemos()
-      .filter(m =>
-        memoStatusKey(m) === 'completed' &&
-        nonSLTypes.includes(m.type) &&
-        projArr.includes(m.project || '(ไม่ระบุ)')
-      )
-      .forEach(m => {
-        const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
-        const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-        if (k >= fromKey && k <= toKey) total += Number(m.total) || 0;
-      });
-  }
-
-  activeManualExpenses()
-    .filter(e => typeArr.includes(e.expenseType) && projArr.includes(e.project || '(ไม่ระบุ)'))
-    .forEach(e => { total += manualExpenseAmountInRange(e, fromKey, toKey); });
+  const records = loadActualSpendRecords().filter(record =>
+    projArr.includes(record.project || '(ไม่ระบุ)') && typeArr.includes(SPEND_TYPE_TO_MEMO_TYPE[record.spendType])
+  );
+  const total = calculateActualSpendInRange(records, fromKey, toKey);
 
   // ── Budget from SL settings (SL only — no budget for other types yet) ──
   const currentYear  = String(new Date().getFullYear() + 543);
@@ -764,37 +760,12 @@ function _ovUpdateKPIs() {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     smooth3Keys.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
   }
-  let smooth3Total = 0;
-  projArr.forEach(proj => {
-    const byMonth = buildActualByMonth(proj);
-    smooth3Keys.forEach(k => { smooth3Total += byMonth[k]?.total || 0; });
-  });
+  const smooth3Total = smooth3Keys.reduce((sum, key) => sum + calculateActualSpendInRange(records, key, key), 0);
   const smoothMonthlyRate = smooth3Total / 3;
   const monthsLeft        = 12 - now.getMonth();
   const ytdStart = `${now.getFullYear()}-01`;
   const ytdEnd   = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-  let ytdTotal = 0;
-  projArr.forEach(proj => {
-    const byMonth = buildActualByMonth(proj);
-    Object.entries(byMonth).forEach(([k, v]) => { if (k >= ytdStart && k <= ytdEnd) ytdTotal += v.total; });
-  });
-  // Also add non-SL YTD
-  if (nonSLTypes.length) {
-    loadMemos()
-      .filter(m =>
-        memoStatusKey(m) === 'completed' &&
-        nonSLTypes.includes(m.type) &&
-        projArr.includes(m.project || '(ไม่ระบุ)')
-      )
-      .forEach(m => {
-        const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
-        const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-        if (k >= ytdStart && k <= ytdEnd) ytdTotal += Number(m.total) || 0;
-      });
-  }
-  activeManualExpenses()
-    .filter(e => typeArr.includes(e.expenseType) && projArr.includes(e.project || '(ไม่ระบุ)'))
-    .forEach(e => { ytdTotal += manualExpenseAmountInRange(e, ytdStart, ytdEnd); });
+  const ytdTotal = calculateActualSpendInRange(records, ytdStart, ytdEnd);
   const forecastTotal = ytdTotal + smoothMonthlyRate * monthsLeft;
 
   const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
@@ -834,15 +805,11 @@ function _ovRenderChart() {
 
   const months   = _ov.allMonths.slice(_ov.fromIdx, _ov.toIdx + 1);
   const labels   = months.map(m => m.label);
-  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
   const typeKeys = [..._ov.activeTypeKeys];
   const projKeys = [..._ov.activeProjKeys];
-
-  const getVal = (memo, monthKey) => {
-    const d = parseThaiDate(memo.date) || new Date(memo.updatedAt || memo.createdAt);
-    const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-    return k === monthKey ? (Number(memo.total) || 0) : 0;
-  };
+  const records = loadActualSpendRecords().filter(record =>
+    projKeys.includes(record.project || '(ไม่ระบุ)') && typeKeys.includes(SPEND_TYPE_TO_MEMO_TYPE[record.spendType])
+  );
 
   let datasets;
   if (_ov.groupBy === 'type') {
@@ -850,28 +817,14 @@ function _ovRenderChart() {
       label: BGT_TYPE_LABELS[tk] || tk.toUpperCase(),
       backgroundColor: OV_TYPE_COLORS[tk],
       borderRadius: 3, borderSkipped: false,
-      data: months.map(m =>
-        approved
-          .filter(memo => projKeys.includes(memo.project || '(ไม่ระบุ)') && memo.type === tk)
-          .reduce((s, memo) => s + getVal(memo, m.key), 0)
-        + activeManualExpenses()
-          .filter(e => projKeys.includes(e.project || '(ไม่ระบุ)') && e.expenseType === tk)
-          .reduce((s, e) => s + manualExpenseMonthValue(e, m.key), 0)
-      ),
+      data: months.map(m => calculateActualSpendInRange(records, m.key, m.key, { spendType:spendTypeFromMemoType(tk) })),
     }));
   } else {
     datasets = projKeys.map((pk, pi) => ({
       label: pk,
       backgroundColor: OV_PROJ_COLORS[pi % OV_PROJ_COLORS.length],
       borderRadius: 3, borderSkipped: false,
-      data: months.map(m =>
-        approved
-          .filter(memo => (memo.project || '(ไม่ระบุ)') === pk && typeKeys.includes(memo.type))
-          .reduce((s, memo) => s + getVal(memo, m.key), 0)
-        + activeManualExpenses()
-          .filter(e => (e.project || '(ไม่ระบุ)') === pk && typeKeys.includes(e.expenseType))
-          .reduce((s, e) => s + manualExpenseMonthValue(e, m.key), 0)
-      ),
+      data: months.map(m => calculateActualSpendInRange(records, m.key, m.key, { project:pk })),
     }));
   }
 
@@ -966,11 +919,9 @@ function _ovRenderBvA() {
   const slBudgets   = loadSLBudgets()?.[currentYear] || {};
 
   // Render BvA project chips
-  const approved = loadMemos().filter(m => memoStatusKey(m) === 'completed');
-  const allProjKeys = [...new Set([
-    ...approved.map(m => m.project || '(ไม่ระบุ)'),
-    ...activeManualExpenses().map(e => e.project || '(ไม่ระบุ)'),
-  ])].sort();
+  const canonical = loadActualSpendRecords();
+  const typeKeys = [..._ov.activeTypeKeys];
+  const allProjKeys = [...new Set(canonical.map(record => record.project || '(ไม่ระบุ)'))].sort();
   const bvaChips = document.getElementById('ov-bva-proj-chips');
   if (bvaChips) {
     bvaChips.innerHTML = allProjKeys.map(k => {
@@ -980,27 +931,10 @@ function _ovRenderBvA() {
   }
 
   const rows = projKeys.map(proj => {
-    // SL: distributed by duration
-    let actual = 0;
-    const byMonth = buildActualByMonth(proj);
-    Object.entries(byMonth).forEach(([k, v]) => { if (k >= fromKey && k <= toKey) actual += v.total; });
-
-    // Non-SL: by memo date
-    loadMemos()
-      .filter(m =>
-        memoStatusKey(m) === 'completed' &&
-        !['sl'].includes(m.type) &&
-        (m.project || '(ไม่ระบุ)') === proj
-      )
-      .forEach(m => {
-        const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
-        const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-        if (k >= fromKey && k <= toKey) actual += Number(m.total) || 0;
-      });
-
-    activeManualExpenses()
-      .filter(e => (e.project || '(ไม่ระบุ)') === proj)
-      .forEach(e => { actual += manualExpenseAmountInRange(e, fromKey, toKey); });
+    const actual = calculateActualSpendInRange(
+      canonical.filter(record => typeKeys.includes(SPEND_TYPE_TO_MEMO_TYPE[record.spendType])),
+      fromKey, toKey, { project:proj },
+    );
 
     const annualBgt = slBudgets[proj] || 0;
     const budget    = annualBgt > 0 ? (annualBgt / 12) * numMonths : null;
@@ -1021,7 +955,7 @@ function _ovRenderBvA() {
   if (noteEl) {
     noteEl.innerHTML = `
       <span style="font-weight:500">Budget</span> = งบรายปีที่ตั้งใน Budget Settings ÷ 12 × ${numMonths} เดือน &nbsp;·&nbsp;
-      <span style="font-weight:500">Actual</span> = SL memo แต่ละรายการกระจายตาม duration (price/seat/เดือน) รวม Infra ที่ active ในช่วงนั้น`;
+      <span style="font-weight:500">Actual</span> = Actual Spend ที่ผ่านตัวกรอง โดยกระจายยอดตาม coverage period`;
   }
 
   container.innerHTML = rows.map(d => `

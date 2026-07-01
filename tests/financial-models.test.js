@@ -223,6 +223,19 @@ test('shared calculation engine totals spend and budget utilization', () => {
   );
 });
 
+test('shared calculation engine allocates canonical Actual Spend across coverage months', () => {
+  const ctx = context();
+  const records = [ctx.createActualSpendRecord({
+    ...base, amount:3000, startDate:'2026-01', endDate:'2026-03',
+  })];
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(ctx.actualSpendMonthlyAllocations(records[0]))),
+    { '2026-01':1000, '2026-02':1000, '2026-03':1000 },
+  );
+  assert.equal(ctx.calculateActualSpendInRange(records, '2026-02', '2026-03'), 2000);
+  assert.equal(ctx.calculateActualSpendInRange(records, '2026-02', '2026-03', { project:'TTB' }), 0);
+});
+
 test('batch mapping re-evaluates unbudgeted records without replacing manual overrides', () => {
   const ctx = context();
   const pool = ctx.createBudgetPoolRecord({

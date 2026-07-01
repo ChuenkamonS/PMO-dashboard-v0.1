@@ -1536,6 +1536,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
             </select>
             <span id="as-period-label" style="font-size:11px;color:var(--text-3)">ทั้งหมด</span>
             <button class="btn-export" onclick="exportActualSpendCSV()">⬇ Export CSV</button>
+            <button class="btn-export" onclick="downloadActualSpendTemplate()">⬇ Import Template</button>
             <button class="btn-export" id="as-import-button" onclick="document.getElementById('as-import-file').click()">⬆ Import</button>
             <input id="as-import-file" type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleActualSpendImport(event)">
             <button class="btn-primary" id="as-add-manual" onclick="openManualExpenseModal()" style="font-size:11px;padding:5px 10px">+ Add Historical Expense</button>

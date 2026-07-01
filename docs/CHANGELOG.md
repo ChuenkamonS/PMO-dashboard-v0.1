@@ -123,9 +123,28 @@
 - Replaced Actual Spend KPI cards with a compact year-specific total line and project summaries.
 - Removed the Overview budget KPI card and clarified the wording of the remaining KPI values.
 - Actual Spend drill-down now uses responsive detail cards that fit within one view without horizontal scrolling.
+- Added a downloadable Actual Spend Excel import template with valid examples, accepted values, and duplicate/validation instructions.
 
 #### Data Flow
 - Approved Memo + Historical/Manual Expense + Infra Cost → shared Actual Spend → Budget Pool mapping → filters, summary cards, drill-down, and export.
 
 #### Remaining Work
 - Forecast, Budget vs Actual, Overview, Settings, and later cleanup phases remain unchanged.
+
+---
+
+### Phase 4 - Overview KPI, Charts, and Filters
+#### Changed
+- Overview KPI actuals, monthly chart, donut breakdown, and embedded project budget-vs-actual rows now consume canonical Actual Spend records.
+- Project, Spend Type, and period filters now apply consistently to every Overview actual calculation, including Infra and Other spend when present.
+- Added shared coverage-period monthly allocation and range-total helpers to the financial calculation engine.
+- Preserved the Forecast tab UI and rendering path; only the existing Overview forecast KPI now receives its actual/YTD inputs from canonical Actual Spend.
+
+#### Data Flow
+- Approved Memo + Historical/Manual Expense + Infra Cost → canonical Actual Spend → shared monthly allocation/range calculation → Overview filters → KPI cards and charts.
+
+#### Tests
+- Added focused shared-engine allocation and Overview canonical-source regression coverage.
+
+#### Remaining Work
+- Standalone Budget vs Actual, Forecast, Settings, exports, and cleanup remain unchanged.

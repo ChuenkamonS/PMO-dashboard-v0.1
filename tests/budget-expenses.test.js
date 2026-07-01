@@ -138,6 +138,21 @@ test('Actual Spend detail uses a responsive layout without a horizontal scroll t
   assert.match(budgetCode, /grid-template-columns:repeat\(auto-fit,minmax\(130px,1fr\)\)/);
 });
 
+test('Actual Spend provides an Excel import template matching accepted columns and duplicate rules', () => {
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  assert.match(html, /downloadActualSpendTemplate\(\)/);
+  assert.match(budgetCode, /Source','Reference No','Spend Type','Project','Amount','Start Date','End Date','Vendor \/ Program','Description/);
+  assert.match(budgetCode, /actual_spend_import_template\.xlsx/);
+  assert.match(budgetCode, /Source \+ Reference No \+ Project \+ Spend Type \+ Amount \+ Start Date \+ End Date/);
+});
+
+test('Overview KPI, charts, and filters consume canonical Actual Spend calculations', () => {
+  assert.match(budgetCode, /function renderBudgetOverview\(\) \{\s*reconcileActualSpendSources\(\)/);
+  assert.match(budgetCode, /const total = calculateActualSpendInRange\(records, fromKey, toKey\)/);
+  assert.match(budgetCode, /data: months\.map\(m => calculateActualSpendInRange\(records, m\.key, m\.key/);
+  assert.match(budgetCode, /typeKeys\.includes\(SPEND_TYPE_TO_MEMO_TYPE\[record\.spendType\]\)/);
+});
+
 test('historical expense migration is additive, RLS-enabled, and forbids delete access', () => {
   const migration = fs.readFileSync(
     path.join(root, 'supabase/migrations/20260629161656_historical_budget_expenses.sql'),
