@@ -261,3 +261,21 @@ test('PMO controls use cancellation, view-only settings, and deactivation instea
   assert.match(settings, /View Only/);
   assert.match(html, /id="as-source"/);
 });
+
+test('Phase 7 exposes exactly the five specified Budget & Spend tabs and removes the obsolete Others path', () => {
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const tabNames = Array.from(html.matchAll(/data-tab="(overview|actual-spend|forecast|bva|bgt-settings|others)"/g), match => match[1]);
+  assert.deepEqual(tabNames, ['overview','actual-spend','forecast','bva','bgt-settings']);
+  assert.doesNotMatch(html, /bgt-tab-others|renderBudgetOthers/);
+  assert.doesNotMatch(budgetCode, /function renderBudgetOthers|_renderOthersChart|_renderOthersTable/);
+});
+
+test('Settings exposes Budget Pools only while Actual Spend retains Infra Cost import', () => {
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  assert.match(html, /id="bset-panel-budget"/);
+  assert.doesNotMatch(html, /bset-nav-infra|bset-panel-infra|infra-bulk-input|infra-modal|Add Infra Cost/);
+  assert.doesNotMatch(budgetCode, /function (?:openInfraModal|saveInfraCost|handleInfraBulkUpload|deleteInfraEntry)/);
+  assert.match(html, /id="as-import-file"/);
+  assert.match(html, /<option value="infra">Infra Cost<\/option>/);
+  assert.match(budgetCode, /\['Infra Cost','INFRA-2026-001','Infra'/);
+});

@@ -245,34 +245,6 @@ async function loadInfraCostsAsync() {
   return loadInfraCosts();
 }
 
-// Save single entry to Supabase + localStorage
-async function saveInfraEntryAsync(entry) {
-  const all = loadInfraCosts();
-  const idx = all.findIndex(e => e.id === entry.id);
-  if (idx >= 0) all[idx] = entry; else all.push(entry);
-  storeInfraCosts(all);
-  _infraCache = all;
-  if (await checkSupa()) {
-    try {
-      await supaFetch('infra_costs', 'POST', entry, '?on_conflict=id');
-      _infraCache = null;
-    } catch(e) { console.warn('Supabase infra save failed', e.message); }
-  }
-}
-
-// Delete single entry
-async function deleteInfraEntryAsync(id) {
-  const all = loadInfraCosts().filter(e => e.id !== id);
-  storeInfraCosts(all);
-  _infraCache = all;
-  if (await checkSupa()) {
-    try {
-      await supaFetch('infra_costs', 'DELETE', null, '?id=eq.' + encodeURIComponent(id));
-      _infraCache = null;
-    } catch(e) { console.warn('Supabase infra delete failed', e.message); }
-  }
-}
-
 // localStorage fallback — returns array
 function loadInfraCosts() {
   if (_infraCache !== null) return _infraCache;
@@ -332,7 +304,7 @@ function getLicenseCostByProject() {
 let _bgtCurrentTab = 'overview';
 function switchBudgetTab(tab, btn) {
   _bgtCurrentTab = tab;
-  ['overview','actual-spend','forecast','bva','bgt-settings','others'].forEach(t => {
+  ['overview','actual-spend','forecast','bva','bgt-settings'].forEach(t => {
     const p = document.getElementById('bgt-tab-' + t);
     if (p) p.style.display = 'none';
   });
@@ -348,8 +320,7 @@ function switchBudgetTab(tab, btn) {
   if (tab === 'actual-spend')  renderActualSpend();
   if (tab === 'forecast')      renderBudgetSLInfra();
   if (tab === 'bva')           renderBudgetVsActual();
-  if (tab === 'bgt-settings')  { switchBgtSettings('budget'); renderBudgetSettings(); }
-  if (tab === 'others')        renderBudgetOthers();
+  if (tab === 'bgt-settings')  renderBudgetSettings();
 }
 
 // ── Main entry ──
@@ -561,7 +532,6 @@ function renderBudget() {
     if (_bgtCurrentTab === 'forecast')     renderBudgetSLInfra();
     if (_bgtCurrentTab === 'bva')          renderBudgetVsActual();
     if (_bgtCurrentTab === 'bgt-settings') renderBudgetSettings();
-    if (_bgtCurrentTab === 'others')       renderBudgetOthers();
   });
 }
 
@@ -1018,9 +988,6 @@ function _renderBudgetSLInfraWith(infraEntries) {
 
   // Cost by Project panel removed
 
-  // ── Infra Matrix ──
-  _renderInfraMatrix(infraEntries);
-
   // ── Budget vs Actual ──
   _renderBudgetVsActual(allProjects, infraEntries, licByProj);
 }
@@ -1285,155 +1252,6 @@ function showMemoBreakdown(proj, monthKey) {
 }
 
 
-// ── Infra Matrix ──
-function _renderInfraMatrix(infraEntries) {
-  const infraThead = document.getElementById('sl-infra-thead');
-  const infraBody  = document.getElementById('sl-infra-body');
-  if(!infraThead || !infraBody) return;
-
-  if(!infraEntries.length) {
-    infraThead.innerHTML = '';
-    infraBody.innerHTML  = `<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล Infra — กด "+ Add Infra Cost" เพื่อเพิ่ม</td></tr>`;
-    return;
-  }
-
-  const thS = 'padding:8px 12px;font-size:11px;font-weight:600;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap';
-  const thR = thS + ';text-align:right';
-  infraThead.innerHTML = `<tr>
-    <th style="${thS}">Project</th>
-    <th style="${thS}">Program</th>
-    <th style="${thR}">Monthly Cost</th>
-    <th style="${thS}">Start</th>
-    <th style="${thS}">End</th>
-    <th style="${thS}">Actions</th>
-  </tr>`;
-
-  const tdS = 'padding:7px 12px;border-bottom:1px solid var(--border);font-size:12px';
-  const tdR = tdS + ';text-align:right';
-  infraBody.innerHTML = infraEntries.map(entry => `<tr>
-    <td style="${tdS};font-weight:500">${esc(entry.project)}</td>
-    <td style="${tdS}">${esc(entry.program)}</td>
-    <td style="${tdR};font-weight:600">${money(entry.monthly_cost)}</td>
-    <td style="${tdS};color:var(--text-2)">${entry.start_month || '—'}</td>
-    <td style="${tdS};color:var(--text-2)">${entry.end_month || 'ongoing'}</td>
-    <td style="${tdS};white-space:nowrap">
-      <button class="btn-sm" style="padding:2px 7px;font-size:11px" onclick="openInfraModal('${esc(entry.id)}')">✎</button>
-      <button class="btn-sm" style="padding:2px 7px;font-size:11px;color:var(--red)" onclick="deleteInfraEntry('${esc(entry.id)}')">✕</button>
-    </td>
-  </tr>`).join('');
-}
-
-// ══════════════════════════════════════════
-// INFRA MODAL — Add / Edit entry
-// ══════════════════════════════════════════
-function openInfraModal(entryId) {
-  const s = typeof loadSettings === 'function' ? loadSettings() : null;
-  const projects = s?.projects || ['AOA-MP','TTB','Geo9','Release 2.1','Release 3'];
-  const entry = entryId ? loadInfraCosts().find(e => e.id === entryId) : null;
-
-  document.getElementById('infra-modal').style.display = 'flex';
-  document.getElementById('infra-form').innerHTML = `
-    <input type="hidden" id="inf-entry-id" value="${esc(entry?.id||'')}">
-    <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px">
-      <div class="fg"><label>Project *</label>
-        <select id="inf-project" class="ri">
-          <option value="">— เลือกโครงการ —</option>
-          ${projects.map(p=>`<option value="${esc(p)}" ${p===(entry?.project||'')?'selected':''}>${esc(p)}</option>`).join('')}
-        </select>
-      </div>
-      <div class="fg"><label>Program *</label>
-        <input id="inf-program" class="ri" placeholder="เช่น AWS, DataDog" value="${esc(entry?.program||'')}">
-      </div>
-      <div class="fg"><label>Monthly Cost (THB) *</label>
-        <input id="inf-monthly" class="ri" type="number" min="0" placeholder="0" value="${entry?.monthly_cost||''}">
-      </div>
-      <div class="fg"></div>
-      <div class="fg"><label>Start Month (YYYY-MM)</label>
-        <input id="inf-start" class="ri" type="month" value="${entry?.start_month||''}">
-      </div>
-      <div class="fg"><label>End Month (YYYY-MM) — ว่างไว้ = ongoing</label>
-        <input id="inf-end" class="ri" type="month" value="${entry?.end_month||''}">
-      </div>
-    </div>`;
-}
-
-function closeInfraModal() { document.getElementById('infra-modal').style.display = 'none'; }
-
-function deleteInfraEntry(id) {
-  if(!confirm('ลบรายการนี้?')) return;
-  deleteInfraEntryAsync(id).catch(e => console.warn('Supabase infra delete failed', e));
-  renderBudgetSLInfra();
-}
-
-function saveInfraCost() {
-  const project = document.getElementById('inf-project')?.value;
-  const program = document.getElementById('inf-program')?.value?.trim();
-  const monthly = parseFloat(document.getElementById('inf-monthly')?.value)||0;
-  const start   = document.getElementById('inf-start')?.value || null;
-  const end     = document.getElementById('inf-end')?.value   || null;
-  const editId  = document.getElementById('inf-entry-id')?.value;
-
-  if(!project) { alert('กรุณาเลือก Project'); return; }
-  if(!program) { alert('กรุณากรอก Program'); return; }
-  if(!monthly) { alert('กรุณากรอก Monthly Cost'); return; }
-
-  // Generate stable id; if editing reuse existing id, if new ensure uniqueness
-  let id = editId || infraEntryId(project, program);
-  if (!editId) {
-    // Avoid collision with existing entries for same project+program
-    const existing = loadInfraCosts().filter(e => e.id.startsWith(infraEntryId(project, program)));
-    if (existing.length > 0) id = `${infraEntryId(project, program)}_${existing.length + 1}`;
-  }
-
-  const entry = { id, project, program, monthly_cost: monthly, start_month: start, end_month: end };
-
-  saveInfraEntryAsync(entry).catch(e => console.warn('Supabase infra save failed', e));
-  closeInfraModal();
-  renderBudgetSLInfra();
-}
-
-// ── Infra Bulk Upload ──
-function handleInfraBulkUpload(event) {
-  const file = event.target.files?.[0];
-  if(!file) return;
-  if(typeof XLSX === 'undefined') { alert('ไม่พบ SheetJS library'); return; }
-
-  const reader = new FileReader();
-  reader.onload = e => {
-    try {
-      const wb   = XLSX.read(e.target.result, { type:'binary' });
-      const ws   = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { defval:'' });
-
-      const costs = loadInfraCosts();
-      let added = 0;
-      const currentEntries = loadInfraCosts();
-      rows.forEach(row => {
-        const proj  = String(row['Project']||row['project']||'').trim();
-        const prog  = String(row['Program']||row['program']||row['Program Name']||'').trim();
-        const amt   = parseFloat(row['Monthly Cost']||row['monthly_cost']||row['Cost']||0)||0;
-        const start = String(row['Start Month']||row['start_month']||'').trim() || null;
-        const end   = String(row['End Month']||row['end_month']||'').trim() || null;
-        if(!proj || !prog || !amt) return;
-        const id = infraEntryId(proj, prog);
-        currentEntries.push({ id, project: proj, program: prog, monthly_cost: amt, start_month: start, end_month: end });
-        added++;
-      });
-
-      storeInfraCosts(currentEntries);
-      _infraCache = null;
-      // Push all new entries to Supabase
-      Promise.all(currentEntries.slice(-added).map(e => saveInfraEntryAsync(e))).catch(e => console.warn('Supabase bulk save failed', e));
-      renderBudgetSLInfra();
-      alert(`✓ Import Infra สำเร็จ — อัปเดต ${added} รายการ`);
-    } catch(err) {
-      alert('เกิดข้อผิดพลาด: ' + err.message);
-    }
-  };
-  reader.readAsBinaryString(file);
-  event.target.value = '';
-}
-
 // ── Budget vs Actual ──
 function _renderBudgetVsActual(allProjects, infraEntries, licByProj) {
   const summary = document.getElementById('sl-bva-summary');
@@ -1552,168 +1370,6 @@ function _renderBudgetVsActual(allProjects, infraEntries, licByProj) {
     </td>
   </tr>`).join('');
 }
-
-// ══════════════════════════════════════════
-// SUB-TAB 3: OTHERS (HW / INT / ENT / DEP)
-// ══════════════════════════════════════════
-const OTHERS_TYPES = ['hw','int','ent','dep'];
-
-function renderBudgetOthers() {
-  const rangeEl = document.getElementById('oth-range');
-  const projEl  = document.getElementById('oth-project');
-  const typeEl  = document.getElementById('oth-type');
-
-  const rangeVal = rangeEl?.value || '12';
-  const projVal  = projEl?.value  || 'all';
-  const typeVal  = typeEl?.value  || 'all';
-
-  const approved = loadMemos().filter(m =>
-    memoStatusKey(m) === 'completed' && OTHERS_TYPES.includes(m.type)
-  );
-
-  // Populate project dropdown once
-  if (projEl && projEl.options.length <= 1) {
-    const projs = [...new Set(approved.map(m => m.project || '(ไม่ระบุ)'))].sort();
-    projs.forEach(p => { const o = document.createElement('option'); o.value = o.textContent = p; projEl.appendChild(o); });
-  }
-
-  // Build month range
-  const now = new Date();
-  let fromKey = null, toKey = null;
-  const months = [];
-  if (rangeVal !== 'all') {
-    const n = parseInt(rangeVal);
-    for (let i = n - 1; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      months.push({ key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`, label: d.toLocaleString('th-TH', { month:'short', year:'2-digit' }) });
-    }
-    fromKey = months[0]?.key;
-    toKey   = months[months.length - 1]?.key;
-  }
-
-  // Filter memos
-  let filtered = approved;
-  if (fromKey) {
-    filtered = filtered.filter(m => {
-      const d = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
-      const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      return k >= fromKey && k <= toKey;
-    });
-  }
-  if (projVal !== 'all') filtered = filtered.filter(m => (m.project || '(ไม่ระบุ)') === projVal);
-  if (typeVal !== 'all') filtered = filtered.filter(m => m.type === typeVal);
-
-  const total    = filtered.reduce((s, m) => s + (Number(m.total) || 0), 0);
-  const numMemos = filtered.length;
-
-  // Top type by spend
-  const byType = {};
-  OTHERS_TYPES.forEach(t => byType[t] = 0);
-  filtered.forEach(m => { byType[m.type] = (byType[m.type] || 0) + (Number(m.total) || 0); });
-  const topType = Object.entries(byType).sort((a, b) => b[1] - a[1])[0];
-
-  // ── KPI cards ──
-  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  setText('oth-kpi-total',    money(Math.round(total)));
-  setText('oth-kpi-memos',    numMemos);
-  setText('oth-kpi-top-type', topType?.[1] > 0 ? `${BGT_TYPE_LABELS[topType[0]]} (${money(Math.round(topType[1]))})` : '—');
-  setText('oth-kpi-period',   fromKey ? `${months[0]?.label} – ${months[months.length-1]?.label}` : 'ทั้งหมด');
-
-  // ── Monthly stacked bar ──
-  _renderOthersChart(filtered, months, rangeVal);
-
-  // ── Breakdown table ──
-  _renderOthersTable(filtered);
-}
-
-function _renderOthersChart(memos, months, rangeVal) {
-  const canvas = document.getElementById('oth-chart');
-  if (!canvas || typeof Chart === 'undefined') return;
-  if (canvas._chart) { canvas._chart.destroy(); canvas._chart = null; }
-
-  if (!months.length) {
-    // Build last 12 months if range=all
-    const now = new Date();
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      months.push({ key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`, label: d.toLocaleString('th-TH', { month:'short', year:'2-digit' }) });
-    }
-  }
-
-  const datasets = OTHERS_TYPES.map(tk => ({
-    label: BGT_TYPE_LABELS[tk],
-    backgroundColor: BGT_TYPE_COLORS[tk],
-    borderRadius: 3, borderSkipped: false,
-    data: months.map(m => memos
-      .filter(memo => {
-        if (memo.type !== tk) return false;
-        const d = parseThaiDate(memo.date) || new Date(memo.updatedAt || memo.createdAt);
-        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` === m.key;
-      })
-      .reduce((s, memo) => s + (Number(memo.total) || 0), 0)
-    ),
-  })).filter(ds => ds.data.some(v => v > 0));
-
-  canvas._chart = new Chart(canvas, {
-    type: 'bar',
-    data: { labels: months.map(m => m.label), datasets },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 12 } },
-        tooltip: {
-          callbacks: {
-            label: ctx => {
-              const val = ctx.raw || 0; if (!val) return null;
-              const mIdx = ctx.dataIndex;
-              const monthTotal = datasets.reduce((s, ds) => s + (ds.data[mIdx] || 0), 0);
-              const pct = monthTotal > 0 ? Math.round(val / monthTotal * 100) : 0;
-              return ` ${ctx.dataset.label}: ${money(Math.round(val))} (${pct}%)`;
-            },
-            footer: ctx => {
-              if (!ctx.length) return '';
-              const t = datasets.reduce((s, ds) => s + (ds.data[ctx[0].dataIndex] || 0), 0);
-              return t > 0 ? `Total: ${money(Math.round(t))}` : '';
-            },
-          },
-        },
-      },
-      scales: {
-        x: { stacked: true, grid: { display: false }, ticks: { font: { size: 10 } } },
-        y: { stacked: true, ticks: { callback: v => '฿' + Number(v).toLocaleString('th-TH'), font: { size: 10 } } },
-      },
-    },
-  });
-}
-
-function _renderOthersTable(memos) {
-  const tbody = document.getElementById('oth-table-body');
-  if (!tbody) return;
-
-  if (!memos.length) {
-    tbody.innerHTML = `<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล</td></tr>`;
-    return;
-  }
-
-  const sorted = [...memos].sort((a, b) => (Number(b.total) || 0) - (Number(a.total) || 0));
-  const tdS = 'padding:7px 12px;border-bottom:1px solid var(--border);font-size:12px';
-
-  tbody.innerHTML = sorted.map(m => {
-    const d     = parseThaiDate(m.date) || new Date(m.updatedAt || m.createdAt);
-    const dateStr = d.toLocaleString('th-TH', { day:'numeric', month:'short', year:'2-digit' });
-    const typeBg  = { hw:'#E8F5E0', int:'#FFF3E0', ent:'#EDE7F6', dep:'#FFEBEE' };
-    const typeClr = { hw:'#2E7D1C', int:'#E65100', ent:'#4527A0', dep:'#B71C1C' };
-    return `<tr>
-      <td style="${tdS};color:var(--text-3)">${dateStr}</td>
-      <td style="${tdS};font-weight:500">${esc(m.project || '(ไม่ระบุ)')}</td>
-      <td style="${tdS}"><span style="font-size:10px;padding:2px 7px;border-radius:4px;background:${typeBg[m.type]||'var(--bg)'};color:${typeClr[m.type]||'var(--text-2)'}">${BGT_TYPE_LABELS[m.type] || m.type}</span></td>
-      <td style="${tdS}">${esc(m.subject || m.memoNo || '—')}</td>
-      <td style="${tdS};text-align:right;font-weight:600">${money(Number(m.total) || 0)}</td>
-      <td style="${tdS};color:var(--blue);font-weight:500">${esc(m.memoNo || '—')}</td>
-    </tr>`;
-  }).join('');
-}
-
 
 const SLINF_BUDGET_KEY = 'orbit-pmo-sl-budgets-v1';
 
@@ -2325,6 +1981,7 @@ async function savePoolAsync(pool) {
       }, '?on_conflict=id');
     } catch(e) { console.warn('Pool save failed', e.message); }
   }
+  remapActualSpendForBudgetPools();
 }
 async function deletePoolAsync(id) {
   storeBudgetPools(loadBudgetPools().filter(p => p.id !== id));
@@ -2332,6 +1989,13 @@ async function deletePoolAsync(id) {
   if (await checkSupa()) {
     try { await supaFetch('budget_pools', 'DELETE', null, '?id=eq.' + encodeURIComponent(id)); } catch(e) {}
   }
+  remapActualSpendForBudgetPools();
+}
+
+function remapActualSpendForBudgetPools() {
+  const pools = loadBudgetPools().map(createBudgetPoolRecord);
+  const records = loadActualSpendRecords();
+  if (records.length) storeActualSpendRecords(mapActualSpendRecords(records, pools));
 }
 
 // ── Auto-match memo → pool ──
@@ -2774,23 +2438,6 @@ async function _confirmPoolImport() {
   renderBudgetSettings();
 }
 
-function switchBgtSettings(panel, btn) {
-  ['budget','infra'].forEach(p => {
-    const el  = document.getElementById('bset-panel-' + p);
-    const nav = document.getElementById('bset-nav-' + p);
-    if (el)  el.style.display  = p === panel ? '' : 'none';
-    if (nav) {
-      nav.style.borderLeft = p === panel ? '2px solid var(--blue)' : '2px solid transparent';
-      nav.style.background = p === panel ? 'var(--blue-50)' : '';
-      const span = nav.querySelector('span');
-      if (span) { span.style.color = p === panel ? 'var(--blue)' : 'var(--text-2)'; span.style.fontWeight = p === panel ? '600' : '400'; }
-      const svg = nav.querySelector('svg');
-      if (svg) svg.setAttribute('stroke', p === panel ? '#185FA5' : 'currentColor');
-    }
-  });
-  if (panel === 'infra') renderBudgetSLInfra();
-}
-
 function renderBudgetSettings() {
   const body = document.getElementById('bset-budget-body');
   if (!body) return;
@@ -2857,22 +2504,22 @@ function openBudgetPoolModal(editId) {
       <input type="hidden" id="bpool-edit-id" value="${editId || ''}">
       <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px">
         <div class="fg"><label>Project *</label>
-          <select id="bpool-project" class="ri"><option value="">— เลือก —</option>${projOpts}</select>
+          <select id="bpool-project" class="ri" required><option value="">— เลือก —</option>${projOpts}</select>
         </div>
         <div class="fg"><label>Pool Name *</label>
-          <input id="bpool-name" class="ri" placeholder="เช่น SL 2025, HW Q1" value="${esc(g('name'))}">
+          <input id="bpool-name" class="ri" required placeholder="เช่น SL 2025, HW Q1" value="${esc(g('name'))}">
         </div>
         <div class="fg"><label>Budget (฿) *</label>
-          <input id="bpool-budget" class="ri" type="number" min="0" value="${g('budget')}">
+          <input id="bpool-budget" class="ri" type="number" min="0.01" step="0.01" required value="${g('budget')}">
         </div>
         <div class="fg"><label>ปี (Thai Buddhist Era)</label>
           <input id="bpool-year" class="ri" value="${g('year', year)}" readonly style="background:var(--bg)">
         </div>
         <div class="fg"><label>Start Month (YYYY-MM)</label>
-          <input id="bpool-start" class="ri" type="month" value="${g('startMonth')}">
+          <input id="bpool-start" class="ri" type="month" required value="${g('startMonth')}">
         </div>
         <div class="fg"><label>End Month (YYYY-MM)</label>
-          <input id="bpool-end" class="ri" type="month" value="${g('endMonth')}">
+          <input id="bpool-end" class="ri" type="month" required value="${g('endMonth')}">
         </div>
       </div>
       <div class="fg" style="margin-top:12px">
@@ -2893,7 +2540,7 @@ function openBudgetPoolModal(editId) {
   document.body.appendChild(modal);
 }
 
-function saveBudgetPool() {
+async function saveBudgetPool() {
   const g      = id => document.getElementById(id)?.value?.trim() || '';
   const project = g('bpool-project');
   const name    = g('bpool-name');
@@ -2905,22 +2552,21 @@ function saveBudgetPool() {
 
   const memoTypes = Object.keys(BGT_TYPE_LABELS).filter(k => document.getElementById('bpool-type-' + k)?.checked);
 
-  if (!project) { alert('กรุณาเลือก Project'); return; }
-  if (!name)    { alert('กรุณากรอกชื่อ Pool'); return; }
-  if (!budget)  { alert('กรุณากรอก Budget'); return; }
-
-  const id    = editId || `pool-${Date.now().toString(36).toUpperCase()}`;
+  const id    = editId || `pool-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
   const entry = { id, project, name, budget, year, startMonth: start, endMonth: end, memoTypes };
-
-  savePoolAsync(entry)
-    .then(() => {
-      document.getElementById('bpool-modal')?.remove();
-      renderBudgetSettings();
-    })
-    .catch(e => console.warn('Pool save error:', e));
+  const validation = validateBudgetPoolChange(entry, loadBudgetPools(), editId || null);
+  if (!validation.valid) { alert(validation.errors.join('\n')); return; }
+  if (validation.conflicts.length && !confirm(`พบ Budget Pool ที่ช่วงเวลาและ Spend Type ซ้อนกัน ${validation.conflicts.length} รายการ\nActual Spend ที่ match หลาย pool จะเป็น Needs PMO Review\nต้องการบันทึกต่อหรือไม่?`)) return;
+  try {
+    await savePoolAsync(entry);
+    document.getElementById('bpool-modal')?.remove();
+    renderBudgetSettings();
+  } catch(e) { console.warn('Pool save error:', e); }
 }
 
 function deleteBudgetPool(id) {
+  const blockers = budgetPoolDeletionBlockers(id, loadActualSpendRecords());
+  if (blockers.length) { alert(`ไม่สามารถลบ Pool ที่มี Actual Spend อ้างอิงอยู่ ${blockers.length} รายการ`); return; }
   if (!confirm('ลบ pool นี้?')) return;
   deletePoolAsync(id)
     .then(() => renderBudgetSettings())

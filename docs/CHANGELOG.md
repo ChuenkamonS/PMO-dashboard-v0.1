@@ -22,6 +22,36 @@
 
 ## Current Baseline
 
+### Infra Cost Entry Consolidation
+#### Changed
+- Actual Spend is now the only UI path for entering or importing Infra Cost spending.
+- Settings now contains Budget Pool configuration only.
+
+#### Removed
+- Settings Infra Cost navigation, manual add/edit/delete modal, and dedicated bulk-upload flow.
+
+#### Tests
+- Added regression coverage proving the Settings entry paths are absent while Infra Cost remains valid in canonical Actual Spend, Budget vs Actual, Forecast, export, drill-down data, and Unbudgeted totals.
+
+### Phase 7 - Budget Pool Integration and Release Verification
+#### Added
+- Shared Budget Pool create/edit validation for required fields, positive budgets, valid periods, duplicate identity, and overlapping project/Spend Type conflicts.
+- Safe deletion guard for Budget Pools referenced by canonical Actual Spend.
+- Focused regression coverage for Budget Pool validation, conflict handling, re-mapping, BvA recalculation, export parity, and the five-tab release scope.
+
+#### Changed
+- Budget Pool create/edit/delete now re-runs shared Actual Spend mapping so Budget vs Actual, utilization, remaining budget, drill-down, export, and Unbudgeted data stay aligned.
+- Overlapping pools may be confirmed and saved; affected records follow the shared `Needs PMO Review` mapping rule.
+
+#### Removed
+- Obsolete Others tab, panel, and legacy memo-based rendering path, as required by `BvA_REQUIREMENT.md`.
+
+#### Data Flow
+- Budget Pool CRUD → shared validation → canonical Budget Pool storage → shared Actual Spend mapping → canonical Budget vs Actual dataset and export.
+
+#### Remaining Work
+- Full role-based authorization and Supabase baseline/RLS verification remain deferred per the confirmed project decisions.
+
 ### Phase 6 - Budget vs Actual
 #### Added
 - Shared Budget vs Actual dataset and CSV serializer for KPI, chart, pool table, drill-down, export, and Unbudgeted totals.

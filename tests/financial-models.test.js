@@ -144,6 +144,64 @@ test('budget pool validation enforces required fields and valid range', () => {
   assert.ok(invalid.errors.length >= 5);
 });
 
+test('Phase 7 Budget Pool CRUD validation rejects invalid and duplicate pools and reports overlap conflicts', () => {
+  const ctx = context();
+  const existing = [ctx.createBudgetPoolRecord({
+    id:'pool-1', project:'AOA-MP', name:'Software 2569', year:'2569', budget:10000,
+    spendTypes:['Software'], startDate:'2026-01', endDate:'2026-12',
+  })];
+  const invalid = ctx.validateBudgetPoolChange({
+    id:'pool-2', project:'', name:'', year:'', budget:-1, spendTypes:[], startDate:'2026-12', endDate:'2026-01',
+  }, existing);
+  assert.equal(invalid.valid, false);
+  assert.ok(invalid.errors.includes('Pool Name is required'));
+  assert.ok(invalid.errors.includes('Year is required'));
+
+  const duplicate = ctx.validateBudgetPoolChange({ ...existing[0], id:'pool-2' }, existing);
+  assert.equal(duplicate.valid, false);
+  assert.ok(duplicate.errors.some(error => error.includes('Duplicate Budget Pool')));
+
+  const conflict = ctx.validateBudgetPoolChange({
+    id:'pool-2', project:'AOA-MP', name:'Software H2', year:'2569', budget:5000,
+    spendTypes:['Software'], startDate:'2026-07', endDate:'2026-12',
+  }, existing);
+  assert.equal(conflict.valid, true);
+  assert.deepEqual(Array.from(conflict.conflicts, pool => pool.id), ['pool-1']);
+});
+
+test('Phase 7 Budget Pool changes re-map Unbudgeted spend and safely block referenced deletion', () => {
+  const ctx = context();
+  const record = ctx.createActualSpendRecord(base);
+  assert.equal(ctx.mapActualSpendRecords([record], [])[0].budgetStatus, 'Unbudgeted');
+  const pool = ctx.createBudgetPoolRecord({
+    id:'pool-1', project:'AOA-MP', name:'Software', year:'2569', budget:10000,
+    spendTypes:['Software'], startDate:'2026-01', endDate:'2026-12',
+  });
+  const mapped = ctx.mapActualSpendRecords([record], [pool]);
+  assert.equal(mapped[0].finalBudgetPoolId, 'pool-1');
+  assert.equal(mapped[0].budgetStatus, 'Mapped');
+  assert.deepEqual(Array.from(ctx.budgetPoolDeletionBlockers('pool-1', mapped), item => item.id), [mapped[0].id]);
+  assert.equal(ctx.budgetPoolDeletionBlockers('unused', mapped).length, 0);
+});
+
+test('Phase 7 Budget Pool create and edit immediately recalculate BvA totals from the canonical dataset', () => {
+  const ctx = context();
+  const spend = ctx.createActualSpendRecord({ ...base, amount:2500, finalBudgetPoolId:'pool-1', budgetStatus:'Mapped' });
+  const created = ctx.createBudgetPoolRecord({
+    id:'pool-1', project:'AOA-MP', name:'Software', year:'2569', budget:10000,
+    spendTypes:['Software'], startDate:'2026-01', endDate:'2026-12',
+  });
+  const before = ctx.calculateBudgetVsActualDataset([created], [spend], { year:'2569' });
+  const edited = ctx.createBudgetPoolRecord({ ...created, budget:12000 });
+  const after = ctx.calculateBudgetVsActualDataset([edited], [spend], { year:'2569' });
+  assert.deepEqual(JSON.parse(JSON.stringify(before.totals)), {
+    budget:10000, actual:2500, mappedActual:2500, unbudgetedActual:0, remaining:7500, utilizationPercent:25,
+  });
+  assert.equal(after.totals.remaining, 9500);
+  assert.equal(after.totals.utilizationPercent, 2500 / 12000 * 100);
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.budgetVsActualExportDataset(after).totals)), JSON.parse(JSON.stringify(after.totals)));
+});
+
 test('storage rejects unvalidated records', () => {
   const ctx = context();
   assert.throws(() => ctx.storeActualSpendRecords([{ ...base, amount:0 }]), /Amount/);
@@ -321,6 +379,24 @@ test('forecast carries the latest coverage monthly cost into future months and e
     ...forecast.months.map(month => row.values[month.key] || 0),
     row.total,
   ]);
+});
+
+test('Infra Cost entered through Actual Spend remains canonical for BvA, Forecast, export, and Unbudgeted', () => {
+  const ctx = context();
+  const validation = ctx.validateActualSpendRecord({
+    source:'Infra Cost', referenceNo:'INFRA-ACTUAL-1', project:'AOA-MP', spendType:'Infra',
+    amount:12000, startDate:'2026-01', endDate:'2026-12', vendorProgram:'Cloud',
+  });
+  assert.equal(validation.valid, true);
+  const record = validation.record;
+  const bva = ctx.calculateBudgetVsActualDataset([], [record], { year:'2569' });
+  assert.equal(bva.totals.actual, 12000);
+  assert.equal(bva.totals.unbudgetedActual, 12000);
+  assert.equal(bva.unbudgetedRecords[0].source, 'Infra Cost');
+  assert.equal(ctx.budgetVsActualExportDataset(bva).totals.actual, 12000);
+  const forecast = ctx.calculateForecast([record], new Date(2026, 6, 15));
+  assert.equal(forecast.rows.length, 1);
+  assert.equal(forecast.rows[0].spendType, 'Infra');
 });
 
 test('batch mapping re-evaluates unbudgeted records without replacing manual overrides', () => {

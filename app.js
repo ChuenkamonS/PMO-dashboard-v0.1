@@ -245,6 +245,40 @@ function validateBudgetPoolRecord(input) {
   return { valid: errors.length === 0, errors, record };
 }
 
+function budgetPoolPeriodsOverlap(first, second) {
+  const firstStart = first.startDate || first.startMonth;
+  const firstEnd = first.endDate || first.endMonth;
+  const secondStart = second.startDate || second.startMonth;
+  const secondEnd = second.endDate || second.endMonth;
+  return Boolean(firstStart && firstEnd && secondStart && secondEnd && firstStart <= secondEnd && secondStart <= firstEnd);
+}
+
+function validateBudgetPoolChange(input, existingPools = [], editId = null) {
+  const result = validateBudgetPoolRecord(input);
+  const errors = [...result.errors];
+  const record = result.record;
+  if (!record.name.trim()) errors.push('Pool Name is required');
+  if (!String(record.year || '').trim()) errors.push('Year is required');
+  const others = existingPools.map(createBudgetPoolRecord).filter(pool => pool.id !== (editId || record.id));
+  const duplicate = others.find(pool =>
+    pool.project === record.project &&
+    pool.name.trim().toLowerCase() === record.name.trim().toLowerCase() &&
+    String(pool.year || '') === String(record.year || '')
+  );
+  if (duplicate) errors.push('Duplicate Budget Pool for Project, Pool Name, and Year');
+  const conflicts = others.filter(pool =>
+    pool.project === record.project &&
+    String(pool.year || '') === String(record.year || '') &&
+    budgetPoolPeriodsOverlap(pool, record) &&
+    pool.spendTypes.some(type => record.spendTypes.includes(type))
+  );
+  return { valid: errors.length === 0, errors, conflicts, record };
+}
+
+function budgetPoolDeletionBlockers(poolId, records = []) {
+  return records.filter(record => getFinalBudgetPoolId(record) === poolId);
+}
+
 function loadFinancialRecords(storageKey) {
   try {
     const rows = JSON.parse(localStorage.getItem(storageKey) || '[]');
@@ -565,6 +599,8 @@ const FINANCIAL_HELPERS = Object.freeze({
   calculateForecast,
   forecastExportDataset,
   calculateBudgetUtilization,
+  validateBudgetPoolChange,
+  budgetPoolDeletionBlockers,
   calculateBudgetVsActualDataset,
   budgetVsActualExportDataset,
 });
