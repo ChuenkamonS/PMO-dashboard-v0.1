@@ -1,5 +1,74 @@
 # CHANGELOG
 
+## Manual Entries import routing fix (2026-07-01)
+
+### Fixed
+- Actual Spend files imported from the Manual Entries workflow now normalize every row to editable Manual / Historical persistence, regardless of the Excel Source value.
+- Imported Infra rows retain Spend Type `Infra`, appear in Manual Entries and canonical Report, and support the existing edit and soft-delete flow.
+- Source normalization occurs before duplicate validation so repeat Manual Entries imports remain detectable.
+- Existing direct-canonical and legacy Infra Cost records remain supported.
+
+### Tests
+- Added mixed-Source routing, imported-Infra edit/delete and total updates, and legacy direct-canonical Infra regression coverage.
+
+## Actual Spend Excel date parsing fix (2026-07-01)
+
+### Fixed
+- Actual Spend import now normalizes Excel serial date values and SheetJS `Date` objects before strict calendar validation.
+- Excel cells representing first-of-month ranges retain month precision, while full dates retain day precision.
+- Existing `YYYY-MM` and `YYYY-MM-DD` strings and matching-precision validation remain unchanged.
+
+### Tests
+- Added coverage for Excel serial full dates, Excel serial month ranges, Date objects, invalid date text, and mixed-precision rejection.
+
+## Manual Entries Delete confirmation fix (2026-07-01)
+
+### Fixed
+- Removed the unintended second reason prompt that could cancel Delete after the user had already confirmed.
+- Delete now uses `Deleted from Manual Entries` as its audit reason, soft-deletes the persisted manual-expense ID, and rerenders/reconciles canonical Actual Spend immediately.
+- Added UI-button wiring coverage for both manually added and Excel-imported manual records, plus success, cancellation, persistence-failure, and canonical-total regression coverage.
+
+## Phase 3.2 — Manual Entries QA fixes (2026-07-01)
+
+### Changed
+- Removed the manual internal-ID fallback from canonical Reference No; blank references remain blank in data and display as `—` in Manual Entries and Report details.
+- Made Manual Entries Delete an explicit soft-delete flow with clear confirmation, a default audit reason, cancellation feedback, transactional remote/local behavior, and clear failure feedback.
+- Reduced the Manual Entries table to nine summary columns and kept schedule, Budget Pool, creator, notes, and creation method in View Detail.
+- Reconfirmed Actual Spend Report drill-down/detail remains read-only with no Edit, Delete, or Void actions.
+
+### Unchanged
+- Manual Add/Edit fields and wording, Entry Type, Quantity/Unit Cost, import template/parser, amount semantics, date/month pickers, exports, calculations, Report grouping/totals, Budget Pools, Forecast, BvA, Spend Types, and legacy records.
+
+### Tests
+- Added wrapper-level soft-delete success/failure coverage, canonical total exclusion, internal-ID leakage regression coverage, and compact table/detail contract checks.
+
+## Phase 3.1 — Manual QA UI fixes (2026-07-01)
+
+### Changed
+- Formatted Manual Entries Created At and Updated At values as user-friendly local date/time text instead of raw ISO timestamps.
+- Applied the same audit timestamp formatting to read-only Actual Spend Report details.
+- Shortened the Manual Entries search placeholder without changing search behavior.
+- Verified Report detail remains informational only, with no Edit, Delete, or Void actions.
+
+### Unchanged
+- Financial calculations, persistence, CRUD behavior, imports/templates, exports, filters, Report grouping, Budget Pools, Forecast, Budget vs Actual, and date/month pickers.
+
+### Tests
+- Added focused UI coverage for timestamp formatting and the shorter search placeholder; retained read-only Report detail coverage.
+
+## Phase 3 — Manual Entries management and read-only Report (2026-07-01)
+
+### Changed
+- Added a flat Manual Entries management table sourced only from active manual-expense persistence, including manually added and Excel-imported manual records.
+- Added search and project, spend type, frequency, coverage date, and budget status filters plus View Detail, Edit, and soft Delete actions.
+- Kept soft-deleted manual records hidden and excluded from canonical Actual Spend and downstream totals.
+- Removed maintenance actions and edit routing from Actual Spend Report drill-down/detail; manual report details now direct users to Manual Entries.
+- Made Reference No optional and display blank references as `—` without exposing internal record IDs.
+- Kept the import template columns, parser, amount/date semantics, form layout, Report grouping/totals, Forecast, Budget vs Actual, Budget Pool CRUD, Spend Types, and legacy support unchanged.
+
+### Tests
+- Added targeted coverage for Manual Entries source isolation, active-only behavior, actions/filters, soft deletion, optional references, and read-only Report details.
+
 ## Phase 2 — Separate Actual Spend report and manual maintenance (2026-07-01)
 
 ### Changed

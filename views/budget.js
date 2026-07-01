@@ -143,8 +143,6 @@ async function voidManualExpenseAsync(id, reason) {
     updatedBy: currentUser(),
     updatedAt: now,
   };
-  rows[idx] = updated;
-  storeManualExpenses(rows);
   if (await checkSupa()) {
     await supaFetch('budget_manual_expenses', 'PATCH', {
       voided_at: now,
@@ -154,6 +152,8 @@ async function voidManualExpenseAsync(id, reason) {
       updated_at: now,
     }, '?id=eq.' + encodeURIComponent(id));
   }
+  rows[idx] = updated;
+  storeManualExpenses(rows);
   return updated;
 }
 
@@ -311,6 +311,7 @@ function switchActualSpendTab(tab, btn) {
   if (manualPanel) manualPanel.style.display = _actualSpendCurrentTab === 'manual' ? '' : 'none';
   [document.getElementById('as-tab-report'), document.getElementById('as-tab-manual')].forEach(tabButton => tabButton?.classList.remove('active'));
   if (btn) btn.classList.add('active');
+  if (_actualSpendCurrentTab === 'manual') renderManualEntries();
 }
 function switchBudgetTab(tab, btn) {
   _bgtCurrentTab = tab;
@@ -360,7 +361,7 @@ function manualExpenseToActualSpend(expense) {
   return createActualSpendRecord({
     id: `actual-spend-manual-${expense.id}`,
     source: ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE,
-    referenceNo: expense.referenceNo || expense.id,
+    referenceNo: expense.referenceNo || '',
     project: expense.project,
     spendType: spendTypeFromMemoType(expense.expenseType),
     amount: (Number(expense.amount) || 0) * (months || 1),
@@ -491,6 +492,36 @@ function actualSpendRecordInYear(record, year) {
   return (!startYear || startYear <= year) && (!endYear || endYear >= year);
 }
 
+function excelImportDateParts(value) {
+  let date;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    date = new Date(Date.UTC(1899, 11, 30) + Math.floor(value) * 86400000);
+    return Number.isNaN(date.getTime()) ? null : {
+      year:date.getUTCFullYear(), month:date.getUTCMonth() + 1, day:date.getUTCDate(),
+    };
+  }
+  if (value && typeof value === 'object' && typeof value.getFullYear === 'function') {
+    date = value;
+    return Number.isNaN(date.getTime()) ? null : {
+      year:date.getFullYear(), month:date.getMonth() + 1, day:date.getDate(),
+    };
+  }
+  return null;
+}
+
+function normalizeActualSpendImportDates(startValue, endValue) {
+  const startParts = excelImportDateParts(startValue);
+  const endParts = excelImportDateParts(endValue);
+  const monthPrecision = startParts?.day === 1 && endParts?.day === 1;
+  const format = (value, parts) => {
+    if (!parts) return String(value ?? '').trim() || null;
+    const month = String(parts.month).padStart(2, '0');
+    const day = String(parts.day).padStart(2, '0');
+    return monthPrecision ? `${parts.year}-${month}` : `${parts.year}-${month}-${day}`;
+  };
+  return { startDate:format(startValue, startParts), endDate:format(endValue, endParts) };
+}
+
 function actualSpendImportRow(row) {
   const get = (...keys) => keys.map(key => row[key]).find(value => value !== undefined && value !== '');
   const rawSource = String(get('Source','source') || '').trim();
@@ -506,15 +537,23 @@ function actualSpendImportRow(row) {
   const spendType = rawType.toLowerCase() === 'infrastructure' && SPEND_TYPE_VALUES.includes(SPEND_TYPES.INFRA)
     ? SPEND_TYPES.INFRA
     : canonicalType || rawType;
+  const dates = normalizeActualSpendImportDates(
+    get('Start Date','Start','startDate'),
+    get('End Date','End','endDate'),
+  );
   return {
     source, referenceNo:String(get('Reference No','Reference','referenceNo') || '').trim(),
     project:String(get('Project','project') || '').trim(), spendType,
     amount:Number(get('Amount','amount') || 0), currency:'THB',
-    startDate:String(get('Start Date','Start','startDate') || '').trim() || null,
-    endDate:String(get('End Date','End','endDate') || '').trim() || null,
+    startDate:dates.startDate,
+    endDate:dates.endDate,
     vendorProgram:String(get('Vendor / Program','Program','vendorProgram') || '').trim(),
     description:String(get('Description','description') || '').trim(), createdBy:currentUser(),
   };
+}
+
+function manualEntriesImportRow(row) {
+  return { ...actualSpendImportRow(row), source:ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE };
 }
 
 function downloadActualSpendTemplate() {
@@ -530,7 +569,7 @@ function downloadActualSpendTemplate() {
 
   const instructions = XLSX.utils.aoa_to_sheet([
     ['Actual Spend Import Instructions'],
-    ['Required columns','Source, Reference No, Spend Type, Project, Amount'],
+    ['Required columns','Source, Spend Type, Project, Amount (Reference No is optional)'],
     ['Allowed Source','Approved Memo, Manual / Historical, or Infra Cost.'],
     ['Allowed Spend Type','Software, Hardware, Team Activity, Client Expense, Deployment, Infra, Others'],
     ['Amount','Total amount for the coverage period (positive THB amount). Do not enter a monthly amount.'],
@@ -553,8 +592,8 @@ function handleActualSpendImport(event) {
   const reader = new FileReader();
   reader.onload = async e => {
     try {
-      const workbook = XLSX.read(e.target.result, { type:'binary' });
-      const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval:'' }).map(actualSpendImportRow);
+      const workbook = XLSX.read(e.target.result, { type:'binary', cellDates:true });
+      const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval:'' }).map(manualEntriesImportRow);
       const result = importActualSpendRecords(rows);
       if (!result.valid) {
         alert(`Import ไม่สำเร็จ\n${result.errors.map(error => `Row ${error.row}: ${error.errors.join(', ')}`).join('\n')}`);
@@ -1787,15 +1826,95 @@ async function saveManualExpenseFromModal() {
 }
 
 async function voidManualExpense(id) {
-  if (!isPMO()) { alert('เฉพาะ PMO เท่านั้นที่ void รายการได้'); return; }
-  const reason = prompt('เหตุผลที่ void รายการนี้:');
-  if (!reason?.trim()) return;
-  if (!confirm('ยืนยันการ void รายการนี้? รายการจะถูกเก็บไว้ใน audit history แต่ไม่นับรวมยอด')) return;
+  if (!isPMO()) { alert('เฉพาะ PMO เท่านั้นที่ลบรายการได้'); return; }
+  if (!confirm('This will remove the record from reports but keep audit history. Continue?')) return;
   try {
-    await voidManualExpenseAsync(id, reason.trim());
+    await voidManualExpenseAsync(id, 'Deleted from Manual Entries');
     document.getElementById('actual-manual-panel')?.remove();
     await renderActualSpend();
-  } catch(e) { alert('Void ไม่สำเร็จ: ' + e.message); }
+  } catch(e) { alert('Delete failed. No changes were made: ' + e.message); }
+}
+
+function manualEntryViewModel(expense) {
+  const projected = manualExpenseToActualSpend(expense);
+  const record = loadActualSpendRecords().find(item => item.id === projected.id) || projected;
+  const pool = loadBudgetPools().find(item => item.id === record.finalBudgetPoolId);
+  return {
+    expense, record,
+    referenceNo: expense.referenceNo || '—',
+    schedule: expense.frequency === 'monthly' ? `${expense.startMonth || '—'} → ${expense.endMonth || '—'}` : (expense.expenseDate || '—'),
+    frequencyLabel: expense.frequency === 'monthly' ? 'Monthly' : 'One-time',
+    poolLabel: pool?.name || pool?.poolName || record.finalBudgetPoolId || '—',
+  };
+}
+
+function formatActualSpendDateTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const datePart = date.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+  const timePart = date.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', hour12:false });
+  return `${datePart} ${timePart}`;
+}
+
+function renderManualEntries() {
+  const container = document.getElementById('as-manual-content');
+  if (!container) return;
+  const value = id => document.getElementById(id)?.value || '';
+  const search = value('as-manual-search').trim().toLowerCase();
+  const selectedProject = value('as-manual-project') || 'all';
+  const selectedType = value('as-manual-type') || 'all';
+  const frequency = value('as-manual-frequency') || 'all';
+  const from = value('as-manual-from');
+  const to = value('as-manual-to');
+  const budgetStatus = value('as-manual-budget-status') || 'all';
+  const active = activeManualExpenses();
+  const updateSelect = (id, values, label, selected) => {
+    const select = document.getElementById(id);
+    if (!select) return;
+    select.innerHTML = `<option value="all">${label}</option>` + values.map(item => `<option value="${esc(item)}">${esc(item)}</option>`).join('');
+    select.value = values.includes(selected) ? selected : 'all';
+  };
+  updateSelect('as-manual-project', [...new Set(active.map(item => item.project).filter(Boolean))].sort(), 'All projects', selectedProject);
+  updateSelect('as-manual-type', [...new Set(active.map(item => manualExpenseToActualSpend(item).spendType))].sort(), 'All spend types', selectedType);
+  const rows = active.map(manualEntryViewModel).filter(({ expense, record }) => {
+    const haystack = [expense.referenceNo, expense.description, expense.vendorProgram, expense.program, expense.notes].filter(Boolean).join(' ').toLowerCase();
+    const start = String(expense.frequency === 'monthly' ? expense.startMonth : expense.expenseDate || '').slice(0, 7);
+    const end = String(expense.frequency === 'monthly' ? expense.endMonth : expense.expenseDate || '').slice(0, 7);
+    return (!search || haystack.includes(search))
+      && (selectedProject === 'all' || expense.project === selectedProject)
+      && (selectedType === 'all' || record.spendType === selectedType)
+      && (frequency === 'all' || expense.frequency === frequency)
+      && (!from || !end || end >= from) && (!to || !start || start <= to)
+      && (budgetStatus === 'all' || record.budgetStatus === budgetStatus);
+  }).sort((a, b) => String(b.expense.updatedAt || b.expense.createdAt || '').localeCompare(String(a.expense.updatedAt || a.expense.createdAt || '')));
+  if (!rows.length) { container.innerHTML = '<div class="card" style="padding:32px;text-align:center;color:var(--text-3)">No manual entries found</div>'; return; }
+  const cell = 'padding:8px 10px;border-bottom:1px solid var(--border);font-size:11px;vertical-align:top';
+  container.innerHTML = `<div class="card" style="padding:0;overflow:auto"><table class="hist-table"><thead><tr><th>Reference No</th><th>Project</th><th>Spend Type</th><th>Description</th><th style="text-align:right">Amount</th><th>Expense / Coverage Date</th><th>Budget Status</th><th>Updated At</th><th>Actions</th></tr></thead><tbody>${rows.map(({ expense, record, referenceNo, schedule }) => `<tr><td style="${cell};font-weight:600">${esc(referenceNo)}</td><td style="${cell}">${esc(expense.project)}</td><td style="${cell}">${esc(record.spendType)}</td><td style="${cell}">${esc(expense.description)}</td><td style="${cell};text-align:right;font-weight:600">${money(record.amount)}</td><td style="${cell}">${esc(schedule)}</td><td style="${cell}">${esc(record.budgetStatus)}</td><td style="${cell}">${esc(formatActualSpendDateTime(expense.updatedAt))}</td><td style="${cell};white-space:nowrap"><button class="btn-sm" onclick="showManualEntryDetail('${esc(expense.id)}')">View Detail</button>${isPMO() ? ` <button class="btn-sm" onclick="openManualExpenseModal('${esc(expense.id)}')">Edit</button> <button class="btn-sm" style="color:var(--red)" onclick="voidManualExpense('${esc(expense.id)}')">Delete</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+function showActualSpendDetailModal(title, fields, helper = '') {
+  document.getElementById('actual-spend-record-detail')?.remove();
+  const panel = document.createElement('div');
+  panel.id = 'actual-spend-record-detail';
+  panel.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:310;display:flex;align-items:center;justify-content:center';
+  panel.innerHTML = `<div class="card" style="width:720px;max-width:95vw;max-height:86vh;overflow:auto;padding:0"><div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between"><strong>${esc(title)}</strong><button class="btn-sm" onclick="document.getElementById('actual-spend-record-detail').remove()">✕</button></div>${helper ? `<div style="margin:12px 16px 0;padding:9px 11px;background:var(--blue-50);color:var(--blue);border-radius:var(--r-sm);font-size:11px">${esc(helper)}</div>` : ''}<div style="padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px">${fields.map(([label, fieldValue]) => `<div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">${esc(label)}</div><div style="overflow-wrap:anywhere">${esc(fieldValue == null || fieldValue === '' ? '—' : fieldValue)}</div></div>`).join('')}</div></div>`;
+  document.body.appendChild(panel);
+  panel.addEventListener('click', event => { if (event.target === panel) panel.remove(); });
+}
+
+function showManualEntryDetail(id) {
+  const expense = activeManualExpenses().find(item => item.id === id);
+  if (!expense) return;
+  const { record, referenceNo, schedule, frequencyLabel, poolLabel } = manualEntryViewModel(expense);
+  showActualSpendDetailModal('Manual Entry Detail', [
+    ['Reference No', referenceNo], ['Project', expense.project], ['Spend Type', record.spendType],
+    ['Description', expense.description], ['Amount', money(record.amount)], ['Frequency', frequencyLabel],
+    ['Expense Date / Coverage', schedule], ['Vendor / Program', expense.vendorProgram || expense.program || expense.notes || '—'],
+    ['Budget Pool', poolLabel], ['Budget Status', record.budgetStatus], ['Created By', expense.createdBy || '—'],
+    ['Created Date', formatActualSpendDateTime(expense.createdAt)], ['Updated At', formatActualSpendDateTime(expense.updatedAt)],
+    ['Notes', expense.notes || '—'], ['Creation Method', expense.entryKind || '—'],
+  ]);
 }
 
 async function renderActualSpend() {
@@ -1811,6 +1930,7 @@ async function renderActualSpend() {
   if (addButton) addButton.style.display = isPMO() ? '' : 'none';
   const importButton = document.getElementById('as-import-button');
   if (importButton) importButton.style.display = isPMO() ? '' : 'none';
+  if (_actualSpendCurrentTab === 'manual') renderManualEntries();
 
   const yearSel = document.getElementById('as-year');
   if (yearSel) {
@@ -1890,12 +2010,8 @@ function showActualSpendGroup(projectEncoded, typeEncoded, sourceEncoded) {
   const spendType = decodeURIComponent(typeEncoded);
   const source = decodeURIComponent(sourceEncoded);
   const rows = filteredActualSpendRecords().filter(record => record.project === project && record.spendType === spendType && record.source === source);
-  const manualExpenseIds = new Set(loadManualExpenses().map(e => e.id));
   const rowCard = record => {
-    const manualId = record.source === ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE ? String(record.id).replace('actual-spend-manual-', '') : null;
-    const isEditableManual = manualId && isPMO() && manualExpenseIds.has(manualId);
-    const voidCell = isEditableManual ? `<div onclick="event.stopPropagation()"><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Actions</div><button class="btn-sm" style="color:var(--red)" onclick="document.getElementById('actual-spend-group-panel').remove();voidManualExpense('${esc(manualId)}')">Void</button></div>` : '';
-    return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;align-items:start" onclick="document.getElementById('actual-spend-group-panel').remove();showActualSpendRecord('${esc(record.id)}')"><div style="min-width:0"><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Reference</div><div style="font-weight:600;color:var(--blue);overflow-wrap:anywhere">${esc(record.referenceNo)}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Source</div><div>${esc(record.source)}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Coverage</div><div>${esc(record.startDate||'—')} → ${esc(record.endDate||'—')}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Budget Status</div><div>${esc(record.budgetStatus)}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Amount</div><div style="font-weight:700">${money(record.amount)}</div></div>${voidCell}</div>`;
+    return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;align-items:start" onclick="document.getElementById('actual-spend-group-panel').remove();showActualSpendRecord('${esc(record.id)}')"><div style="min-width:0"><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Reference No</div><div style="font-weight:600;color:var(--blue);overflow-wrap:anywhere">${esc(record.referenceNo || '—')}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Source</div><div>${esc(record.source)}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Coverage</div><div>${esc(record.startDate||'—')} → ${esc(record.endDate||'—')}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Budget Status</div><div>${esc(record.budgetStatus)}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Amount</div><div style="font-weight:700">${money(record.amount)}</div></div></div>`;
   };
   const panel = document.createElement('div');
   panel.id = 'actual-spend-group-panel';
@@ -1909,11 +2025,14 @@ function showActualSpendRecord(id) {
   const record = loadActualSpendRecords().find(item => item.id === id);
   if (!record) return;
   if (record.source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO && record.memoId) { openMemoReadOnly(record.memoId); return; }
-  if (record.source === ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE) {
-    const expenseId = String(record.id).replace('actual-spend-manual-', '');
-    if (isPMO() && loadManualExpenses().some(item => item.id === expenseId)) { openManualExpenseModal(expenseId); return; }
-  }
-  alert(`${record.referenceNo}\n${record.source} · ${record.spendType}\n${record.project}\n${record.description || record.vendorProgram || ''}\n${money(record.amount)}\nBudget: ${record.budgetStatus}`);
+  const helper = record.source === ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE ? 'To modify this record, go to Actual Spend → Manual Entries.' : '';
+  showActualSpendDetailModal('Actual Spend Detail', [
+    ['Reference No', record.referenceNo || '—'], ['Source', record.source], ['Project', record.project],
+    ['Spend Type', record.spendType], ['Description', record.description || '—'], ['Amount', money(record.amount)],
+    ['Coverage', `${record.startDate || '—'} → ${record.endDate || '—'}`], ['Vendor / Program', record.vendorProgram || '—'],
+    ['Budget Status', record.budgetStatus || '—'], ['Created By', record.createdBy || '—'],
+    ['Created Date', formatActualSpendDateTime(record.createdAt)], ['Updated At', formatActualSpendDateTime(record.updatedAt)], ['Notes', record.notes || '—'],
+  ], helper);
 }
 
 function showActualMemos(proj, type, memoNosStr) {
@@ -1994,14 +2113,11 @@ function showManualExpenses(proj, type) {
             const schedule = e.frequency === 'monthly' ? `${e.startMonth} → ${e.endMonth}` : (e.expenseDate || '—');
             const amount = manualExpenseAmountInRange(e);
             return `<tr>
-              <td style="${tdS};color:var(--amber);font-weight:500">${esc(e.referenceNo || 'Manual')}</td>
+              <td style="${tdS};color:var(--amber);font-weight:500">${esc(e.referenceNo || '—')}</td>
               <td style="${tdS}">${esc(e.description)}${e.notes ? `<div style="font-size:10px;color:var(--text-3)">${esc(e.notes)}</div>` : ''}</td>
               <td style="${tdS};color:var(--text-3)">${esc(schedule)}</td>
               <td style="${tdS};text-align:right;font-weight:500">${money(Math.round(amount))}</td>
-              <td style="${tdS};text-align:center;white-space:nowrap">
-                ${isPMO() ? `<button class="btn-sm" onclick="document.getElementById('actual-manual-panel').remove();openManualExpenseModal('${esc(e.id)}')">✎</button>
-                <button class="btn-sm" style="color:var(--red);margin-left:4px" onclick="voidManualExpense('${esc(e.id)}')">Void</button>` : '<span style="font-size:10px;color:var(--text-3)">View only</span>'}
-              </td>
+              <td style="${tdS};text-align:center;white-space:nowrap"><span style="font-size:10px;color:var(--text-3)">View only</span></td>
             </tr>`;
           }).join('')}
           <tr style="background:var(--bg)"><td colspan="3" style="${tdS};font-weight:600">Total</td><td style="${tdS};text-align:right;font-weight:700;color:var(--amber)">${money(Math.round(total))}</td><td style="${tdS}"></td></tr>

@@ -1554,6 +1554,16 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <input id="as-import-file" type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleActualSpendImport(event)">
               <button class="btn-export" onclick="downloadActualSpendTemplate()">⬇ Download Template</button>
             </div>
+            <div class="filter-row">
+              <input id="as-manual-search" class="ri" type="search" placeholder="Search reference or description..." oninput="renderManualEntries()" style="max-width:300px">
+              <select id="as-manual-project" onchange="renderManualEntries()"><option value="all">All projects</option></select>
+              <select id="as-manual-type" onchange="renderManualEntries()"><option value="all">All spend types</option></select>
+              <select id="as-manual-frequency" onchange="renderManualEntries()"><option value="all">All frequencies</option><option value="one_time">One-time</option><option value="monthly">Monthly</option></select>
+              <input id="as-manual-from" type="month" onchange="renderManualEntries()" aria-label="Coverage from">
+              <input id="as-manual-to" type="month" onchange="renderManualEntries()" aria-label="Coverage to">
+              <select id="as-manual-budget-status" onchange="renderManualEntries()"><option value="all">All budget statuses</option><option value="Mapped">Mapped</option><option value="Manual Override">Manual Override</option><option value="Needs PMO Review">Needs PMO Review</option><option value="Unbudgeted">Unbudgeted</option></select>
+            </div>
+            <div id="as-manual-content"></div>
           </div>
 
         </div>

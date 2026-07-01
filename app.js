@@ -151,7 +151,6 @@ function validateActualSpendRecord(input) {
   const record = createActualSpendRecord(input);
   const errors = [];
   if (!ACTUAL_SPEND_SOURCE_VALUES.includes(record.source)) errors.push('Invalid Source');
-  if (!record.referenceNo) errors.push('Reference No is required');
   if (!record.project) errors.push('Project is required');
   if (!SPEND_TYPE_VALUES.includes(record.spendType)) errors.push('Invalid Spend Type');
   if (!(record.amount > 0)) errors.push('Amount must be greater than zero');

@@ -245,6 +245,49 @@ test('Actual Spend template rows parse successfully and Others remains a valid s
   assert.deepEqual(Array.from(result.records, record => record.spendType), ['Hardware', 'Infra', 'Others']);
 });
 
+test('Actual Spend import normalizes Excel serial dates and month cells', () => {
+  const context = createActualSpendContext();
+  const serial = (year, month, day) => (Date.UTC(year, month - 1, day) - Date.UTC(1899, 11, 30)) / 86400000;
+  const rows = [
+    { Source:'Manual / Historical', 'Reference No':'SERIAL-DATE', 'Spend Type':'Hardware', Project:'AOA-MP', Amount:100, 'Start Date':serial(2025,11,15), 'End Date':serial(2025,11,15) },
+    { Source:'Manual / Historical', 'Reference No':'SERIAL-MONTH', 'Spend Type':'Software', Project:'AOA-MP', Amount:300, 'Start Date':serial(2026,6,1), 'End Date':serial(2026,8,1) },
+  ].map(context.actualSpendImportRow);
+  assert.deepEqual(Array.from(rows, row => [row.startDate, row.endDate]), [
+    ['2025-11-15','2025-11-15'], ['2026-06','2026-08'],
+  ]);
+  assert.equal(context.validateActualSpendImport(rows).valid, true);
+});
+
+test('Actual Spend import accepts Excel Date objects and still rejects invalid date text', () => {
+  const context = createActualSpendContext();
+  const dateRow = context.actualSpendImportRow({
+    Source:'Manual / Historical', 'Reference No':'DATE-OBJECT', 'Spend Type':'Hardware', Project:'AOA-MP', Amount:100,
+    'Start Date':new Date(2025,10,15), 'End Date':new Date(2025,10,15),
+  });
+  assert.equal(dateRow.startDate, '2025-11-15');
+  assert.equal(dateRow.endDate, '2025-11-15');
+  assert.equal(context.validateActualSpendImport([dateRow]).valid, true);
+
+  const invalid = context.actualSpendImportRow({
+    Source:'Manual / Historical', 'Reference No':'BAD-DATE', 'Spend Type':'Hardware', Project:'AOA-MP', Amount:100,
+    'Start Date':'not-a-date', 'End Date':'2025-11-15',
+  });
+  const result = context.validateActualSpendImport([invalid]);
+  assert.equal(result.valid, false);
+  assert.deepEqual(Array.from(result.errors[0].errors), ['Invalid Start Date', 'Invalid coverage period']);
+});
+
+test('Actual Spend import preserves matching date precision validation', () => {
+  const context = createActualSpendContext();
+  const mixed = context.actualSpendImportRow({
+    Source:'Manual / Historical', 'Reference No':'MIXED-PRECISION', 'Spend Type':'Hardware', Project:'AOA-MP', Amount:100,
+    'Start Date':'2026-06', 'End Date':'2026-08-01',
+  });
+  const result = context.validateActualSpendImport([mixed]);
+  assert.equal(result.valid, false);
+  assert.deepEqual(Array.from(result.errors[0].errors), ['Invalid coverage period']);
+});
+
 test('Manual Historical form distinguishes monthly amount from one-time total', () => {
   assert.match(budgetCode, /monthly \? 'Monthly amount' : 'One-time total amount'/);
   assert.match(budgetCode, /Monthly total = monthly amount × inclusive coverage months\./);
@@ -361,24 +404,212 @@ test('Soft-deleting an imported manual expense excludes it from canonical Actual
   assert.equal(bva.totals.actual, context.calculateActualSpend(after));
 });
 
-test('Excel import of Approved Memo and Infra Cost rows stays direct-canonical and read-only, unaffected by manual expense routing', async () => {
+test('Manual Entries import routes every Source through editable manual persistence', async () => {
   const context = createActualSpendContext();
   const rows = [
     { Source:'Approved Memo', 'Reference No':'IMP-MEMO', 'Spend Type':'Software', Project:'AOA-MP', Amount:1000 },
     { Source:'Infra Cost', 'Reference No':'IMP-INFRA', 'Spend Type':'Infra', Project:'AOA-MP', Amount:2000, 'Start Date':'2026-01', 'End Date':'2026-02' },
-  ].map(context.actualSpendImportRow);
+    { Source:'Manual / Historical', 'Reference No':'IMP-MANUAL', 'Spend Type':'Hardware', Project:'AOA-MP', Amount:500, 'Start Date':'2026-03-01', 'End Date':'2026-03-01' },
+  ].map(context.manualEntriesImportRow);
   const importResult = context.importActualSpendRecords(rows);
   await context.promoteImportedManualExpenses(importResult.records);
 
-  assert.equal(context.loadManualExpenses().length, 0);
-  const canonical = context.loadActualSpendRecords();
-  assert.equal(canonical.length, 2);
-  assert.ok(canonical.every(record => !String(record.id).startsWith('actual-spend-manual-')));
+  const manual = context.loadManualExpenses();
+  assert.equal(manual.length, 3);
+  assert.deepEqual(Array.from(manual, record => record.referenceNo).sort(), ['IMP-INFRA','IMP-MANUAL','IMP-MEMO']);
+  const canonical = context.reconcileActualSpendSources();
+  assert.equal(canonical.length, 3);
+  assert.ok(canonical.every(record => record.source === 'Manual / Historical Expense'));
+  assert.equal(canonical.find(record => record.referenceNo === 'IMP-INFRA').spendType, 'Infra');
+  assert.equal(context.calculateActualSpend(canonical), 3500);
 });
 
-test('Actual Spend group drill-down offers Void for editable imported manual expense records', () => {
-  assert.match(budgetCode, /voidManualExpense\('\$\{esc\(manualId\)\}'\)/);
+test('Manual Entries imported Infra remains editable and soft-delete removes it from canonical totals', async () => {
+  const context = createActualSpendContext();
+  const row = context.manualEntriesImportRow({
+    Source:'Infra Cost', 'Reference No':'EDITABLE-INFRA', 'Spend Type':'Infra', Project:'TTB', Amount:2400,
+    'Start Date':'2026-06', 'End Date':'2026-08', 'Vendor / Program':'AWS', Description:'Imported Infra',
+  });
+  const importResult = context.importActualSpendRecords([row]);
+  await context.promoteImportedManualExpenses(importResult.records);
+  const imported = context.loadManualExpenses().find(record => record.referenceNo === 'EDITABLE-INFRA');
+  assert.ok(imported);
+  assert.equal(imported.expenseType, 'infra');
+  assert.equal(context.calculateActualSpend(context.reconcileActualSpendSources()), 2400);
+
+  await context.saveManualExpenseAsync({ ...imported, amount:900, unitCost:900 });
+  assert.equal(context.calculateActualSpend(context.reconcileActualSpendSources()), 2700);
+
+  await context.voidManualExpenseAsync(imported.id, 'Deleted from Manual Entries');
+  assert.equal(context.activeManualExpenses().length, 0);
+  assert.equal(context.calculateActualSpend(context.reconcileActualSpendSources()), 0);
+});
+
+test('legacy direct-canonical Infra Cost records remain supported', () => {
+  const context = createActualSpendContext();
+  const result = context.importActualSpendRecords([context.actualSpendImportRow({
+    Source:'Infra Cost', 'Reference No':'LEGACY-INFRA', 'Spend Type':'Infra', Project:'TTB', Amount:1200,
+    'Start Date':'2026-01', 'End Date':'2026-02',
+  })]);
+  assert.equal(result.valid, true);
+  const canonical = context.reconcileActualSpendSources();
+  const legacy = canonical.find(record => record.referenceNo === 'LEGACY-INFRA');
+  assert.ok(legacy);
+  assert.equal(legacy.source, 'Infra Cost');
+  assert.equal(context.loadManualExpenses().length, 0);
+});
+
+test('Actual Spend Report drill-down is read-only and directs manual edits to Manual Entries', () => {
+  const drilldown = budgetCode.match(/function showActualSpendGroup[\s\S]*?function showActualSpendRecord/)[0];
+  const detail = budgetCode.match(/function showActualSpendRecord[\s\S]*?function showActualMemos/)[0];
+  assert.doesNotMatch(drilldown, /voidManualExpense|openManualExpenseModal|>Void<|>Edit<|>Delete</);
+  assert.doesNotMatch(detail, /voidManualExpense|openManualExpenseModal/);
+  assert.match(detail, /To modify this record, go to Actual Spend → Manual Entries\./);
   assert.match(budgetCode, /actual-spend-group-panel[\s\S]*overflow-x:hidden/);
+});
+
+test('Manual Entries is a filtered management table backed only by active manual expenses', () => {
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const renderer = budgetCode.match(/function renderManualEntries[\s\S]*?function showActualSpendDetailModal/)[0];
+  assert.match(html, /id="as-manual-search"/);
+  assert.match(html, /id="as-manual-project"/);
+  assert.match(html, /id="as-manual-type"/);
+  assert.match(html, /id="as-manual-frequency"/);
+  assert.match(html, /id="as-manual-budget-status"/);
+  assert.match(renderer, /activeManualExpenses\(\)/);
+  assert.doesNotMatch(renderer, /APPROVED_MEMO|INFRA_COST/);
+  assert.match(renderer, /View Detail[\s\S]*Edit[\s\S]*Delete/);
+});
+
+test('Manual Entries table stays compact while detail retains audit and schedule fields', () => {
+  const renderer = budgetCode.match(/function renderManualEntries[\s\S]*?function showActualSpendDetailModal/)[0];
+  const table = renderer.match(/container\.innerHTML = `<div class="card"[\s\S]*?;\n}/)[0];
+  const detail = budgetCode.match(/function showManualEntryDetail[\s\S]*?async function renderActualSpend/)[0];
+  assert.match(table, /Reference No[\s\S]*Project[\s\S]*Spend Type[\s\S]*Description[\s\S]*Amount[\s\S]*Expense \/ Coverage Date[\s\S]*Budget Status[\s\S]*Updated At[\s\S]*Actions/);
+  assert.doesNotMatch(table, /<th>Frequency<\/th>|<th>Budget Pool|<th>Created By/);
+  assert.match(detail, /Frequency[\s\S]*Expense Date \/ Coverage[\s\S]*Vendor \/ Program[\s\S]*Budget Pool[\s\S]*Created By[\s\S]*Created Date[\s\S]*Notes[\s\S]*Creation Method/);
+});
+
+test('Manual Entries formats audit timestamps and keeps the shorter search placeholder', () => {
+  const context = createBudgetContext();
+  const formatted = context.formatActualSpendDateTime('2026-07-01T09:40:31.098+00:00');
+  assert.match(formatted, /^\d{2} [A-Z][a-z]{2} 2026 \d{2}:\d{2}$/);
+  assert.doesNotMatch(formatted, /T|\.098|\+00:00/);
+  assert.equal(context.formatActualSpendDateTime(''), '—');
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  assert.match(html, /id="as-manual-search"[^>]*placeholder="Search reference or description\.\.\."/);
+  assert.match(budgetCode, /formatActualSpendDateTime\(expense\.updatedAt\)/);
+  assert.match(budgetCode, /formatActualSpendDateTime\(expense\.createdAt\)/);
+});
+
+test('Manual Entries excludes soft-deleted rows and displays blank Reference No as an em dash', async () => {
+  const context = createActualSpendContext();
+  await context.saveManualExpenseAsync({
+    id:'manual-visible', referenceNo:'', project:'AOA-MP', expenseType:'hw', description:'Visible row',
+    frequency:'one_time', expenseDate:'2026-06-01', quantity:1, unitCost:100, amount:100,
+  });
+  await context.saveManualExpenseAsync({
+    id:'manual-deleted', referenceNo:'DELETE-ME', project:'AOA-MP', expenseType:'hw', description:'Deleted row',
+    frequency:'one_time', expenseDate:'2026-06-01', quantity:1, unitCost:200, amount:200,
+  });
+  await context.voidManualExpenseAsync('manual-deleted', 'test delete');
+  const active = context.activeManualExpenses();
+  assert.deepEqual(Array.from(active, row => row.id), ['manual-visible']);
+  assert.equal(context.manualEntryViewModel(active[0]).referenceNo, '—');
+  assert.equal(context.reconcileActualSpendSources().some(row => row.id === 'actual-spend-manual-manual-deleted'), false);
+});
+
+test('Manual Entries Delete wrapper soft-deletes with a default reason and refreshes canonical totals', async () => {
+  const context = createActualSpendContext();
+  context.isPMO = () => true;
+  context.confirm = () => true;
+  const originalRender = context.renderActualSpend;
+  let renderCount = 0;
+  context.renderActualSpend = async () => { renderCount += 1; await originalRender(); };
+  await context.saveManualExpenseAsync({
+    id:'manual-ui-delete', referenceNo:'UI-DELETE', project:'AOA-MP', expenseType:'sl', description:'Delete through UI',
+    frequency:'monthly', startMonth:'2026-01', endMonth:'2026-03', quantity:1, unitCost:100, amount:100,
+  });
+  assert.equal(context.calculateActualSpend(context.reconcileActualSpendSources()), 300);
+  await context.voidManualExpense('manual-ui-delete');
+  const deleted = context.loadManualExpenses().find(row => row.id === 'manual-ui-delete');
+  assert.equal(deleted.voidReason, 'Deleted from Manual Entries');
+  assert.equal(context.activeManualExpenses().length, 0);
+  assert.equal(context.calculateActualSpend(context.loadActualSpendRecords()), 0);
+  assert.equal(renderCount, 1);
+});
+
+test('Manual Entries Delete button uses the persisted manual ID for added and imported records', async () => {
+  const context = createActualSpendContext();
+  context.isPMO = () => true;
+  const elements = new Map();
+  elements.set('as-manual-content', { innerHTML:'', style:{} });
+  context.document.getElementById = id => elements.get(id) || null;
+  await context.saveManualExpenseAsync({
+    id:'manual-button-id', referenceNo:'BUTTON-ID', project:'AOA-MP', expenseType:'hw', description:'Manual button record',
+    frequency:'one_time', expenseDate:'2026-06-01', quantity:1, unitCost:100, amount:100,
+  });
+  const importedRow = context.actualSpendImportRow({
+    Source:'Manual / Historical', 'Reference No':'IMPORTED-BUTTON', 'Spend Type':'Hardware', Project:'AOA-MP', Amount:200,
+    'Start Date':'2026-06-01', 'End Date':'2026-06-01', Description:'Imported button record',
+  });
+  const importResult = context.importActualSpendRecords([importedRow]);
+  await context.promoteImportedManualExpenses(importResult.records);
+  const imported = context.loadManualExpenses().find(row => row.referenceNo === 'IMPORTED-BUTTON');
+  context.renderManualEntries();
+  const markup = elements.get('as-manual-content').innerHTML;
+  assert.match(markup, /voidManualExpense\('manual-button-id'\)/);
+  assert.match(markup, new RegExp(`voidManualExpense\\('${imported.id}'\\)`));
+});
+
+test('failed Manual Entries Delete keeps the record active and reports a clear error', async () => {
+  const context = createActualSpendContext();
+  const messages = [];
+  context.isPMO = () => true;
+  context.confirm = () => true;
+  context.alert = message => messages.push(message);
+  await context.saveManualExpenseAsync({
+    id:'manual-delete-failure', referenceNo:'KEEP-ME', project:'AOA-MP', expenseType:'hw', description:'Keep on failure',
+    frequency:'one_time', expenseDate:'2026-06-01', quantity:1, unitCost:100, amount:100,
+  });
+  context.checkSupa = async () => true;
+  context.supaFetch = async () => { throw new Error('remote update failed'); };
+  await context.voidManualExpense('manual-delete-failure');
+  assert.equal(context.activeManualExpenses().some(row => row.id === 'manual-delete-failure'), true);
+  assert.match(messages.at(-1), /Delete failed\. No changes were made: remote update failed/);
+});
+
+test('cancelling Manual Entries Delete leaves the record unchanged without an error', async () => {
+  const context = createActualSpendContext();
+  const messages = [];
+  context.isPMO = () => true;
+  context.confirm = () => false;
+  context.alert = message => messages.push(message);
+  await context.saveManualExpenseAsync({
+    id:'manual-delete-cancel', referenceNo:'CANCEL', project:'AOA-MP', expenseType:'hw', description:'Cancel delete',
+    frequency:'one_time', expenseDate:'2026-06-01', quantity:1, unitCost:100, amount:100,
+  });
+  await context.voidManualExpense('manual-delete-cancel');
+  assert.equal(context.activeManualExpenses().some(row => row.id === 'manual-delete-cancel'), true);
+  assert.deepEqual(messages, []);
+});
+
+test('Reference No is optional in canonical validation and internal IDs are not used as display references', () => {
+  const context = createActualSpendContext();
+  const result = context.validateActualSpendRecord({
+    id:'actual-spend-manual-internal-only', source:'Manual / Historical Expense', referenceNo:'',
+    project:'AOA-MP', spendType:'Hardware', amount:100, startDate:'2026-06-01', endDate:'2026-06-01',
+  });
+  assert.equal(result.valid, true);
+  assert.equal(result.record.referenceNo, '');
+  const projected = context.manualExpenseToActualSpend({
+    id:'manual-internal-only', referenceNo:'', project:'AOA-MP', expenseType:'hw', description:'No reference',
+    frequency:'one_time', expenseDate:'2026-06-01', amount:100,
+  });
+  assert.equal(projected.referenceNo, '');
+  assert.notEqual(projected.referenceNo, projected.id);
+  assert.match(budgetCode, /record\.referenceNo \|\| '—'/);
+  assert.doesNotMatch(budgetCode, /referenceNo:\s*(?:record\.)?id|referenceNo:\s*expense\.referenceNo\s*\|\|\s*expense\.id/);
 });
 
 test('Actual Spend export aligns canonical fields and totals for all three sources', async () => {
