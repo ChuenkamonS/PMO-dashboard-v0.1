@@ -320,6 +320,82 @@ test('Phase 6 Unbudgeted includes only Actual Spend with no matched budget', () 
   assert.equal(dataset.totals.unbudgetedActual, 700);
 });
 
+// ── Phase 7A-2: fail-first regression coverage for the BvA year silent-drop bug ──
+// Bug: Budget Pool `year` is an independent label (see docs/BvA_REQUIREMENT.md "Phase 7A-1" §2)
+// and is never derived from / reconciled against the pool's own startMonth/endMonth. When a
+// pool's year label disagrees with its date range, `calculateBudgetVsActualDataset()` filters
+// `selectedPools` by `pool.year` and `scopedRecords` by the record's own date-derived year
+// independently — so a validly-mapped Actual Spend record can fail both filters at once and
+// vanish from `totals.actual` without appearing in either a matched pool row or
+// `unbudgetedRecords`. These tests must fail against the current implementation and are
+// expected to start passing once Phase 7A-3 reconciles pool year with its date range (or
+// otherwise closes this gap). Do not fix the underlying logic in this phase.
+
+test('Phase 7A-2 (fail-first): BvA must not silently drop a mapped Actual Spend record when filtered by the pool\'s own year label, even though the pool\'s date range disagrees', () => {
+  const ctx = context();
+  const pool = ctx.createBudgetPoolRecord({
+    id:'pool-mismatch-year', project:'AOA-MP', name:'Software Pool', budget:100000,
+    year:'2569', startMonth:'2025-01', endMonth:'2025-12', spendTypes:['Software'],
+  });
+  const record = ctx.createActualSpendRecord({
+    id:'as-mismatch-1', source:'Approved Memo', referenceNo:'MISMATCH-1', project:'AOA-MP',
+    spendType:'Software', amount:12000, startDate:'2025-06', endDate:'2025-06',
+  });
+  const mapped = ctx.mapActualSpendRecords([record], [pool]);
+  // Sanity: the record genuinely auto-maps to this pool before BvA filtering is applied.
+  assert.equal(mapped[0].finalBudgetPoolId, 'pool-mismatch-year');
+  assert.equal(mapped[0].budgetStatus, 'Mapped');
+
+  const dataset = ctx.calculateBudgetVsActualDataset([pool], mapped, { year:'2569', project:'AOA-MP' });
+  const visibleIds = new Set([
+    ...dataset.rows.flatMap(row => Array.from(row.records, r => r.id)),
+    ...Array.from(dataset.unbudgetedRecords, r => r.id),
+  ]);
+  assert.ok(visibleIds.has(mapped[0].id), 'the mapped record must appear under its pool or in an unbudgeted/review bucket, not vanish entirely');
+  assert.equal(dataset.totals.actual, 12000, 'total actual must still account for the mapped record\'s amount');
+});
+
+test('Phase 7A-2 (fail-first): BvA must not silently drop a mapped Actual Spend record when filtered by the record\'s date-derived year, even though the pool\'s year label disagrees', () => {
+  const ctx = context();
+  const pool = ctx.createBudgetPoolRecord({
+    id:'pool-mismatch-year', project:'AOA-MP', name:'Software Pool', budget:100000,
+    year:'2569', startMonth:'2025-01', endMonth:'2025-12', spendTypes:['Software'],
+  });
+  const record = ctx.createActualSpendRecord({
+    id:'as-mismatch-1', source:'Approved Memo', referenceNo:'MISMATCH-1', project:'AOA-MP',
+    spendType:'Software', amount:12000, startDate:'2025-06', endDate:'2025-06',
+  });
+  const mapped = ctx.mapActualSpendRecords([record], [pool]);
+
+  // 2025-06 is the Gregorian year that Buddhist Era 2568 converts to — this is the year an
+  // operator filtering "by the record's own date" would reasonably select.
+  const dataset = ctx.calculateBudgetVsActualDataset([pool], mapped, { year:'2568', project:'AOA-MP' });
+  const visibleIds = new Set([
+    ...dataset.rows.flatMap(row => Array.from(row.records, r => r.id)),
+    ...Array.from(dataset.unbudgetedRecords, r => r.id),
+  ]);
+  assert.ok(visibleIds.has(mapped[0].id), 'the mapped record must appear under its pool or in an unbudgeted/review bucket, not vanish entirely');
+  assert.equal(dataset.totals.actual, 12000, 'total actual must still account for the mapped record\'s amount');
+});
+
+test('Phase 7A-2 control: BvA includes actual spend normally when pool.year agrees with its startMonth/endMonth', () => {
+  const ctx = context();
+  const pool = ctx.createBudgetPoolRecord({
+    id:'pool-control-year', project:'AOA-MP', name:'Software Pool Control', budget:100000,
+    year:'2568', startMonth:'2025-01', endMonth:'2025-12', spendTypes:['Software'],
+  });
+  const record = ctx.createActualSpendRecord({
+    id:'as-control-1', source:'Approved Memo', referenceNo:'CONTROL-1', project:'AOA-MP',
+    spendType:'Software', amount:12000, startDate:'2025-06', endDate:'2025-06',
+  });
+  const mapped = ctx.mapActualSpendRecords([record], [pool]);
+  assert.equal(mapped[0].finalBudgetPoolId, 'pool-control-year');
+
+  const dataset = ctx.calculateBudgetVsActualDataset([pool], mapped, { year:'2568', project:'AOA-MP' });
+  assert.deepEqual(Array.from(dataset.rows[0].records, r => r.id), ['as-control-1']);
+  assert.equal(dataset.totals.actual, 12000);
+});
+
 test('shared calculation engine allocates canonical Actual Spend across coverage months', () => {
   const ctx = context();
   const records = [ctx.createActualSpendRecord({

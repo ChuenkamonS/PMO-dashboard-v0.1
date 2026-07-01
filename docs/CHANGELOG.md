@@ -22,6 +22,36 @@
 
 ## Current Baseline
 
+### Phase 7A-2 - BvA Year Silent-Drop Bug: Fail-First Regression Tests
+#### Added
+- Three behavioral tests in `tests/financial-models.test.js` proving the Budget Pool year
+  silent-drop bug documented in `docs/BvA_REQUIREMENT.md` "Phase 7A-1" §2: a Budget Pool whose
+  `year` label disagrees with its own `startMonth`/`endMonth` can cause a validly-mapped Actual
+  Spend record to disappear from `calculateBudgetVsActualDataset()`'s totals entirely — neither
+  matched under its pool nor counted as Unbudgeted — regardless of whether Budget vs Actual is
+  filtered by the pool's year label or by the record's own date-derived year.
+- A control test proving the same mapping/BvA path works correctly when a pool's `year` agrees
+  with its date range, isolating the bug to the year-mismatch condition specifically.
+
+#### Tests
+- `Phase 7A-2 (fail-first): BvA must not silently drop a mapped Actual Spend record when filtered
+  by the pool's own year label, even though the pool's date range disagrees` — fails on current
+  code.
+- `Phase 7A-2 (fail-first): BvA must not silently drop a mapped Actual Spend record when filtered
+  by the record's date-derived year, even though the pool's year label disagrees` — fails on
+  current code.
+- `Phase 7A-2 control: BvA includes actual spend normally when pool.year agrees with its
+  startMonth/endMonth` — passes on current code.
+
+#### Unchanged
+- No application logic, UI, or Supabase migrations were modified. No existing test was changed or
+  weakened. `calculateBudgetVsActualDataset()`, `mapActualSpendRecords()`, and related mapping
+  functions remain exactly as before.
+
+#### Remaining Work
+- Phase 7A-3 must reconcile Budget Pool `year` with its own date range (or otherwise close this
+  gap) so the two new fail-first tests above pass without weakening the control test.
+
 ### Phase 7A-1 - Budget Pool Data Contract Documentation
 #### Added
 - Locked Budget Pool business contract in `BvA_REQUIREMENT.md` covering identity
