@@ -202,11 +202,24 @@ test('Actual Spend detail uses a responsive layout without a horizontal scroll t
 test('Actual Spend provides an Excel import template matching accepted columns and duplicate rules', () => {
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   assert.match(html, /downloadActualSpendTemplate\(\)/);
-  assert.match(budgetCode, /Source','Reference No','Spend Type','Project','Amount','Start Date','End Date','Vendor \/ Program','Description/);
+  assert.match(budgetCode, /const headers = \['Source','Reference No','Spend Type','Project','Amount','Start Date','End Date','Vendor \/ Program','Description'\]/);
   assert.match(budgetCode, /actual_spend_import_template\.xlsx/);
   assert.match(budgetCode, /Total amount for the coverage period/);
   assert.match(budgetCode, /Do not enter a monthly amount/);
+  assert.match(budgetCode, /Use YYYY-MM or YYYY-MM-DD\. Start Date and End Date must use the same format\./);
   assert.match(budgetCode, /Source \+ Reference No \+ Project \+ Spend Type \+ Amount \+ Start Date \+ End Date/);
+});
+
+test('Actual Spend template rows parse successfully and Others remains a valid shared Spend Type', () => {
+  const context = createActualSpendContext();
+  const rows = [
+    { Source:'Manual / Historical', 'Reference No':'HIST-2025-001', 'Spend Type':'Hardware', Project:'AOA-MP', Amount:75000, 'Start Date':'2025-11-15', 'End Date':'2025-11-15', 'Vendor / Program':'Vendor A', Description:'Historical laptop purchase' },
+    { Source:'Infra Cost', 'Reference No':'INFRA-2026-001', 'Spend Type':'Infra', Project:'TTB', Amount:24000, 'Start Date':'2026-06', 'End Date':'2026-08', 'Vendor / Program':'AWS', Description:'Total infrastructure cost for the coverage period' },
+    { Source:'Manual / Historical', 'Reference No':'OTHER-2026-001', 'Spend Type':'Others', Project:'TTB', Amount:1000, 'Start Date':'2026-06', 'End Date':'2026-06', Description:'Other valid spend' },
+  ].map(context.actualSpendImportRow);
+  const result = context.validateActualSpendImport(rows);
+  assert.equal(result.valid, true);
+  assert.deepEqual(Array.from(result.records, record => record.spendType), ['Hardware', 'Infra', 'Others']);
 });
 
 test('Manual Historical form distinguishes monthly amount from one-time total', () => {
@@ -245,6 +258,104 @@ test('Actual Spend import preserves all valid sources and supported Infra aliase
     'Approved Memo', 'Manual / Historical Expense', 'Infra Cost',
   ]);
   assert.deepEqual(Array.from(result.records, record => record.spendType), ['Software', 'Hardware', 'Infra']);
+});
+
+test('Excel import of Manual / Historical rows creates editable manual expense records with correct one-time and monthly totals', async () => {
+  const context = createActualSpendContext();
+  const rows = [
+    { Source:'Manual / Historical', 'Reference No':'IMP-ONE', 'Spend Type':'Hardware', Project:'AOA-MP', Amount:5000, 'Start Date':'2026-02-10', 'End Date':'2026-02-10', Description:'One-time import' },
+    { Source:'Manual / Historical', 'Reference No':'IMP-MONTHLY', 'Spend Type':'Software', Project:'AOA-MP', Amount:3000, 'Start Date':'2026-01', 'End Date':'2026-03', Description:'Monthly import' },
+  ].map(context.actualSpendImportRow);
+
+  const importResult = context.importActualSpendRecords(rows);
+  assert.equal(importResult.valid, true);
+  assert.equal(importResult.saved, 2);
+
+  await context.promoteImportedManualExpenses(importResult.records);
+
+  const manualExpenses = context.loadManualExpenses();
+  assert.equal(manualExpenses.length, 2);
+  const oneTime = manualExpenses.find(e => e.referenceNo === 'IMP-ONE');
+  const monthly = manualExpenses.find(e => e.referenceNo === 'IMP-MONTHLY');
+  assert.equal(oneTime.frequency, 'one_time');
+  assert.equal(oneTime.amount, 5000);
+  assert.equal(monthly.frequency, 'monthly');
+  assert.equal(monthly.startMonth, '2026-01');
+  assert.equal(monthly.endMonth, '2026-03');
+  assert.equal(monthly.amount, 1000); // 3000 total ÷ 3 months, not the full total repeated per month
+
+  const canonical = context.reconcileActualSpendSources();
+  const imported = canonical.filter(record => ['IMP-ONE', 'IMP-MONTHLY'].includes(record.referenceNo));
+  assert.equal(imported.length, 2);
+  assert.ok(imported.every(record => record.source === 'Manual / Historical Expense'));
+  assert.equal(context.calculateActualSpend(imported), 8000); // 5000 + 3000, no double-counting
+
+  const rawCanonical = context.loadActualSpendRecords();
+  const rawImported = rawCanonical.filter(record => ['IMP-ONE', 'IMP-MONTHLY'].includes(record.referenceNo));
+  assert.equal(rawImported.length, 2);
+  assert.ok(rawImported.every(record => String(record.id).startsWith('actual-spend-manual-')));
+});
+
+test('An imported manual expense record can be edited and the change flows into canonical Actual Spend', async () => {
+  const context = createActualSpendContext();
+  const rows = [
+    { Source:'Manual / Historical', 'Reference No':'IMP-EDIT', 'Spend Type':'Hardware', Project:'AOA-MP', Amount:4000, 'Start Date':'2026-05-01', 'End Date':'2026-05-01', Description:'Edit me' },
+  ].map(context.actualSpendImportRow);
+  const importResult = context.importActualSpendRecords(rows);
+  await context.promoteImportedManualExpenses(importResult.records);
+
+  const before = context.reconcileActualSpendSources();
+  assert.equal(context.calculateActualSpend(before.filter(record => record.referenceNo === 'IMP-EDIT')), 4000);
+
+  const manualExpense = context.loadManualExpenses().find(e => e.referenceNo === 'IMP-EDIT');
+  await context.saveManualExpenseAsync({ ...manualExpense, amount:4500, unitCost:4500 });
+
+  const after = context.reconcileActualSpendSources();
+  assert.equal(context.calculateActualSpend(after.filter(record => record.referenceNo === 'IMP-EDIT')), 4500);
+});
+
+test('Soft-deleting an imported manual expense excludes it from canonical Actual Spend, Forecast, and Budget vs Actual totals', async () => {
+  const context = createActualSpendContext();
+  const rows = [
+    { Source:'Manual / Historical', 'Reference No':'IMP-VOID', 'Spend Type':'Software', Project:'AOA-MP', Amount:6000, 'Start Date':'2026-01', 'End Date':'2026-06', Description:'Import to void' },
+  ].map(context.actualSpendImportRow);
+  const importResult = context.importActualSpendRecords(rows);
+  await context.promoteImportedManualExpenses(importResult.records);
+
+  const before = context.reconcileActualSpendSources();
+  assert.equal(context.calculateActualSpend(before.filter(record => record.referenceNo === 'IMP-VOID')), 6000);
+
+  const manualExpense = context.loadManualExpenses().find(e => e.referenceNo === 'IMP-VOID');
+  await context.voidManualExpenseAsync(manualExpense.id, 'no longer valid');
+
+  const after = context.reconcileActualSpendSources();
+  assert.equal(after.filter(record => record.referenceNo === 'IMP-VOID').length, 0);
+
+  const forecast = context.calculateForecast(after, new Date(2026, 3, 15));
+  assert.equal(forecast.rows.some(row => row.program === 'IMP-VOID' || row.referenceNo === 'IMP-VOID'), false);
+
+  const bva = context.calculateBudgetVsActualDataset([], after, { year:'2569' });
+  assert.equal(bva.totals.actual, context.calculateActualSpend(after));
+});
+
+test('Excel import of Approved Memo and Infra Cost rows stays direct-canonical and read-only, unaffected by manual expense routing', async () => {
+  const context = createActualSpendContext();
+  const rows = [
+    { Source:'Approved Memo', 'Reference No':'IMP-MEMO', 'Spend Type':'Software', Project:'AOA-MP', Amount:1000 },
+    { Source:'Infra Cost', 'Reference No':'IMP-INFRA', 'Spend Type':'Infra', Project:'AOA-MP', Amount:2000, 'Start Date':'2026-01', 'End Date':'2026-02' },
+  ].map(context.actualSpendImportRow);
+  const importResult = context.importActualSpendRecords(rows);
+  await context.promoteImportedManualExpenses(importResult.records);
+
+  assert.equal(context.loadManualExpenses().length, 0);
+  const canonical = context.loadActualSpendRecords();
+  assert.equal(canonical.length, 2);
+  assert.ok(canonical.every(record => !String(record.id).startsWith('actual-spend-manual-')));
+});
+
+test('Actual Spend group drill-down offers Void for editable imported manual expense records', () => {
+  assert.match(budgetCode, /voidManualExpense\('\$\{esc\(manualId\)\}'\)/);
+  assert.match(budgetCode, /actual-spend-group-panel[\s\S]*overflow-x:hidden/);
 });
 
 test('Actual Spend export aligns canonical fields and totals for all three sources', async () => {

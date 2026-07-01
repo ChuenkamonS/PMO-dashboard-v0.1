@@ -362,6 +362,53 @@ function manualExpenseToActualSpend(expense) {
   });
 }
 
+// Converts a validated Excel-imported "Manual / Historical" Actual Spend row into
+// the same shape the manual expense form saves, so imported rows become editable
+// and soft-deletable through the existing manual expense store.
+function manualExpenseFromImportedActualSpend(record) {
+  const months = inclusiveCoverageMonths(record.startDate, record.endDate);
+  const monthly = months != null && months > 1;
+  const totalAmount = Number(record.amount) || 0;
+  // Import Amount is the total for the coverage period; when spread across
+  // months we must store the per-month amount so manualExpenseToActualSpend's
+  // amount × months does not double-count the total.
+  const perUnitAmount = monthly ? totalAmount / months : totalAmount;
+  return {
+    id: generateFinancialRecordId('manual-import'),
+    entryKind: 'historical',
+    referenceNo: record.referenceNo || '',
+    project: record.project || '',
+    budgetPoolId: null,
+    expenseType: SPEND_TYPE_TO_MEMO_TYPE[record.spendType] || 'other',
+    description: record.description || record.vendorProgram || '',
+    frequency: monthly ? 'monthly' : 'one_time',
+    expenseDate: monthly ? null : (record.startDate ? (String(record.startDate).length === 7 ? `${record.startDate}-01` : record.startDate) : null),
+    startMonth: monthly ? String(record.startDate).slice(0, 7) : null,
+    endMonth: monthly ? String(record.endDate).slice(0, 7) : null,
+    quantity: 1,
+    unitCost: perUnitAmount,
+    amount: perUnitAmount,
+    notes: record.vendorProgram || '',
+    createdBy: record.createdBy || currentUser(),
+    updatedBy: record.createdBy || currentUser(),
+    voidedAt: null,
+  };
+}
+
+// After importActualSpendRecords() writes validated rows to canonical storage,
+// move any "Manual / Historical Expense" sourced rows into the manual expense
+// store and drop their direct-canonical copy so reconcileActualSpendSources()
+// re-projects them the same way manually added expenses are projected.
+async function promoteImportedManualExpenses(records) {
+  const manualRecords = (records || []).filter(record => record.source === ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE);
+  if (!manualRecords.length) return;
+  for (const record of manualRecords) {
+    await saveManualExpenseAsync(manualExpenseFromImportedActualSpend(record));
+  }
+  const manualIds = new Set(manualRecords.map(record => record.id));
+  storeActualSpendRecords(loadActualSpendRecords().filter(row => !manualIds.has(row.id)));
+}
+
 function infraCostToActualSpend(entry) {
   const months = inclusiveCoverageMonths(entry.start_month, entry.end_month);
   return createActualSpendRecord({
@@ -503,6 +550,7 @@ function handleActualSpendImport(event) {
         alert(`Import ไม่สำเร็จ\n${result.errors.map(error => `Row ${error.row}: ${error.errors.join(', ')}`).join('\n')}`);
         return;
       }
+      await promoteImportedManualExpenses(result.records);
       alert(`Import สำเร็จ ${result.saved} รายการ · ข้ามข้อมูลซ้ำ ${result.duplicates.length} รายการ`);
       await renderActualSpend();
     } catch(error) { alert('Import ไม่สำเร็จ: ' + error.message); }
@@ -1832,10 +1880,17 @@ function showActualSpendGroup(projectEncoded, typeEncoded, sourceEncoded) {
   const spendType = decodeURIComponent(typeEncoded);
   const source = decodeURIComponent(sourceEncoded);
   const rows = filteredActualSpendRecords().filter(record => record.project === project && record.spendType === spendType && record.source === source);
+  const manualExpenseIds = new Set(loadManualExpenses().map(e => e.id));
+  const rowCard = record => {
+    const manualId = record.source === ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE ? String(record.id).replace('actual-spend-manual-', '') : null;
+    const isEditableManual = manualId && isPMO() && manualExpenseIds.has(manualId);
+    const voidCell = isEditableManual ? `<div onclick="event.stopPropagation()"><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Actions</div><button class="btn-sm" style="color:var(--red)" onclick="document.getElementById('actual-spend-group-panel').remove();voidManualExpense('${esc(manualId)}')">Void</button></div>` : '';
+    return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;align-items:start" onclick="document.getElementById('actual-spend-group-panel').remove();showActualSpendRecord('${esc(record.id)}')"><div style="min-width:0"><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Reference</div><div style="font-weight:600;color:var(--blue);overflow-wrap:anywhere">${esc(record.referenceNo)}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Source</div><div>${esc(record.source)}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Coverage</div><div>${esc(record.startDate||'—')} → ${esc(record.endDate||'—')}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Budget Status</div><div>${esc(record.budgetStatus)}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Amount</div><div style="font-weight:700">${money(record.amount)}</div></div>${voidCell}</div>`;
+  };
   const panel = document.createElement('div');
   panel.id = 'actual-spend-group-panel';
   panel.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;display:flex;align-items:center;justify-content:center';
-  panel.innerHTML = `<div class="card" style="width:900px;max-width:96vw;max-height:86vh;overflow-x:hidden;overflow-y:auto;padding:0"><div style="padding:12px 16px;display:flex;justify-content:space-between;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:1"><div><strong>${esc(project)} · ${esc(spendType)}</strong><div style="font-size:11px;color:var(--text-3)">${rows.length} รายการ · ${money(calculateActualSpend(rows))}</div></div><button class="btn-sm" onclick="document.getElementById('actual-spend-group-panel').remove()">✕</button></div><div style="padding:10px;display:flex;flex-direction:column;gap:8px">${rows.map(record => `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;align-items:start" onclick="document.getElementById('actual-spend-group-panel').remove();showActualSpendRecord('${esc(record.id)}')"><div style="min-width:0"><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Reference</div><div style="font-weight:600;color:var(--blue);overflow-wrap:anywhere">${esc(record.referenceNo)}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Source</div><div>${esc(record.source)}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Coverage</div><div>${esc(record.startDate||'—')} → ${esc(record.endDate||'—')}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Budget Status</div><div>${esc(record.budgetStatus)}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Amount</div><div style="font-weight:700">${money(record.amount)}</div></div></div>`).join('')}</div></div>`;
+  panel.innerHTML = `<div class="card" style="width:900px;max-width:96vw;max-height:86vh;overflow-x:hidden;overflow-y:auto;padding:0"><div style="padding:12px 16px;display:flex;justify-content:space-between;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:1"><div><strong>${esc(project)} · ${esc(spendType)}</strong><div style="font-size:11px;color:var(--text-3)">${rows.length} รายการ · ${money(calculateActualSpend(rows))}</div></div><button class="btn-sm" onclick="document.getElementById('actual-spend-group-panel').remove()">✕</button></div><div style="padding:10px;display:flex;flex-direction:column;gap:8px">${rows.map(rowCard).join('')}</div></div>`;
   document.body.appendChild(panel);
   panel.addEventListener('click', event => { if (event.target === panel) panel.remove(); });
 }
