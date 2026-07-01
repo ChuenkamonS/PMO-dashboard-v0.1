@@ -199,6 +199,29 @@ test('Actual Spend detail uses a responsive layout without a horizontal scroll t
   assert.match(budgetCode, /grid-template-columns:repeat\(auto-fit,minmax\(130px,1fr\)\)/);
 });
 
+test('Actual Spend separates the unchanged report from manual maintenance actions', () => {
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const reportPanel = html.match(/<div id="as-panel-report">([\s\S]*?)<div id="as-panel-manual"/)[1];
+  const manualPanel = html.match(/<div id="as-panel-manual"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>\s*<!-- ── TAB: FORECAST/)[0];
+
+  assert.match(html, /id="as-tab-report"[\s\S]*>Report<\/button>/);
+  assert.match(html, /id="as-tab-manual"[\s\S]*>Manual Entries<\/button>/);
+  assert.match(reportPanel, /id="as-year"/);
+  assert.match(reportPanel, /id="as-content"/);
+  assert.match(reportPanel, /exportActualSpendCSV\(\)/);
+  assert.doesNotMatch(reportPanel, /openManualExpenseModal|handleActualSpendImport|downloadActualSpendTemplate/);
+  assert.match(manualPanel, /openManualExpenseModal\(\)[\s\S]*Add Actual Spend/);
+  assert.match(manualPanel, /handleActualSpendImport\(event\)[\s\S]*Download Template/);
+  assert.match(manualPanel, /Import Excel/);
+  assert.doesNotMatch(manualPanel, /exportActualSpendCSV\(\)/);
+});
+
+test('Actual Spend sub-tab switch defaults to Report and toggles panel visibility', () => {
+  assert.match(budgetCode, /let _actualSpendCurrentTab = 'report'/);
+  assert.match(budgetCode, /reportPanel\.style\.display = _actualSpendCurrentTab === 'report' \? '' : 'none'/);
+  assert.match(budgetCode, /manualPanel\.style\.display = _actualSpendCurrentTab === 'manual' \? '' : 'none'/);
+});
+
 test('Actual Spend provides an Excel import template matching accepted columns and duplicate rules', () => {
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   assert.match(html, /downloadActualSpendTemplate\(\)/);

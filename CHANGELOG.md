@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Phase 2 — Separate Actual Spend report and manual maintenance (2026-07-01)
+
+### Changed
+- Added Report and Manual Entries sub-tabs under Actual Spend.
+- Kept the grouped report, filters, totals, drill-down, and existing report CSV export together in Report.
+- Moved Add Actual Spend, Import Excel, and Download Template into Manual Entries without changing their handlers or permissions.
+- Kept the existing 9-column import template, parser, amount semantics, and Phase 1 editable/soft-deletable persistence unchanged.
+
+### Tests
+- Added targeted coverage for the default Report tab, sub-tab visibility, and maintenance-action placement.
+
 ## Phase 1 import template verification (2026-07-01)
 
 ### Verified

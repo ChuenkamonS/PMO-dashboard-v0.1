@@ -302,6 +302,16 @@ function getLicenseCostByProject() {
 
 // ── Sub-tab switching ──
 let _bgtCurrentTab = 'overview';
+let _actualSpendCurrentTab = 'report';
+function switchActualSpendTab(tab, btn) {
+  _actualSpendCurrentTab = tab === 'manual' ? 'manual' : 'report';
+  const reportPanel = document.getElementById('as-panel-report');
+  const manualPanel = document.getElementById('as-panel-manual');
+  if (reportPanel) reportPanel.style.display = _actualSpendCurrentTab === 'report' ? '' : 'none';
+  if (manualPanel) manualPanel.style.display = _actualSpendCurrentTab === 'manual' ? '' : 'none';
+  [document.getElementById('as-tab-report'), document.getElementById('as-tab-manual')].forEach(tabButton => tabButton?.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+}
 function switchBudgetTab(tab, btn) {
   _bgtCurrentTab = tab;
   ['overview','actual-spend','forecast','bva','bgt-settings'].forEach(t => {

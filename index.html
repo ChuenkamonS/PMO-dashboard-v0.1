@@ -1497,51 +1497,64 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <!-- ── TAB: ACTUAL SPEND ── -->
         <div id="bgt-tab-actual-spend" class="cost-tab-panel" style="display:none">
 
-          <div class="filter-row">
-            <select id="as-year" onchange="renderActualSpend()" aria-label="ปีข้อมูล Actual Spend">
-              <option value="2026">ปี 2026</option>
-            </select>
-            <div style="display:flex;align-items:center;gap:6px">
-              <label style="font-size:11px;color:var(--text-3)">จาก</label>
-              <input type="month" id="as-from" onchange="renderActualSpend()">
-              <label style="font-size:11px;color:var(--text-3)">ถึง</label>
-              <input type="month" id="as-to" onchange="renderActualSpend()">
-            </div>
-            <select id="as-project" onchange="renderActualSpend()">
-              <option value="all">ทุกโปรเจค</option>
-            </select>
-            <select id="as-type" onchange="renderActualSpend()">
-              <option value="all">ทุกประเภท</option>
-              <option value="sl">Software License</option>
-              <option value="hw">Hardware</option>
-              <option value="int">Team Activity</option>
-              <option value="ent">Client Expense</option>
-              <option value="dep">Deployment</option>
-              <option value="infra">Infrastructure</option>
-              <option value="other">Other</option>
-            </select>
-            <select id="as-source" onchange="renderActualSpend()">
-              <option value="all">ทุกแหล่งข้อมูล</option>
-              <option value="memo">จาก Memo</option>
-              <option value="manual">Historical / Manual</option>
-              <option value="infra">Infra Cost</option>
-            </select>
-            <select id="as-budget-status" onchange="renderActualSpend()">
-              <option value="all">ทุก Budget Status</option>
-              <option value="Mapped">Mapped</option>
-              <option value="Manual Override">Manual Override</option>
-              <option value="Needs PMO Review">Needs PMO Review</option>
-              <option value="Unbudgeted">Unbudgeted</option>
-            </select>
-            <span id="as-period-label" style="font-size:11px;color:var(--text-3)">ทั้งหมด</span>
-            <button class="btn-export" onclick="exportActualSpendCSV()">⬇ Export CSV</button>
-            <button class="btn-export" onclick="downloadActualSpendTemplate()">⬇ Import Template</button>
-            <button class="btn-export" id="as-import-button" onclick="document.getElementById('as-import-file').click()">⬆ Import</button>
-            <input id="as-import-file" type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleActualSpendImport(event)">
-            <button class="btn-primary" id="as-add-manual" onclick="openManualExpenseModal()" style="font-size:11px;padding:5px 10px">+ Add Historical Expense</button>
+          <div style="display:flex;gap:6px;margin-bottom:12px;border-bottom:1px solid var(--border)">
+            <button id="as-tab-report" class="btn-sm active" onclick="switchActualSpendTab('report',this)" style="border-radius:6px 6px 0 0">Report</button>
+            <button id="as-tab-manual" class="btn-sm" onclick="switchActualSpendTab('manual',this)" style="border-radius:6px 6px 0 0">Manual Entries</button>
           </div>
 
-          <div id="as-content"></div>
+          <div id="as-panel-report">
+
+            <div class="filter-row">
+              <select id="as-year" onchange="renderActualSpend()" aria-label="ปีข้อมูล Actual Spend">
+                <option value="2026">ปี 2026</option>
+              </select>
+              <div style="display:flex;align-items:center;gap:6px">
+                <label style="font-size:11px;color:var(--text-3)">จาก</label>
+                <input type="month" id="as-from" onchange="renderActualSpend()">
+                <label style="font-size:11px;color:var(--text-3)">ถึง</label>
+                <input type="month" id="as-to" onchange="renderActualSpend()">
+              </div>
+              <select id="as-project" onchange="renderActualSpend()">
+                <option value="all">ทุกโปรเจค</option>
+              </select>
+              <select id="as-type" onchange="renderActualSpend()">
+                <option value="all">ทุกประเภท</option>
+                <option value="sl">Software License</option>
+                <option value="hw">Hardware</option>
+                <option value="int">Team Activity</option>
+                <option value="ent">Client Expense</option>
+                <option value="dep">Deployment</option>
+                <option value="infra">Infrastructure</option>
+                <option value="other">Other</option>
+              </select>
+              <select id="as-source" onchange="renderActualSpend()">
+                <option value="all">ทุกแหล่งข้อมูล</option>
+                <option value="memo">จาก Memo</option>
+                <option value="manual">Historical / Manual</option>
+                <option value="infra">Infra Cost</option>
+              </select>
+              <select id="as-budget-status" onchange="renderActualSpend()">
+                <option value="all">ทุก Budget Status</option>
+                <option value="Mapped">Mapped</option>
+                <option value="Manual Override">Manual Override</option>
+                <option value="Needs PMO Review">Needs PMO Review</option>
+                <option value="Unbudgeted">Unbudgeted</option>
+              </select>
+              <span id="as-period-label" style="font-size:11px;color:var(--text-3)">ทั้งหมด</span>
+              <button class="btn-export" onclick="exportActualSpendCSV()">⬇ Export CSV</button>
+            </div>
+
+            <div id="as-content"></div>
+          </div>
+
+          <div id="as-panel-manual" style="display:none">
+            <div class="filter-row">
+              <button class="btn-primary" id="as-add-manual" onclick="openManualExpenseModal()" style="font-size:11px;padding:5px 10px">+ Add Actual Spend</button>
+              <button class="btn-export" id="as-import-button" onclick="document.getElementById('as-import-file').click()">⬆ Import Excel</button>
+              <input id="as-import-file" type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleActualSpendImport(event)">
+              <button class="btn-export" onclick="downloadActualSpendTemplate()">⬇ Download Template</button>
+            </div>
+          </div>
 
         </div>
 
