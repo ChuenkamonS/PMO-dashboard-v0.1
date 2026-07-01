@@ -22,6 +22,41 @@
 
 ## Current Baseline
 
+### Phase 7A-1 - Budget Pool Data Contract Documentation
+#### Added
+- Locked Budget Pool business contract in `BvA_REQUIREMENT.md` covering identity
+  (`project` + `name` + `year`), year handling, multi-month mapping, manual override precedence,
+  the canonical automatic mapping rule, missing-pool behavior, duplicate-pool rules, bulk import,
+  deletion/orphan risk, Forecast independence, the Overview legacy-budget-source issue, the
+  Supabase schema-audit requirement, and dead-code-cleanup ordering.
+- `Phase 7A` entry in `PHASE_PLAN.md` distinguishing this roadmap track (per
+  `docs/AI_ENIGINEERING_GUIDE/05_PHASE_HISTORY.md`) from the earlier, differently-scoped `Phase 7`
+  already recorded in this changelog and plan.
+
+#### Known Issues Documented (not fixed in this sub-phase)
+- Budget Pool `year` is an independently stored field, not derived from `startDate`/`startMonth`,
+  and can be saved contradicting the pool's own date range.
+- Buddhist Era year conversion is duplicated across multiple call sites instead of one shared
+  helper.
+- Budget Pool bulk import re-implements its own duplicate/conflict validation instead of reusing
+  the shared manual add/edit validator, and its duplicate check is case-sensitive where the manual
+  path is case-insensitive.
+- The Budget Pool deletion guard checks only canonical Actual Spend references, not legacy
+  memo-level Budget Pool references.
+- Overview's KPI and embedded Budget-vs-Actual widgets read a separate legacy budget store instead
+  of the canonical Budget Pool table, so Overview figures may not reconcile with the canonical
+  Budget vs Actual tab.
+
+#### Unchanged
+- No application logic, UI, tests, or Supabase migrations were modified. All mapping, override,
+  deletion, Forecast, and Overview behavior described above reflects the pre-existing
+  implementation, verified by reading the code, not altered by this documentation phase.
+
+#### Remaining Work
+- Phase 7A-2 onward implements against the locked contract (year derivation, shared BE helper,
+  bulk import unification, manual override warnings, memo-level orphan review), per
+  `PHASE_PLAN.md`.
+
 ### Phase C - Actual Spend Export Alignment
 #### Changed
 - Actual Spend CSV export now includes canonical record identity, currency, amount basis, coverage status, vendor/program, final Budget Pool, and optional Notes alongside the existing audit fields.

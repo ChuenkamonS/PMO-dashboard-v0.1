@@ -192,6 +192,72 @@ Dependencies:
 Exit criteria:
 - Five Budget & Spend tabs only; UI and exports match; all Master Definition of Done items pass.
 
+## Phase 7A - Budget Pool Data Contract and Mapping Hardening
+
+This phase is tracked separately from the `Phase 7` entry above (`Shared Exports, Cleanup, and
+Release Verification`), which predates and is unrelated to this numbering. `Phase 7A` follows the
+roadmap defined in `docs/AI_ENIGINEERING_GUIDE/05_PHASE_HISTORY.md`
+(`Phase 7A → Phase 7B → Phase 8 → Phase 9 → Phase 10`) and targets the Budget Pool identity, year,
+mapping, override, import, and deletion contract specifically.
+
+### Phase 7A-1 - Budget Pool Data Contract Documentation (this sub-phase)
+
+Scope:
+- Document-only. Lock the Budget Pool business contract before any Phase 7A implementation begins.
+- No application logic, tests, UI, or Supabase migrations were changed.
+
+Delivered:
+- `docs/BvA_REQUIREMENT.md` — new "Phase 7A-1 — Budget Pool Data Contract (Locked)" section
+  covering identity, year handling, multi-month mapping, manual override, canonical automatic
+  mapping, missing-pool behavior, duplicate-pool rules, bulk import, deletion/orphan risk,
+  Forecast independence, the Overview legacy-budget-source known issue, the Supabase schema-audit
+  requirement, and dead-code-cleanup ordering.
+
+Known issues documented (not fixed in 7A-1, cited with exact function/file/line evidence):
+- Budget Pool `year` is stored as an independent field (`app.js:223-240`), not derived from
+  `startDate`/`startMonth`, and can be saved contradicting the pool's own date range
+  (`views/budget.js:2734-2817`).
+- Buddhist Era year conversion is duplicated across at least three call sites in
+  `views/budget.js` (around lines `855`, `1022`, `1441`) instead of one shared helper.
+- Budget Pool bulk import (`views/budget.js`, around lines `2568-2680+`) re-implements its own
+  duplicate/conflict checks instead of calling the shared `validateBudgetPoolChange()`
+  (`app.js:273-293`) used by manual add/edit, and its duplicate check is case-sensitive where the
+  manual path is case-insensitive.
+- The Budget Pool deletion guard (`budgetPoolDeletionBlockers()`, `app.js:295-296`) checks only
+  canonical Actual Spend references, not legacy memo-level `budgetPoolId` references
+  (`views/history.js`, around lines `915`, `1003`, `1024`, `1079`).
+- Overview's KPI and embedded Budget-vs-Actual widgets (`_ovUpdateKPIs()`
+  `views/budget.js:841-858`; `_ovRenderBvA()` `views/budget.js:1013` onward) read a separate legacy
+  `loadSLBudgets()` store (`views/budget.js:1543-1549`) instead of the canonical Budget Pool table,
+  so Overview budget figures may not reconcile with the canonical Budget vs Actual tab.
+
+Confirmed-correct behavior (verified against code, not assumed):
+- Canonical automatic mapping (project + spend type + date range using the record's `startDate`,
+  single-match/no-match/multi-match → Mapped/Unbudgeted/Needs PMO Review) is already implemented
+  once, in `findMatchingBudgetPools()` + `mapBudgetPool()` (`app.js:388-421`), with no competing
+  legacy implementation found.
+- Manual override already always wins and is never overwritten by auto mapping
+  (`mapBudgetPool()`, `app.js:398-421`).
+- Mapping already uses whole-record mapping by `startDate` only; multi-month Actual Spend is never
+  split across pools (`actualSpendMappingDate()`, `app.js:384-386`).
+- Forecast already has no Budget Pool dependency (`calculateForecast()`, `app.js:458-501`).
+
+Expected files for Phase 7A-2 onward (not modified in 7A-1):
+- `app.js` (year derivation helper, shared BE conversion helper, bulk import validation reuse)
+- `views/budget.js` (bulk import wiring, Overview/BE call sites)
+- `views/history.js` (memo-level Budget Pool reference review)
+- Budget Pool contract tests
+
+Exit criteria for 7A-1:
+- The contract in `docs/BvA_REQUIREMENT.md` is specific enough (exact rules, current-vs-contract
+  gaps, file/line evidence) that a future implementation agent can execute Phase 7A-2 without
+  re-deriving business rules from scratch.
+
+Out of scope for 7A-1 (see `docs/BvA_REQUIREMENT.md`, "Phase 7A-1 Scope Boundary"):
+- Year normalization implementation, BvA calculation fixes, Budget Pool import validation
+  unification, manual override warnings, Tag Budget modal changes, Overview BvA fix, Forecast
+  changes, Budget Settings UX changes, Supabase migrations, dead-code cleanup, test changes.
+
 ## Requirement Coverage
 
 | Requirement | Planned phase(s) |
