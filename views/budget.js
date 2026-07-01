@@ -1858,6 +1858,20 @@ async function saveManualExpenseFromModal() {
   if (frequency === 'monthly' && (!expense.startMonth || !expense.endMonth || expense.startMonth > expense.endMonth)) {
     alert('กรุณาระบุ Start/End Month ให้ถูกต้อง'); return;
   }
+  if (expense.budgetPoolId) {
+    // Compare against the CANONICAL derived year (createBudgetPoolRecord), not the raw stored
+    // pool.year — loadBudgetPools() returns raw, un-normalized objects, and a pool saved before
+    // Phase 7A-3 (or otherwise mismatched) would have a raw year that disagrees with the year
+    // mapping actually uses.
+    const rawPool = loadBudgetPools().find(p => p.id === expense.budgetPoolId);
+    const selectedPool = rawPool ? createBudgetPoolRecord(rawPool) : null;
+    const coverageDate = frequency === 'monthly' ? expense.startMonth : expense.expenseDate;
+    const expenseYear = gregorianYearToBuddhistEra(coverageDate);
+    if (selectedPool && expenseYear && String(selectedPool.year || '') !== expenseYear) {
+      alert(`Budget Pool ที่เลือกอยู่คนละปีกับรายการนี้ (Pool ปี ${selectedPool.year || '-'}, รายการปี ${expenseYear})\nกรุณาเลือก Budget Pool ปีเดียวกับรายการ`);
+      return;
+    }
+  }
   const duplicate = activeManualExpenses().find(e => e.id !== id && referenceNo && e.referenceNo === referenceNo && e.description.toLowerCase() === expense.description.toLowerCase());
   if (duplicate && !confirm(`พบ Reference และรายการคล้ายกันแล้ว: ${duplicate.referenceNo}\nต้องการบันทึกต่อหรือไม่?`)) return;
   try {
@@ -2817,7 +2831,9 @@ async function saveBudgetPool() {
 }
 
 function deleteBudgetPool(id) {
-  const blockers = budgetPoolDeletionBlockers(id, loadActualSpendRecords());
+  const manualExpenses = typeof loadManualExpenses === 'function' ? loadManualExpenses() : [];
+  const memos = typeof loadMemos === 'function' ? loadMemos() : [];
+  const blockers = budgetPoolDeletionBlockers(id, loadActualSpendRecords(), manualExpenses, memos);
   if (blockers.length) { alert(`ไม่สามารถลบ Pool ที่มี Actual Spend อ้างอิงอยู่ ${blockers.length} รายการ`); return; }
   if (!confirm('ลบ pool นี้?')) return;
   deletePoolAsync(id)

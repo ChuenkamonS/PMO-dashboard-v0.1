@@ -22,6 +22,91 @@
 
 ## Current Baseline
 
+### Phase 7A-3 - Same-Year Budget Pool Mapping Contract
+#### Follow-up fixes (pre-commit clarification pass)
+- `saveBudgetTag()`'s cross-year guard no longer fails open when no canonical Actual Spend record
+  exists yet for the memo (e.g. stale/unrefreshed canonical storage) — it now falls back to
+  deriving the memo's own coverage date via `memoCoveragePeriod()`, mirroring
+  `actualSpendFromMemo()`'s exact fallback chain, so the check is never silently skipped.
+- `createActualSpendRecord()` now preserves `mappingWarning` across normalization. Previously the
+  flag only existed in `mapBudgetPool()`'s immediate return value and was silently dropped every
+  time a record passed through `storeActualSpendRecords()`/`loadActualSpendRecords()` — meaning a
+  blocked cross-year override could become indistinguishable from an ordinary never-assigned
+  Unbudgeted record after a single store/reload cycle.
+
+#### Follow-up fixes (strict review, pre-commit)
+- Tag Budget (`saveBudgetTag()` in `views/history.js`) now blocks a cross-year Budget Pool
+  assignment at save time with a clear error, instead of silently persisting a memo whose
+  underlying Actual Spend record was reclassified to `Unbudgeted` without any user feedback.
+  Compares against the pool's canonical derived year, not its raw stored year.
+- `budgetPoolDeletionBlockers()` now also checks persisted manual expense and memo-level
+  `budgetPoolId` references, not just the canonical Actual Spend mapping — a Budget Pool no longer
+  becomes deletable merely because a cross-year override was cleared from the canonical record;
+  any raw source still referencing it keeps deletion blocked.
+- `saveManualExpenseFromModal()`'s save-time validation now compares against the Budget Pool's
+  canonical derived year (`createBudgetPoolRecord()`), not the raw stored `year` from the
+  unnormalized `loadBudgetPools()` cache, so a pool whose raw label disagrees with its own dates
+  is validated correctly rather than against a stale label.
+
+#### Changed
+- Budget Pool `year` is now always derived from the pool's own `startDate`/`startMonth`
+  (`createBudgetPoolRecord()`), using a new shared `gregorianYearToBuddhistEra()` helper — a
+  conflicting `year` input is ignored whenever coverage dates exist, and is only used as a
+  fallback when no date data is present at all.
+- Budget Pools can no longer span multiple Gregorian years — `validateBudgetPoolRecord()` now
+  rejects a pool whose `startDate` and `endDate` fall in different years with
+  `"Budget Pool must not span multiple years"`.
+- Manual Actual Spend no longer auto-maps under any circumstance. With no Budget Pool selected it
+  is always `Unbudgeted`, even if a matching pool would otherwise be found by project/spend
+  type/date range (`mapBudgetPool()`).
+- Cross-year Manual Override is blocked at both layers: the data layer (`mapBudgetPool()` refuses
+  to honor a `manualBudgetPoolId` whose pool's year disagrees with the spend's own coverage year,
+  clearing `manualBudgetPoolId`/`autoBudgetPoolId`/`finalBudgetPoolId` and setting
+  `mappingWarning: "blocked-cross-year-override"` so it is detected, not silently normalized) and
+  the save layer (`saveManualExpenseFromModal()` in `views/budget.js` now rejects the save with a
+  clear error and does not persist the invalid `budgetPoolId` if the selected pool's year does not
+  match the manual spend's coverage year).
+- Approved Memo-created Actual Spend and Infra Cost continue to auto-map exactly as before, with
+  one addition: `findMatchingBudgetPools()` now also requires the candidate pool's year to match
+  the record's coverage year, closing the Phase 7A-1/7A-2 silent-drop gap at its source rather
+  than compensating for it in `calculateBudgetVsActualDataset()`.
+
+#### Unchanged
+- `calculateBudgetVsActualDataset()` and `budgetVsActualExportDataset()` were not modified — no
+  `outOfScopePoolRecords`-style bucket was introduced. Once mapping only ever produces a same-year
+  `finalBudgetPoolId` (or `null`), the existing `unbudgetedRecords`/`totals.unbudgetedActual`
+  already account for every blocked or never-assigned record without any structural change.
+- Forecast, Overview, Import, and the Tag Budget modal were not modified.
+
+#### Known Issues (not fixed in this phase)
+- Existing invalid legacy records — a Budget Pool already spanning multiple years, or an Actual
+  Spend record with an already-stored cross-year override — are detected and flagged
+  (`mappingWarning`) the next time reconciliation runs, but are not retroactively repaired. The
+  underlying stored `budgetPoolId`/`year` values are left exactly as they were; only the derived
+  `budgetStatus` changes. A manual data-quality review of existing pools and overrides is
+  recommended before relying on this phase's totals for historical years.
+- Budget Pool bulk import still does not call the shared validator, so a bulk-imported pool could
+  still be saved spanning multiple years (pre-existing gap, documented in
+  `docs/BvA_REQUIREMENT.md` "Phase 7A-1" §7/§8, not addressed here).
+
+#### Tests
+- Replaced the two Phase 7A-2 fail-first tests, which constructed their mismatched pool by passing
+  a conflicting `year` alongside `startMonth`/`endMonth` directly to `createBudgetPoolRecord()` —
+  that construction is no longer possible now that `year` is always derived from dates, so the bug
+  is fixed structurally rather than reproduced. Replaced with a legacy-simulation test (a
+  mismatched pool is hand-constructed to simulate pre-fix stored data) proving the record remains
+  visible as `Unbudgeted` rather than vanishing.
+- Added tests in `tests/financial-models.test.js` for: year derivation and the conflicting-input
+  fallback; multi-year-span rejection; Manual Actual Spend never auto-mapping; same-year Manual
+  Override; cross-year Manual Override being blocked and flagged (asserting
+  `getFinalBudgetPoolId()` returns `null`); Approved Memo and Infra Cost same-year auto-mapping
+  (positive and negative); BvA totals including flagged Unbudgeted records; and Forecast being
+  unaffected by the new mapping/blocking logic.
+- One pre-existing test's fixture (`Phase 7 Budget Pool CRUD validation rejects invalid and
+  duplicate pools...`) was adjusted to remove a `startDate`/`endDate` pair that would otherwise
+  now allow `year` to be derived, which had made its `"Year is required"` assertion obsolete under
+  the new derivation rule; the assertion itself is unchanged.
+
 ### Phase 7A-2 - BvA Year Silent-Drop Bug: Fail-First Regression Tests
 #### Added
 - Three behavioral tests in `tests/financial-models.test.js` proving the Budget Pool year

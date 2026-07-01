@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const appCode = fs.readFileSync(path.resolve(__dirname, '..', 'app.js'), 'utf8');
+const historyCode = fs.readFileSync(path.resolve(__dirname, '..', 'views/history.js'), 'utf8');
 
 function context() {
   const storage = new Map();
@@ -150,8 +151,10 @@ test('Phase 7 Budget Pool CRUD validation rejects invalid and duplicate pools an
     id:'pool-1', project:'AOA-MP', name:'Software 2569', year:'2569', budget:10000,
     spendTypes:['Software'], startDate:'2026-01', endDate:'2026-12',
   })];
+  // No startDate/startMonth at all, so year cannot be derived and "Year is required" still
+  // fires as its own distinct error (Phase 7A-3: year is otherwise always derived from dates).
   const invalid = ctx.validateBudgetPoolChange({
-    id:'pool-2', project:'', name:'', year:'', budget:-1, spendTypes:[], startDate:'2026-12', endDate:'2026-01',
+    id:'pool-2', project:'', name:'', year:'', budget:-1, spendTypes:[],
   }, existing);
   assert.equal(invalid.valid, false);
   assert.ok(invalid.errors.includes('Pool Name is required'));
@@ -320,69 +323,184 @@ test('Phase 6 Unbudgeted includes only Actual Spend with no matched budget', () 
   assert.equal(dataset.totals.unbudgetedActual, 700);
 });
 
-// ── Phase 7A-2: fail-first regression coverage for the BvA year silent-drop bug ──
-// Bug: Budget Pool `year` is an independent label (see docs/BvA_REQUIREMENT.md "Phase 7A-1" §2)
-// and is never derived from / reconciled against the pool's own startMonth/endMonth. When a
-// pool's year label disagrees with its date range, `calculateBudgetVsActualDataset()` filters
-// `selectedPools` by `pool.year` and `scopedRecords` by the record's own date-derived year
-// independently — so a validly-mapped Actual Spend record can fail both filters at once and
-// vanish from `totals.actual` without appearing in either a matched pool row or
-// `unbudgetedRecords`. These tests must fail against the current implementation and are
-// expected to start passing once Phase 7A-3 reconciles pool year with its date range (or
-// otherwise closes this gap). Do not fix the underlying logic in this phase.
+// ── Phase 7A-3: Budget Pool / Actual Spend same-year mapping contract ──
+// Locked business rules (see docs/BvA_REQUIREMENT.md and PHASE_PLAN.md "Phase 7A"):
+// - Budget Pool year is derived from startDate/startMonth, never an independently settable label.
+// - A Budget Pool must not span multiple Gregorian years.
+// - Approved Memo and Infra Cost auto-map only to a same-year matching pool.
+// - Manual Actual Spend never auto-maps at all; with no selected pool it is always Unbudgeted.
+// - A Manual Override is honored only when the selected pool is same-year; a cross-year override
+//   is blocked at the data layer, falls back to Unbudgeted, and is flagged via `mappingWarning`
+//   so it is detected, not silently normalized.
+// This supersedes the Phase 7A-2 fail-first tests: those constructed a mismatched pool by passing
+// a conflicting `year` alongside `startMonth`/`endMonth` directly to `createBudgetPoolRecord()` —
+// that specific construction is no longer possible now that `year` is always derived from dates
+// when date data exists, so the bug they proved is fixed structurally rather than reproduced.
 
-test('Phase 7A-2 (fail-first): BvA must not silently drop a mapped Actual Spend record when filtered by the pool\'s own year label, even though the pool\'s date range disagrees', () => {
+test('Phase 7A-3: createBudgetPoolRecord derives year from startMonth/startDate and ignores conflicting input.year', () => {
   const ctx = context();
   const pool = ctx.createBudgetPoolRecord({
-    id:'pool-mismatch-year', project:'AOA-MP', name:'Software Pool', budget:100000,
-    year:'2569', startMonth:'2025-01', endMonth:'2025-12', spendTypes:['Software'],
+    id:'pool-derive-1', project:'AOA-MP', name:'Software Pool', budget:100000,
+    year:'2999', startMonth:'2025-01', endMonth:'2025-12', spendTypes:['Software'],
   });
-  const record = ctx.createActualSpendRecord({
-    id:'as-mismatch-1', source:'Approved Memo', referenceNo:'MISMATCH-1', project:'AOA-MP',
-    spendType:'Software', amount:12000, startDate:'2025-06', endDate:'2025-06',
-  });
-  const mapped = ctx.mapActualSpendRecords([record], [pool]);
-  // Sanity: the record genuinely auto-maps to this pool before BvA filtering is applied.
-  assert.equal(mapped[0].finalBudgetPoolId, 'pool-mismatch-year');
-  assert.equal(mapped[0].budgetStatus, 'Mapped');
+  assert.equal(pool.year, '2568', 'derived from startMonth 2025 (2025+543), ignoring the conflicting input.year');
 
-  const dataset = ctx.calculateBudgetVsActualDataset([pool], mapped, { year:'2569', project:'AOA-MP' });
-  const visibleIds = new Set([
-    ...dataset.rows.flatMap(row => Array.from(row.records, r => r.id)),
-    ...Array.from(dataset.unbudgetedRecords, r => r.id),
-  ]);
-  assert.ok(visibleIds.has(mapped[0].id), 'the mapped record must appear under its pool or in an unbudgeted/review bucket, not vanish entirely');
-  assert.equal(dataset.totals.actual, 12000, 'total actual must still account for the mapped record\'s amount');
+  const noDateData = ctx.createBudgetPoolRecord({
+    id:'pool-no-dates', project:'AOA-MP', name:'No Dates', budget:1, year:'2570', spendTypes:['Software'],
+  });
+  assert.equal(noDateData.year, '2570', 'falls back to input.year only when there is no date data to derive from at all');
 });
 
-test('Phase 7A-2 (fail-first): BvA must not silently drop a mapped Actual Spend record when filtered by the record\'s date-derived year, even though the pool\'s year label disagrees', () => {
+test('Phase 7A-3: validateBudgetPoolRecord rejects a pool spanning multiple Gregorian years', () => {
+  const ctx = context();
+  const spanning = ctx.validateBudgetPoolRecord({
+    id:'pool-span', project:'AOA-MP', budget:1000, spendTypes:['Software'],
+    startDate:'2025-06', endDate:'2026-05',
+  });
+  assert.equal(spanning.valid, false);
+  assert.ok(spanning.errors.includes('Budget Pool must not span multiple years'));
+
+  const singleYear = ctx.validateBudgetPoolRecord({
+    id:'pool-single', project:'AOA-MP', budget:1000, spendTypes:['Software'],
+    startDate:'2025-01', endDate:'2025-12',
+  });
+  assert.equal(singleYear.valid, true);
+});
+
+test('Phase 7A-3: Manual Actual Spend without a selected Budget Pool remains Unbudgeted even when a matching pool exists', () => {
   const ctx = context();
   const pool = ctx.createBudgetPoolRecord({
-    id:'pool-mismatch-year', project:'AOA-MP', name:'Software Pool', budget:100000,
-    year:'2569', startMonth:'2025-01', endMonth:'2025-12', spendTypes:['Software'],
+    id:'pool-manual-nomatch', project:'AOA-MP', name:'Software Pool', budget:100000,
+    startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'],
   });
   const record = ctx.createActualSpendRecord({
-    id:'as-mismatch-1', source:'Approved Memo', referenceNo:'MISMATCH-1', project:'AOA-MP',
-    spendType:'Software', amount:12000, startDate:'2025-06', endDate:'2025-06',
+    id:'as-manual-1', source:'Manual / Historical Expense', referenceNo:'MAN-1', project:'AOA-MP',
+    spendType:'Software', amount:5000, startDate:'2026-03-15', endDate:'2026-03-15',
   });
-  const mapped = ctx.mapActualSpendRecords([record], [pool]);
-
-  // 2025-06 is the Gregorian year that Buddhist Era 2568 converts to — this is the year an
-  // operator filtering "by the record's own date" would reasonably select.
-  const dataset = ctx.calculateBudgetVsActualDataset([pool], mapped, { year:'2568', project:'AOA-MP' });
-  const visibleIds = new Set([
-    ...dataset.rows.flatMap(row => Array.from(row.records, r => r.id)),
-    ...Array.from(dataset.unbudgetedRecords, r => r.id),
-  ]);
-  assert.ok(visibleIds.has(mapped[0].id), 'the mapped record must appear under its pool or in an unbudgeted/review bucket, not vanish entirely');
-  assert.equal(dataset.totals.actual, 12000, 'total actual must still account for the mapped record\'s amount');
+  const mapped = ctx.mapBudgetPool(record, [pool]);
+  assert.equal(mapped.budgetStatus, 'Unbudgeted');
+  assert.equal(mapped.finalBudgetPoolId, null);
+  assert.equal(mapped.autoBudgetPoolId, null);
 });
 
-test('Phase 7A-2 control: BvA includes actual spend normally when pool.year agrees with its startMonth/endMonth', () => {
+test('Phase 7A-3: Manual Actual Spend with a same-year selected Budget Pool becomes Manual Override', () => {
+  const ctx = context();
+  const pool = ctx.createBudgetPoolRecord({
+    id:'pool-manual-sameyear', project:'AOA-MP', name:'Software Pool', budget:100000,
+    startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'],
+  });
+  const record = ctx.createActualSpendRecord({
+    id:'as-manual-2', source:'Manual / Historical Expense', referenceNo:'MAN-2', project:'AOA-MP',
+    spendType:'Software', amount:5000, startDate:'2026-03-15', endDate:'2026-03-15',
+    manualBudgetPoolId:'pool-manual-sameyear',
+  });
+  const mapped = ctx.mapBudgetPool(record, [pool]);
+  assert.equal(mapped.budgetStatus, 'Manual Override');
+  assert.equal(mapped.finalBudgetPoolId, 'pool-manual-sameyear');
+});
+
+test('Phase 7A-3: Manual Actual Spend with a cross-year selected Budget Pool is blocked and flagged, not silently normalized', () => {
+  const ctx = context();
+  const poolA = ctx.createBudgetPoolRecord({ id:'pool-A', project:'AOA-MP', name:'Pool A', budget:100000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const poolB = ctx.createBudgetPoolRecord({ id:'pool-B', project:'AOA-MP', name:'Pool B', budget:100000, startMonth:'2025-01', endMonth:'2025-12', spendTypes:['Software'] });
+  const record = ctx.createActualSpendRecord({
+    id:'as-manual-3', source:'Manual / Historical Expense', referenceNo:'MAN-3', project:'AOA-MP',
+    spendType:'Software', amount:5000, startDate:'2026-03-15', endDate:'2026-03-15',
+    manualBudgetPoolId:'pool-B',
+  });
+  const mapped = ctx.mapBudgetPool(record, [poolA, poolB]);
+  assert.equal(mapped.budgetStatus, 'Unbudgeted');
+  assert.equal(mapped.manualBudgetPoolId, null);
+  assert.equal(mapped.finalBudgetPoolId, null);
+  assert.equal(mapped.autoBudgetPoolId, null);
+  assert.equal(mapped.mappingWarning, 'blocked-cross-year-override');
+  assert.equal(ctx.getFinalBudgetPoolId(mapped), null);
+});
+
+test('Phase 7A-3: Approved Memo-created Actual Spend still auto-maps to a same-year matching pool', () => {
+  const ctx = context();
+  const pool = ctx.createBudgetPoolRecord({ id:'pool-memo-sameyear', project:'AOA-MP', budget:10000, spendTypes:['Software'], startMonth:'2026-01', endMonth:'2026-12' });
+  const record = ctx.createActualSpendRecord(base); // source: 'Approved Memo', 2026 dates
+  const mapped = ctx.mapBudgetPool(record, [pool]);
+  assert.equal(mapped.budgetStatus, 'Mapped');
+  assert.equal(mapped.autoBudgetPoolId, 'pool-memo-sameyear');
+});
+
+test('Phase 7A-3: Infra Cost still auto-maps to a same-year matching pool', () => {
+  const ctx = context();
+  const pool = ctx.createBudgetPoolRecord({ id:'pool-infra-sameyear', project:'AOA-MP', budget:10000, spendTypes:['Infra'], startMonth:'2026-01', endMonth:'2026-12' });
+  const record = ctx.createActualSpendRecord({
+    id:'as-infra-1', source:'Infra Cost', referenceNo:'INF-1', project:'AOA-MP',
+    spendType:'Infra', amount:6000, startDate:'2026-04', endDate:'2026-09',
+  });
+  const mapped = ctx.mapBudgetPool(record, [pool]);
+  assert.equal(mapped.budgetStatus, 'Mapped');
+  assert.equal(mapped.autoBudgetPoolId, 'pool-infra-sameyear');
+});
+
+test('Phase 7A-3: Approved Memo-created Actual Spend does not auto-map to a pool from a different year', () => {
+  const ctx = context();
+  const pool = ctx.createBudgetPoolRecord({ id:'pool-memo-diffyear', project:'AOA-MP', budget:10000, spendTypes:['Software'], startMonth:'2025-01', endMonth:'2025-12' });
+  const record = ctx.createActualSpendRecord(base); // 2026 dates
+  const mapped = ctx.mapBudgetPool(record, [pool]);
+  assert.equal(mapped.budgetStatus, 'Unbudgeted');
+  assert.equal(mapped.finalBudgetPoolId, null);
+});
+
+test('Phase 7A-3: Infra Cost does not auto-map to a pool from a different year', () => {
+  const ctx = context();
+  const pool = ctx.createBudgetPoolRecord({ id:'pool-infra-diffyear', project:'AOA-MP', budget:10000, spendTypes:['Infra'], startMonth:'2025-01', endMonth:'2025-12' });
+  const record = ctx.createActualSpendRecord({
+    id:'as-infra-2', source:'Infra Cost', referenceNo:'INF-2', project:'AOA-MP',
+    spendType:'Infra', amount:6000, startDate:'2026-04', endDate:'2026-09',
+  });
+  const mapped = ctx.mapBudgetPool(record, [pool]);
+  assert.equal(mapped.budgetStatus, 'Unbudgeted');
+  assert.equal(mapped.finalBudgetPoolId, null);
+});
+
+test('Phase 7A-3: a legacy pool whose stored year conflicts with its own dates must not silently auto-match; the record remains visible as Unbudgeted', () => {
+  const ctx = context();
+  // Simulate data that predates the year-derivation fix: bypass createBudgetPoolRecord's
+  // derivation by overwriting `year` on an already-constructed, otherwise well-formed pool.
+  const legacyMismatchedPool = { ...ctx.createBudgetPoolRecord({
+    id:'pool-legacy-mismatch', project:'AOA-MP', name:'Legacy Pool', budget:100000,
+    startMonth:'2025-01', endMonth:'2025-12', spendTypes:['Software'],
+  }), year:'2569' }; // wrong label; real dates are still 2025 (BE 2568)
+  const record = ctx.createActualSpendRecord({
+    id:'as-legacy-1', source:'Approved Memo', referenceNo:'LEGACY-1', project:'AOA-MP',
+    spendType:'Software', amount:7000, startDate:'2025-07', endDate:'2025-07',
+  });
+  const mapped = ctx.mapBudgetPool(record, [legacyMismatchedPool]);
+  assert.equal(mapped.budgetStatus, 'Unbudgeted', 'auto-match must refuse a pool whose label disagrees with the record\'s derived year');
+  assert.equal(mapped.finalBudgetPoolId, null);
+
+  const dataset = ctx.calculateBudgetVsActualDataset([legacyMismatchedPool], [mapped], { year:'2568', project:'AOA-MP' });
+  assert.deepEqual(Array.from(dataset.unbudgetedRecords, r => r.id), ['as-legacy-1'], 'the record must remain visible in Unbudgeted, not vanish');
+  assert.equal(dataset.totals.actual, 7000);
+});
+
+test('Phase 7A-3: BvA totals include Unbudgeted records (including blocked cross-year overrides) and never silently drop them', () => {
+  const ctx = context();
+  const poolA = ctx.createBudgetPoolRecord({ id:'pool-A2', project:'AOA-MP', name:'Pool A', budget:100000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const poolB = ctx.createBudgetPoolRecord({ id:'pool-B2', project:'AOA-MP', name:'Pool B', budget:100000, startMonth:'2025-01', endMonth:'2025-12', spendTypes:['Software'] });
+  const record = ctx.createActualSpendRecord({
+    id:'as-manual-4', source:'Manual / Historical Expense', referenceNo:'MAN-4', project:'AOA-MP',
+    spendType:'Software', amount:5000, startDate:'2026-03-15', endDate:'2026-03-15',
+    manualBudgetPoolId:'pool-B2',
+  });
+  const mapped = ctx.mapBudgetPool(record, [poolA, poolB]);
+  const dataset = ctx.calculateBudgetVsActualDataset([poolA, poolB], [mapped], { year:'2569', project:'AOA-MP' });
+  assert.equal(dataset.unbudgetedRecords.length, 1);
+  assert.equal(dataset.unbudgetedRecords[0].mappingWarning, 'blocked-cross-year-override');
+  assert.equal(dataset.totals.actual, 5000, 'blocked cross-year override amount must still be visible in BvA totals');
+});
+
+test('Phase 7A-3 control: normal same-year matching still works exactly as before', () => {
   const ctx = context();
   const pool = ctx.createBudgetPoolRecord({
     id:'pool-control-year', project:'AOA-MP', name:'Software Pool Control', budget:100000,
-    year:'2568', startMonth:'2025-01', endMonth:'2025-12', spendTypes:['Software'],
+    startMonth:'2025-01', endMonth:'2025-12', spendTypes:['Software'],
   });
   const record = ctx.createActualSpendRecord({
     id:'as-control-1', source:'Approved Memo', referenceNo:'CONTROL-1', project:'AOA-MP',
@@ -391,9 +509,122 @@ test('Phase 7A-2 control: BvA includes actual spend normally when pool.year agre
   const mapped = ctx.mapActualSpendRecords([record], [pool]);
   assert.equal(mapped[0].finalBudgetPoolId, 'pool-control-year');
 
-  const dataset = ctx.calculateBudgetVsActualDataset([pool], mapped, { year:'2568', project:'AOA-MP' });
+  const dataset = ctx.calculateBudgetVsActualDataset([pool], mapped, { year: pool.year, project:'AOA-MP' });
   assert.deepEqual(Array.from(dataset.rows[0].records, r => r.id), ['as-control-1']);
   assert.equal(dataset.totals.actual, 12000);
+});
+
+test('Phase 7A-3: updateActualSpendBudgetOverride (the function Tag Budget calls) blocks a cross-year override and flags it, matching mapBudgetPool', () => {
+  const ctx = context();
+  const poolA = ctx.createBudgetPoolRecord({ id:'pool-tag-A', project:'AOA-MP', name:'Pool A', budget:100000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const poolB = ctx.createBudgetPoolRecord({ id:'pool-tag-B', project:'AOA-MP', name:'Pool B', budget:100000, startMonth:'2025-01', endMonth:'2025-12', spendTypes:['Software'] });
+  const memoRecord = ctx.createActualSpendRecord({
+    id:'actual-spend-memo-TAG-1', source:'Approved Memo', referenceNo:'TAG-1', memoId:'TAG-1',
+    project:'AOA-MP', spendType:'Software', amount:9000, startDate:'2026-05-01', endDate:'2026-05-01',
+  });
+  ctx.storeActualSpendRecords([memoRecord]);
+
+  const overridden = ctx.updateActualSpendBudgetOverride('TAG-1', 'pool-tag-B', [poolA, poolB]);
+  assert.equal(overridden.budgetStatus, 'Unbudgeted', 'Tag Budget\'s underlying mechanism must not silently accept a cross-year assignment as Manual Override');
+  assert.equal(overridden.mappingWarning, 'blocked-cross-year-override');
+  assert.equal(ctx.getFinalBudgetPoolId(overridden), null);
+
+  const validOverride = ctx.updateActualSpendBudgetOverride('TAG-1', 'pool-tag-A', [poolA, poolB]);
+  assert.equal(validOverride.budgetStatus, 'Manual Override');
+  assert.equal(validOverride.finalBudgetPoolId, 'pool-tag-A');
+});
+
+test('Phase 7A-3: Budget Pool deletion remains blocked by persisted manual expense / memo references even after a cross-year override is cleared from the canonical record', () => {
+  const ctx = context();
+  const poolB = ctx.createBudgetPoolRecord({ id:'pool-del-B', project:'AOA-MP', name:'Pool B', budget:100000, startMonth:'2025-01', endMonth:'2025-12', spendTypes:['Software'] });
+  const poolA = ctx.createBudgetPoolRecord({ id:'pool-del-A', project:'AOA-MP', name:'Pool A', budget:100000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+
+  // A manual expense whose cross-year override gets blocked at the canonical layer...
+  const manualRecord = ctx.createActualSpendRecord({
+    id:'as-del-manual-1', source:'Manual / Historical Expense', referenceNo:'DEL-1', project:'AOA-MP',
+    spendType:'Software', amount:4000, startDate:'2026-02-01', endDate:'2026-02-01',
+    manualBudgetPoolId:'pool-del-B',
+  });
+  const mappedManual = ctx.mapBudgetPool(manualRecord, [poolA, poolB]);
+  assert.equal(mappedManual.finalBudgetPoolId, null, 'sanity: the cross-year override is blocked at the canonical layer');
+
+  // ...but the raw, persisted sources (the manual expense's own record and the memo's own record)
+  // still reference the pool directly and are never touched by mapBudgetPool's blocking logic.
+  const rawManualExpense = { id:'manual-expense-1', budgetPoolId:'pool-del-B' };
+  const rawMemo = { memoNo:'MEMO-DEL-1', budgetPoolId:'pool-del-B' };
+
+  const canonicalOnly = ctx.budgetPoolDeletionBlockers('pool-del-B', [mappedManual]);
+  assert.equal(canonicalOnly.length, 0, 'the canonical record alone no longer blocks deletion once its override is cleared');
+
+  const withAllSources = ctx.budgetPoolDeletionBlockers('pool-del-B', [mappedManual], [rawManualExpense], [rawMemo]);
+  assert.equal(withAllSources.length, 2, 'the raw manual expense and memo still reference the pool, so deletion must remain blocked');
+
+  const unrelatedPool = ctx.budgetPoolDeletionBlockers('pool-del-A', [mappedManual], [rawManualExpense], [rawMemo]);
+  assert.equal(unrelatedPool.length, 0, 'an unrelated pool id is not blocked');
+});
+
+test('Phase 7A-3: saveBudgetTag guards against a cross-year selection before calling the override, rather than saving and discovering it silently later', () => {
+  // financial-models.test.js does not eval views/history.js (no execution harness exists for it
+  // here), so this is a structural check, not a behavioral one -- it confirms the guard exists
+  // and runs BEFORE the mutating call, ahead of the behavioral proof above (which shows what the
+  // shared updateActualSpendBudgetOverride mechanism itself does when reached).
+  const saveBudgetTagSource = (historyCode.match(/function saveBudgetTag[\s\S]*?\n}/) || [''])[0];
+  assert.ok(saveBudgetTagSource, 'saveBudgetTag() must still exist in views/history.js');
+  assert.match(saveBudgetTagSource, /gregorianYearToBuddhistEra/, 'must derive the memo\'s coverage year using the shared helper, not ad hoc logic');
+  assert.match(saveBudgetTagSource, /createBudgetPoolRecord/, 'must compare against the pool\'s canonical derived year, not its raw stored year');
+  const guardIndex = saveBudgetTagSource.search(/if \(memoYear[\s\S]*?return;\s*\n\s*}/);
+  const overrideCallIndex = saveBudgetTagSource.indexOf('updateActualSpendBudgetOverride(memoNo');
+  assert.ok(guardIndex >= 0 && overrideCallIndex >= 0 && guardIndex < overrideCallIndex,
+    'the cross-year guard must run and return BEFORE updateActualSpendBudgetOverride is ever called, so an invalid selection is never persisted');
+  // The guard must not fail open when no canonical Actual Spend record exists yet for this memo
+  // (e.g. stale/unrefreshed canonical storage) -- it must fall back to deriving the memo's own
+  // coverage date directly, using the same fallback chain actualSpendFromMemo() uses.
+  assert.match(saveBudgetTagSource, /memoCoveragePeriod/, 'must fall back to the memo\'s own coverage period when no canonical record is found yet, instead of silently skipping the check');
+});
+
+test('Phase 7A-3: mappingWarning survives createActualSpendRecord normalization (a store/reload cycle), not just mapBudgetPool\'s immediate return value', () => {
+  const ctx = context();
+  const poolA = ctx.createBudgetPoolRecord({ id:'pool-mw-A', project:'AOA-MP', name:'Pool A', budget:100000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const poolB = ctx.createBudgetPoolRecord({ id:'pool-mw-B', project:'AOA-MP', name:'Pool B', budget:100000, startMonth:'2025-01', endMonth:'2025-12', spendTypes:['Software'] });
+  const record = ctx.createActualSpendRecord({
+    id:'as-mw-1', source:'Manual / Historical Expense', referenceNo:'MW-1', project:'AOA-MP',
+    spendType:'Software', amount:3000, startDate:'2026-04-01', endDate:'2026-04-01',
+    manualBudgetPoolId:'pool-mw-B',
+  });
+  const mapped = ctx.mapBudgetPool(record, [poolA, poolB]);
+  assert.equal(mapped.mappingWarning, 'blocked-cross-year-override', 'sanity: mapBudgetPool sets the flag immediately');
+
+  // Simulate the real persistence path: reconcileActualSpendSources() stores via
+  // storeActualSpendRecords(), and a later render reads it back via loadActualSpendRecords() --
+  // both of which normalize every record through createActualSpendRecord().
+  ctx.storeActualSpendRecords([mapped]);
+  const reloaded = ctx.loadActualSpendRecords().find(r => r.id === 'as-mw-1');
+  assert.ok(reloaded, 'the record must still exist after the store/reload cycle');
+  assert.equal(reloaded.mappingWarning, 'blocked-cross-year-override', 'the flag must survive normalization, not only appear in the immediate in-memory result');
+  assert.equal(reloaded.budgetStatus, 'Unbudgeted');
+  assert.equal(reloaded.finalBudgetPoolId, null);
+
+  // Control: a record with no warning must not spuriously gain one after the same round trip.
+  const cleanRecord = ctx.createActualSpendRecord({ id:'as-mw-2', source:'Approved Memo', referenceNo:'MW-2', project:'AOA-MP', spendType:'Software', amount:1000, startDate:'2026-01', endDate:'2026-01' });
+  ctx.storeActualSpendRecords([cleanRecord]);
+  const reloadedClean = ctx.loadActualSpendRecords().find(r => r.id === 'as-mw-2');
+  assert.equal(reloadedClean.mappingWarning, null);
+});
+
+test('Phase 7A-3: Forecast remains unaffected by the same-year mapping / cross-year blocking changes', () => {
+  const ctx = context();
+  const poolA = ctx.createBudgetPoolRecord({ id:'pool-fc-A', project:'AOA-MP', name:'Pool A', budget:100000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const poolB = ctx.createBudgetPoolRecord({ id:'pool-fc-B', project:'AOA-MP', name:'Pool B', budget:100000, startMonth:'2025-01', endMonth:'2025-12', spendTypes:['Software'] });
+  const record = ctx.createActualSpendRecord({
+    id:'as-fc-1', source:'Manual / Historical Expense', referenceNo:'FC-1', project:'AOA-MP',
+    spendType:'Software', amount:12000, startDate:'2026-01', endDate:'2026-12', vendorProgram:'Suite',
+    manualBudgetPoolId:'pool-fc-B', // cross-year, will be blocked and flagged
+  });
+  const mapped = ctx.mapBudgetPool(record, [poolA, poolB]);
+  assert.equal(mapped.budgetStatus, 'Unbudgeted');
+  const forecast = ctx.calculateForecast([mapped], new Date(2026, 6, 15));
+  assert.equal(forecast.rows.length, 1, 'Forecast eligibility (spendType + coverageStatus) is unaffected by budgetStatus/mappingWarning');
+  assert.equal(forecast.rows[0].total, 12000);
 });
 
 test('shared calculation engine allocates canonical Actual Spend across coverage months', () => {

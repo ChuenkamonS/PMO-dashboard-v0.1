@@ -586,6 +586,55 @@ test('Phase 4 create, edit, and reload preserve amount, schedule, pool, Vendor P
   assert.equal(canonical.notes, 'Edited note');
 });
 
+test('Phase 7A-3: Manual Entry save-time validation uses the canonical derived Budget Pool year, not the raw stored year', async () => {
+  const context = createActualSpendContext();
+  // createActualSpendContext() evaluates app.js's real isPMO() into the context, which silently
+  // overwrites createBudgetContext()'s `isPMO: () => true` stub -- the real implementation reads
+  // #sb-user-btn/#sb-urole, which this test's DOM map never populates, so it would otherwise
+  // return false and saveManualExpenseFromModal() would bail out at its PMO-only guard before
+  // ever reaching the cross-year check under test. Restore the simple stub explicitly.
+  context.isPMO = () => true;
+  // Raw stored pool: label says Buddhist Era 2569, but its own dates are actually 2025 (true
+  // canonical derived year is 2568) -- simulates a pool whose raw year was never reconciled
+  // against its own dates.
+  context.storeBudgetPools([{
+    id:'pool-raw-mismatch', project:'AOA-MP', name:'Raw Mismatch Pool', budget:100000,
+    year:'2569', startMonth:'2025-01', endMonth:'2025-12', memoTypes:['sl'],
+  }]);
+
+  const elements = new Map();
+  const setField = (id, value) => elements.set(id, { id, value, textContent:'' });
+  setField('me-id', '');
+  setField('me-frequency', 'one_time');
+  setField('me-reference', '');
+  setField('me-project', 'AOA-MP');
+  setField('me-pool', 'pool-raw-mismatch');
+  setField('me-type', 'sl');
+  setField('me-description', 'Cross-year canonical check');
+  setField('me-date', '2026-03-15'); // 2026 -> BE 2569, disagrees with the pool's TRUE derived year 2568
+  setField('me-start', '');
+  setField('me-end', '');
+  setField('me-amount-input', '1000');
+  setField('me-vendor-program', '');
+  setField('me-notes', '');
+  context.document.getElementById = id => elements.get(id) || null;
+
+  let alertMessage = null;
+  context.alert = message => { alertMessage = message; };
+
+  await context.saveManualExpenseFromModal();
+  assert.ok(alertMessage && /คนละปี/.test(alertMessage), 'save must be blocked with a clear cross-year error, using the canonical (2568) year, not the raw stored (2569) year');
+  assert.equal(context.loadManualExpenses().length, 0, 'the invalid budgetPoolId must not be persisted');
+
+  // Control: the SAME raw (mismatched-label) pool, but an expense genuinely dated within its
+  // true canonical year (2025 / BE 2568), must be accepted.
+  alertMessage = null;
+  setField('me-date', '2025-06-15');
+  await context.saveManualExpenseFromModal();
+  assert.equal(alertMessage, null, 'a same-canonical-year expense must not be blocked');
+  assert.equal(context.loadManualExpenses().length, 1, 'a same-canonical-year expense must save successfully');
+});
+
 test('Phase 4 schema-lag reload preserves locally saved Vendor Program without using Notes', async () => {
   const context = createActualSpendContext();
   await context.saveManualExpenseAsync({

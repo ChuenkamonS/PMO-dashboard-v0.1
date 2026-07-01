@@ -1129,6 +1129,30 @@ function saveBudgetTag(memoNo) {
     const pools = typeof loadBudgetPools === 'function' ? loadBudgetPools() : [];
     const pool  = pools.find(p => p.id === selected);
     if (!pool) { alert('ไม่พบ Pool ที่เลือก'); return; }
+    // Cross-year Manual Override is not allowed for Tag Budget either (Phase 7A-3): the same
+    // rule that blocks a Manual Actual Spend override applies here, and it must not silently
+    // save — block before writing anything, with a clear error. Compare against the pool's
+    // CANONICAL derived year, not its raw stored year (loadBudgetPools() is unnormalized).
+    const canonicalPool = typeof createBudgetPoolRecord === 'function' ? createBudgetPoolRecord(pool) : pool;
+    const existingRecord = typeof loadActualSpendRecords === 'function'
+      ? loadActualSpendRecords().find(r => r.memoId === memoNo) : null;
+    let mappingDate = existingRecord && typeof actualSpendMappingDate === 'function'
+      ? actualSpendMappingDate(existingRecord) : null;
+    if (!mappingDate) {
+      // No canonical Actual Spend record yet (e.g. canonical storage hasn't been refreshed in
+      // this session) — derive the memo's own coverage date directly, mirroring
+      // actualSpendFromMemo()'s exact fallback chain, so the cross-year check is never silently
+      // skipped just because canonical storage happens to be stale or missing.
+      const coverage = typeof memoCoveragePeriod === 'function' ? memoCoveragePeriod(memo) : { startDate: null };
+      const fallbackDate = memo.approvedAt || memo.updatedAt || memo.createdAt || null;
+      mappingDate = coverage.startDate || (fallbackDate ? String(fallbackDate).slice(0, 10) : null);
+    }
+    const memoYear = mappingDate && typeof gregorianYearToBuddhistEra === 'function'
+      ? gregorianYearToBuddhistEra(mappingDate) : '';
+    if (memoYear && String(canonicalPool.year || '') !== memoYear) {
+      alert(`Budget Pool ที่เลือกอยู่คนละปีกับ Memo นี้ (Pool ปี ${canonicalPool.year || '-'}, Memo ปี ${memoYear})\nไม่สามารถ Tag Budget ข้ามปีได้ กรุณาเลือก Budget Pool ปีเดียวกับ Memo`);
+      return;
+    }
     newPoolId = pool.id;
     newSource = pool.project; // derive budgetSource from pool's project
   }

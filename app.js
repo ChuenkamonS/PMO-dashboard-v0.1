@@ -158,6 +158,9 @@ function createActualSpendRecord(input = {}) {
     manualBudgetPoolId: input.manualBudgetPoolId || null,
     finalBudgetPoolId: input.manualBudgetPoolId || input.finalBudgetPoolId || input.autoBudgetPoolId || null,
     budgetStatus: input.budgetStatus || 'Unbudgeted',
+    // Preserved across normalization so a blocked cross-year override (Phase 7A-3) stays
+    // detectable after a store/reload cycle, not only in mapBudgetPool()'s immediate return value.
+    mappingWarning: input.mappingWarning || null,
     createdBy: input.createdBy || '',
     createdAt: input.createdAt || now,
     updatedBy: input.updatedBy || '',
@@ -228,6 +231,12 @@ function createBudgetPoolRecord(input = {}) {
   const spendTypes = (hasCanonicalTypes && Array.isArray(input.spendTypes) ? input.spendTypes : legacyTypes)
     .filter(t => SPEND_TYPE_VALUES.includes(t));
   const memoTypes = spendTypes.map(t => SPEND_TYPE_TO_MEMO_TYPE[t]).filter(Boolean);
+  const effectiveStartDate = input.startDate || input.startMonth || null;
+  // Year is derived from the pool's own coverage start whenever date data exists — an
+  // independently-supplied input.year is never allowed to disagree with the pool's dates
+  // (see docs/BvA_REQUIREMENT.md "Phase 7A-1" §2). Only fall back to input.year when there is
+  // no date data to derive from at all.
+  const derivedYear = effectiveStartDate ? gregorianYearToBuddhistEra(effectiveStartDate) : '';
   return {
     id: input.id || '',
     project: input.project || '',
@@ -235,9 +244,9 @@ function createBudgetPoolRecord(input = {}) {
     budget: Number(input.budget) || 0,
     currency: input.currency || 'THB',
     spendTypes,
-    startDate: input.startDate || input.startMonth || null,
+    startDate: effectiveStartDate,
     endDate: input.endDate || input.endMonth || null,
-    year: input.year || null,
+    year: derivedYear || input.year || null,
     startMonth: input.startMonth || input.startDate || null,
     endMonth: input.endMonth || input.endDate || null,
     memoTypes,
@@ -258,6 +267,12 @@ function validateBudgetPoolRecord(input) {
   if (!record.spendTypes.length) errors.push('At least one Spend Type is required');
   if (!record.startDate || !record.endDate || !isValidCalendarRange(record.startDate, record.endDate)) {
     errors.push('Valid start/end month or date range is required');
+  } else {
+    const startParts = parseStrictCalendarValue(record.startDate);
+    const endParts = parseStrictCalendarValue(record.endDate);
+    if (startParts && endParts && startParts.year !== endParts.year) {
+      errors.push('Budget Pool must not span multiple years');
+    }
   }
   return { valid: errors.length === 0, errors, record };
 }
@@ -292,8 +307,16 @@ function validateBudgetPoolChange(input, existingPools = [], editId = null) {
   return { valid: errors.length === 0, errors, conflicts, record };
 }
 
-function budgetPoolDeletionBlockers(poolId, records = []) {
-  return records.filter(record => getFinalBudgetPoolId(record) === poolId);
+function budgetPoolDeletionBlockers(poolId, records = [], manualExpenses = [], memos = []) {
+  // A cross-year Manual Override being blocked (Phase 7A-3) clears the CANONICAL Actual Spend
+  // record's manualBudgetPoolId/finalBudgetPoolId — but it never touches the underlying manual
+  // expense's or memo's own persisted budgetPoolId field. Deletion must still be blocked if any
+  // of those raw, persisted sources still reference this pool, even though canonical
+  // reconciliation would no longer show an effective mapping to it.
+  const canonicalBlockers = records.filter(record => getFinalBudgetPoolId(record) === poolId);
+  const manualBlockers = manualExpenses.filter(expense => expense && expense.budgetPoolId === poolId);
+  const memoBlockers = memos.filter(memo => memo && memo.budgetPoolId === poolId);
+  return [...canonicalBlockers, ...manualBlockers, ...memoBlockers];
 }
 
 function loadFinancialRecords(storageKey) {
@@ -388,19 +411,47 @@ function actualSpendMappingDate(actualSpend = {}) {
 function findMatchingBudgetPools(actualSpend, pools = []) {
   const mappingDate = actualSpendMappingDate(actualSpend);
   if (!mappingDate) return [];
+  const recordYear = gregorianYearToBuddhistEra(mappingDate);
   return pools.filter(pool =>
     pool.project === actualSpend.project &&
     Array.isArray(pool.spendTypes) && pool.spendTypes.includes(actualSpend.spendType) &&
-    calendarValueInRange(mappingDate, pool.startDate || pool.startMonth, pool.endDate || pool.endMonth)
+    calendarValueInRange(mappingDate, pool.startDate || pool.startMonth, pool.endDate || pool.endMonth) &&
+    String(pool.year || '') === recordYear
   );
 }
 
 function mapBudgetPool(actualSpend, pools = []) {
   if (actualSpend.manualBudgetPoolId) {
+    const selectedPool = pools.find(pool => pool.id === actualSpend.manualBudgetPoolId);
+    if (selectedPool) {
+      const mappingDate = actualSpendMappingDate(actualSpend);
+      const sameYear = !mappingDate || String(selectedPool.year || '') === gregorianYearToBuddhistEra(mappingDate);
+      if (!sameYear) {
+        // Cross-year Manual Override is blocked (docs/BvA_REQUIREMENT.md "Phase 7A-1" §2/§4):
+        // clear every override/mapping field so getFinalBudgetPoolId() cannot resurrect the
+        // blocked pool, and flag it so this is detected/warned rather than silently normalized.
+        return {
+          ...actualSpend,
+          manualBudgetPoolId: null,
+          autoBudgetPoolId: null,
+          finalBudgetPoolId: null,
+          budgetStatus: BUDGET_STATUSES.UNBUDGETED,
+          mappingWarning: 'blocked-cross-year-override',
+        };
+      }
+    }
     return {
       ...actualSpend,
       finalBudgetPoolId: actualSpend.manualBudgetPoolId,
       budgetStatus: BUDGET_STATUSES.MANUAL_OVERRIDE,
+    };
+  }
+  if (actualSpend.source === ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE) {
+    return {
+      ...actualSpend,
+      autoBudgetPoolId: null,
+      finalBudgetPoolId: null,
+      budgetStatus: BUDGET_STATUSES.UNBUDGETED,
     };
   }
   const matches = findMatchingBudgetPools(actualSpend, pools);
@@ -530,6 +581,16 @@ function calculateBudgetUtilization(pool, records = []) {
 function financialYearToGregorian(year) {
   const numeric = Number(year);
   return numeric > 2400 ? String(numeric - 543) : String(numeric || '');
+}
+
+// Shared Gregorian -> Buddhist Era year helper (the inverse of financialYearToGregorian above).
+// Accepts either a full calendar value ("2026-01", "2026-01-15") or a bare year. Used wherever a
+// Budget Pool or Actual Spend coverage year needs to be derived and compared consistently, so year
+// conversion exists in exactly one place per docs/BvA_REQUIREMENT.md "Phase 7A-1" §2.
+function gregorianYearToBuddhistEra(dateOrYear) {
+  const parsed = parseStrictCalendarValue(dateOrYear);
+  const numeric = parsed ? parsed.year : Number(String(dateOrYear || '').slice(0, 4));
+  return numeric ? String(numeric + 543) : '';
 }
 
 function actualSpendOverlapsYear(record = {}, year) {
