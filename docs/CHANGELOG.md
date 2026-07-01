@@ -22,6 +22,33 @@
 
 ## Current Baseline
 
+### Phase C - Actual Spend Export Alignment
+#### Changed
+- Actual Spend CSV export now includes canonical record identity, currency, amount basis, coverage status, vendor/program, final Budget Pool, and optional Notes alongside the existing audit fields.
+- Existing Reference, date, and Budget Pool columns were clarified as Reference No, Start/End Date, and Final Budget Pool.
+- Export Amount remains the canonical total for the coverage period and continues to use the same filtered records as the UI.
+
+#### Tests
+- Added export coverage for canonical field alignment, UI/export total parity, and Approved Memo, Manual / Historical, and Infra Cost rows.
+
+### Phase B - Actual Spend Field Clarity
+#### Changed
+- The Manual Historical form now labels Monthly entries as a monthly amount and explains that the resulting total equals monthly amount multiplied by inclusive coverage months.
+- One-time entries are explicitly labeled as a one-time total without changing their calculation.
+- The Actual Spend import template now states that Amount is the total amount for the coverage period, not a monthly amount.
+
+#### Tests
+- Added focused label/helper coverage while retaining the existing one-time, monthly, Infra, and import validation behavior tests.
+
+### Phase A - Actual Spend Import Validation
+#### Changed
+- Actual Spend imports now reject unknown Source and Spend Type values with row-level field errors instead of coercing them to Manual/Historical or Others.
+- Approved Memo, Manual / Historical, and Infra Cost remain accepted; the supported Infrastructure label maps to the shared Infra Spend Type.
+- The import template now lists the accepted Source values and uses the Manual / Historical label.
+
+#### Tests
+- Added behavioral coverage for invalid enum rejection, all-or-nothing row validation, all three valid sources, and the supported Infrastructure alias.
+
 ### Infra Cost Entry Consolidation
 #### Changed
 - Actual Spend is now the only UI path for entering or importing Infra Cost spending.

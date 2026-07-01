@@ -329,12 +329,17 @@ function switchBudgetTab(tab, btn) {
 async function exportActualSpendCSV() {
   await refreshCanonicalActualSpend();
   const rows = filteredActualSpendRecords().map(record => [
-    record.source, record.referenceNo, record.spendType, record.project, record.amount,
-    record.startDate || '', record.endDate || '', record.finalBudgetPoolId || '', record.budgetStatus,
-    record.createdBy || '', record.description || '',
+    record.id || '', record.source, record.referenceNo, record.spendType, record.project, record.amount,
+    record.currency || '', 'Total for coverage period', record.startDate || '', record.endDate || '',
+    record.coverageStatus || '', record.vendorProgram || '', record.finalBudgetPoolId || '', record.budgetStatus,
+    record.createdBy || '', record.description || '', record.notes || '',
   ]);
   if (!rows.length) { alert('ไม่มีข้อมูล'); return; }
-  _downloadCSV('Actual_Spend', ['Source','Reference','Spend Type','Project','Amount','Start','End','Budget Pool','Budget Status','Created By','Description'], rows);
+  _downloadCSV('Actual_Spend', [
+    'Record ID','Source','Reference No','Spend Type','Project','Amount','Currency','Amount Basis',
+    'Start Date','End Date','Coverage Status','Vendor / Program','Final Budget Pool','Budget Status',
+    'Created By','Description','Notes',
+  ], rows);
 }
 
 function manualExpenseToActualSpend(expense) {
@@ -431,10 +436,19 @@ function actualSpendRecordInYear(record, year) {
 
 function actualSpendImportRow(row) {
   const get = (...keys) => keys.map(key => row[key]).find(value => value !== undefined && value !== '');
-  const rawSource = String(get('Source','source') || ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE).trim();
-  const source = rawSource.toLowerCase().includes('infra') ? ACTUAL_SPEND_SOURCES.INFRA_COST : ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE;
-  const rawType = get('Spend Type','spendType','Type','type') || (source === ACTUAL_SPEND_SOURCES.INFRA_COST ? 'Infra' : 'Others');
-  const spendType = SPEND_TYPE_VALUES.includes(rawType) ? rawType : spendTypeFromMemoType(rawType);
+  const rawSource = String(get('Source','source') || '').trim();
+  const sourceAliases = {
+    'approved memo': ACTUAL_SPEND_SOURCES.APPROVED_MEMO,
+    'manual / historical': ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE,
+    'manual / historical expense': ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE,
+    'infra cost': ACTUAL_SPEND_SOURCES.INFRA_COST,
+  };
+  const source = sourceAliases[rawSource.toLowerCase()] || rawSource;
+  const rawType = String(get('Spend Type','spendType','Type','type') || '').trim();
+  const canonicalType = SPEND_TYPE_VALUES.find(type => type.toLowerCase() === rawType.toLowerCase());
+  const spendType = rawType.toLowerCase() === 'infrastructure' && SPEND_TYPE_VALUES.includes(SPEND_TYPES.INFRA)
+    ? SPEND_TYPES.INFRA
+    : canonicalType || rawType;
   return {
     source, referenceNo:String(get('Reference No','Reference','referenceNo') || '').trim(),
     project:String(get('Project','project') || '').trim(), spendType,
@@ -450,7 +464,7 @@ function downloadActualSpendTemplate() {
   if (typeof XLSX === 'undefined') { alert('ไม่พบ SheetJS library'); return; }
   const headers = ['Source','Reference No','Spend Type','Project','Amount','Start Date','End Date','Vendor / Program','Description'];
   const samples = [
-    ['Manual / Historical Expense','HIST-2025-001','Hardware','AOA-MP',75000,'2025-11-15','2025-11-15','Vendor A','Historical laptop purchase'],
+    ['Manual / Historical','HIST-2025-001','Hardware','AOA-MP',75000,'2025-11-15','2025-11-15','Vendor A','Historical laptop purchase'],
     ['Infra Cost','INFRA-2026-001','Infra','TTB',24000,'2026-06','2026-08','AWS','Total infrastructure cost for the coverage period'],
   ];
   const template = XLSX.utils.aoa_to_sheet([headers, ...samples]);
@@ -460,9 +474,9 @@ function downloadActualSpendTemplate() {
   const instructions = XLSX.utils.aoa_to_sheet([
     ['Actual Spend Import Instructions'],
     ['Required columns','Source, Reference No, Spend Type, Project, Amount'],
-    ['Allowed Source','Manual / Historical Expense or Infra Cost. Approved Memo must come from the All Memo workflow.'],
+    ['Allowed Source','Approved Memo, Manual / Historical, or Infra Cost.'],
     ['Allowed Spend Type','Software, Hardware, Team Activity, Client Expense, Deployment, Infra, Others'],
-    ['Amount','Positive total amount in THB for the full coverage period.'],
+    ['Amount','Total amount for the coverage period (positive THB amount). Do not enter a monthly amount.'],
     ['Dates','Use YYYY-MM or YYYY-MM-DD. Start Date and End Date must use the same format.'],
     ['Duplicate rule','Source + Reference No + Project + Spend Type + Amount + Start Date + End Date. Duplicate rows are skipped.'],
     ['Validation','If any non-duplicate row is invalid, the complete import is rejected and nothing is saved.'],
@@ -1629,6 +1643,7 @@ function openManualExpenseModal(editId = null) {
         <span id="me-amount-label" style="font-size:12px;color:var(--blue-800)">Amount</span>
         <strong id="me-amount" style="color:var(--blue)">${money(g('amount',0))}</strong>
       </div>
+      <div id="me-amount-help" style="margin-top:5px;font-size:11px;color:var(--text-3)"></div>
       <div class="fg" style="margin-top:10px"><label>Notes</label>
         <textarea id="me-notes" class="ri" rows="2" placeholder="เหตุผลหรือรายละเอียดเพิ่มเติม">${esc(g('notes'))}</textarea>
       </div>
@@ -1661,8 +1676,12 @@ function manualExpenseRecalculate() {
   const monthly = document.getElementById('me-frequency')?.value === 'monthly';
   const amountEl = document.getElementById('me-amount');
   const labelEl = document.getElementById('me-amount-label');
+  const helpEl = document.getElementById('me-amount-help');
   if (amountEl) amountEl.textContent = money(amount);
-  if (labelEl) labelEl.textContent = monthly ? 'Amount per month' : 'Total amount';
+  if (labelEl) labelEl.textContent = monthly ? 'Monthly amount' : 'One-time total amount';
+  if (helpEl) helpEl.textContent = monthly
+    ? 'Monthly total = monthly amount × inclusive coverage months.'
+    : 'This amount is recorded once as the one-time total.';
   return amount;
 }
 

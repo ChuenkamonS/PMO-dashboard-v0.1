@@ -204,7 +204,88 @@ test('Actual Spend provides an Excel import template matching accepted columns a
   assert.match(html, /downloadActualSpendTemplate\(\)/);
   assert.match(budgetCode, /Source','Reference No','Spend Type','Project','Amount','Start Date','End Date','Vendor \/ Program','Description/);
   assert.match(budgetCode, /actual_spend_import_template\.xlsx/);
+  assert.match(budgetCode, /Total amount for the coverage period/);
+  assert.match(budgetCode, /Do not enter a monthly amount/);
   assert.match(budgetCode, /Source \+ Reference No \+ Project \+ Spend Type \+ Amount \+ Start Date \+ End Date/);
+});
+
+test('Manual Historical form distinguishes monthly amount from one-time total', () => {
+  assert.match(budgetCode, /monthly \? 'Monthly amount' : 'One-time total amount'/);
+  assert.match(budgetCode, /Monthly total = monthly amount × inclusive coverage months\./);
+  assert.match(budgetCode, /This amount is recorded once as the one-time total\./);
+});
+
+test('Actual Spend import rejects invalid Source and Spend Type with row-level field errors', () => {
+  const context = createActualSpendContext();
+  const invalidSource = context.actualSpendImportRow({
+    Source:'Legacy Upload', 'Reference No':'BAD-SOURCE', 'Spend Type':'Software', Project:'AOA-MP', Amount:100,
+  });
+  const invalidType = context.actualSpendImportRow({
+    Source:'Manual / Historical', 'Reference No':'BAD-TYPE', 'Spend Type':'Mystery', Project:'AOA-MP', Amount:100,
+  });
+  const result = context.validateActualSpendImport([invalidSource, invalidType]);
+  assert.equal(result.valid, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.errors)), [
+    { row:1, errors:['Invalid Source'] },
+    { row:2, errors:['Invalid Spend Type'] },
+  ]);
+  assert.equal(result.records.length, 0);
+});
+
+test('Actual Spend import preserves all valid sources and supported Infra aliases', () => {
+  const context = createActualSpendContext();
+  const rows = [
+    { Source:'Approved Memo', 'Reference No':'MEMO-1', 'Spend Type':'Software', Project:'AOA-MP', Amount:100 },
+    { Source:'Manual / Historical', 'Reference No':'HIST-1', 'Spend Type':'Hardware', Project:'AOA-MP', Amount:200 },
+    { Source:'Infra Cost', 'Reference No':'INFRA-1', 'Spend Type':'Infrastructure', Project:'AOA-MP', Amount:300 },
+  ].map(context.actualSpendImportRow);
+  const result = context.validateActualSpendImport(rows);
+  assert.equal(result.valid, true);
+  assert.deepEqual(Array.from(result.records, record => record.source), [
+    'Approved Memo', 'Manual / Historical Expense', 'Infra Cost',
+  ]);
+  assert.deepEqual(Array.from(result.records, record => record.spendType), ['Software', 'Hardware', 'Infra']);
+});
+
+test('Actual Spend export aligns canonical fields and totals for all three sources', async () => {
+  const context = createActualSpendContext();
+  const records = [
+    context.createActualSpendRecord({
+      id:'actual-spend-memo-1', source:'Approved Memo', referenceNo:'MEMO-1', spendType:'Software',
+      project:'AOA-MP', amount:1200, currency:'THB', startDate:'2026-01', endDate:'2026-03',
+      vendorProgram:'Product A', finalBudgetPoolId:'POOL-1', budgetStatus:'Mapped', createdBy:'Requester', description:'Memo spend',
+    }),
+    context.createActualSpendRecord({
+      id:'actual-spend-manual-1', source:'Manual / Historical Expense', referenceNo:'HIST-1', spendType:'Hardware',
+      project:'AOA-MP', amount:600, currency:'THB', startDate:'2026-02', endDate:'2026-04',
+      budgetStatus:'Unbudgeted', createdBy:'PMO', description:'Historical spend',
+    }),
+    context.createActualSpendRecord({
+      id:'actual-spend-infra-1', source:'Infra Cost', referenceNo:'INFRA-1', spendType:'Infra',
+      project:'TTB', amount:900, currency:'THB', startDate:'2026-01', endDate:'2026-03',
+      vendorProgram:'AWS', budgetStatus:'Unbudgeted', description:'Infrastructure cost',
+    }),
+  ];
+  let exported;
+  context.refreshCanonicalActualSpend = async () => records;
+  context.filteredActualSpendRecords = () => records;
+  context._downloadCSV = (filename, headers, rows) => { exported = { filename, headers, rows }; };
+
+  await context.exportActualSpendCSV();
+
+  assert.equal(exported.filename, 'Actual_Spend');
+  assert.deepEqual(Array.from(exported.headers), [
+    'Record ID','Source','Reference No','Spend Type','Project','Amount','Currency','Amount Basis',
+    'Start Date','End Date','Coverage Status','Vendor / Program','Final Budget Pool','Budget Status',
+    'Created By','Description','Notes',
+  ]);
+  assert.deepEqual(Array.from(exported.rows, row => row[1]), ['Approved Memo', 'Manual / Historical Expense', 'Infra Cost']);
+  assert.deepEqual(Array.from(exported.rows, row => row[7]), ['Total for coverage period', 'Total for coverage period', 'Total for coverage period']);
+  assert.deepEqual(Array.from(exported.rows, row => row[10]), ['Complete', 'Complete', 'Complete']);
+  assert.equal(exported.rows[2][11], 'AWS');
+  assert.equal(exported.rows[0][12], 'POOL-1');
+  assert.equal(exported.rows[1][16], '');
+  assert.equal(exported.rows.reduce((total, row) => total + row[5], 0), context.calculateActualSpend(records));
 });
 
 test('Overview KPI, chart, donut, and project comparison stay equal for 3M, 6M, and 12M filters', () => {
