@@ -22,6 +22,53 @@
 
 ## Current Baseline
 
+### Phase 7A-7 Follow-up - BvA Assignment Workspace UI Consistency Fix (pending review — not committed)
+#### Fixed
+- **Part 1 (stacked modals):** clicking a memo reference from the Budget Pool drill-down modal
+  (`showBvaActualSpend()`) previously opened the All Memo detail (`openMemoReadOnly()`) on top of
+  the still-open `bva-memo-panel` backdrop, stacking two modals. New `showBvaRecordDetail(recordId)`
+  closes `bva-memo-panel` first, then opens the detail — a no-op when called from the in-page
+  Budget Assignment Workspace, which has no such modal to begin with.
+- **Part 2 (cramped pool drill-down):** `showBvaActualSpend()`'s modal widened from 760px to 900px
+  (`max-width` 95vw → 96vw) and its row/header padding increased (7px 10px → 9px 12px) for
+  readability on desktop. Still the same lightweight, read-only 5-column table (Reference, Source,
+  Project, Spend Type, Amount) — no edit/assign action was added.
+- **Part 3 (wrong detail context):** both BvA-context reference links (`actualSpendRowsTable()`,
+  used by the pool drill-down and "all" modal; `budgetAssignmentRowsTable()`, used by the workspace)
+  now call `showBvaRecordDetail()` → `showActualSpendRecord()` — the same Actual Spend Detail
+  layout already used from the Actual Spend tab — instead of `openMemoReadOnly()`'s All Memo
+  approval/history detail. `views/history.js`/`openMemoReadOnly()` itself is unchanged; it remains
+  in use elsewhere (e.g. `showActualMemos()`), which is out of scope for this BvA-only fix.
+
+#### Investigated, no change needed
+- **Part 4 (manual modal consistency):** Manual Entries' "Edit" button and
+  `assignBudgetPoolFromWorkspace()`'s manual-origin path already both call the identical
+  `openManualExpenseModal(expenseId)` — confirmed via a new test asserting byte-identical rendered
+  HTML from both entry points. No second modal existed; only a regression test was added to guard
+  against future divergence.
+
+#### Unchanged
+- No change to `app.js`, `index.html`, mapping/validation logic (`mapBudgetPool()`,
+  `saveManualExpenseFromModal()`, `saveBudgetTag()`), Forecast, Import/Export, or the Supabase
+  schema. Infra Cost remains view-only, unimplemented by design.
+
+#### Tests
+- Added to `tests/budget-expenses.test.js`: opening a reference from the pool drill-down modal
+  leaves exactly one modal open (the Actual Spend detail, with the drill-down modal closed first);
+  the pool drill-down modal is wider and still shows exactly the five original fields with no
+  assign action; `showBvaRecordDetail()` opens the Actual Spend-style detail (not
+  `openMemoReadOnly()`); Manual Entries Edit and BvA workspace Assign render byte-identical Manual
+  Actual Spend modal HTML. Updated two existing tests whose assertions targeted the now-replaced
+  `openMemoReadOnly()` reference link to instead assert `showBvaRecordDetail()`. Upgraded
+  `createBvaContext()`'s DOM mock to track dynamically created/removed panels by id (needed to
+  actually exercise the "close the previous modal" fix in tests, rather than a silent no-op).
+
+#### Remaining Work / Deferred
+- Not committed — pending review per instruction.
+- Infra Cost Budget Pool assignment remains out of scope (view-only, unimplemented by design).
+- No redesign of the full Budget vs Actual tab was attempted — only the modal/detail consistency
+  issues named in this follow-up.
+
 ### Phase 7A-7 - Budget Assignment Workspace Navigation (pending review — not committed)
 #### Added
 - A dedicated Budget Assignment Workspace (`renderBudgetAssignmentWorkspace()`,

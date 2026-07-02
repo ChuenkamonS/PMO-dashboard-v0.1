@@ -2601,6 +2601,17 @@ function _renderBvaWith(pools) {
       </div>`).join('')}`;
 }
 
+// Reference/memo detail opened from a BvA context (Budget Pool drill-down modal or the Budget
+// Assignment Workspace) must use the Actual Spend-style detail (showActualSpendRecord()), not the
+// All Memo approval/history detail (openMemoReadOnly()) — here the user is reviewing Actual Spend
+// budget assignment, not a memo's approval history (Phase 7A-7 follow-up, Part 3). This also closes
+// any open BvA drill-down modal first, so opening a reference from it never stacks two modals/
+// backdrops (Part 1) — a no-op when called from the in-page workspace, which has no such modal.
+function showBvaRecordDetail(recordId) {
+  document.getElementById('bva-memo-panel')?.remove();
+  showActualSpendRecord(recordId);
+}
+
 // Shared one-row-per-record, single-line table used by every BvA / Budget Pool drill-down view —
 // the in-page Unbudgeted and Needs PMO Review sections in _renderBvaWith(), and the "all"/per-pool
 // modal in showBvaActualSpend(). `table-layout:fixed` plus per-cell text-overflow:ellipsis keeps
@@ -2608,14 +2619,12 @@ function _renderBvaWith(pools) {
 // Reference/Project value is (the full value is still available via the `title` tooltip).
 function actualSpendRowsTable(records) {
   if (!records.length) return `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:12px">ยังไม่มี Actual Spend</div>`;
-  const thS = 'padding:7px 10px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text-3);text-align:left;font-weight:600;text-transform:uppercase;white-space:nowrap';
-  const tdS = 'padding:7px 10px;border-bottom:1px solid var(--border);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+  const thS = 'padding:9px 12px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text-3);text-align:left;font-weight:600;text-transform:uppercase;white-space:nowrap';
+  const tdS = 'padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
   const referenceCell = record => {
     const ref = esc(record.referenceNo || '—');
     if (record.source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO && record.referenceNo) {
-      // openMemoReadOnly() is the existing shared read-only Memo viewer already used from the
-      // License/Device tabs (views/history.js) — reuse it instead of building a new memo view.
-      return `<span style="color:var(--blue);font-weight:600;text-decoration:underline;cursor:pointer" onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly('${esc(record.referenceNo)}')">${ref}</span>`;
+      return `<span style="color:var(--blue);font-weight:600;text-decoration:underline;cursor:pointer" onclick="showBvaRecordDetail('${esc(record.id)}')">${ref}</span>`;
     }
     return `<span style="font-weight:600">${ref}</span>`;
   };
@@ -2694,7 +2703,7 @@ function budgetAssignmentRowsTable(records) {
   const referenceCell = record => {
     const ref = esc(record.referenceNo || '—');
     if (record.source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO && record.referenceNo) {
-      return `<span style="color:var(--blue);font-weight:600;text-decoration:underline;cursor:pointer" onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly('${esc(record.referenceNo)}')">${ref}</span>`;
+      return `<span style="color:var(--blue);font-weight:600;text-decoration:underline;cursor:pointer" onclick="showBvaRecordDetail('${esc(record.id)}')">${ref}</span>`;
     }
     return `<span style="font-weight:600">${ref}</span>`;
   };
@@ -2787,12 +2796,16 @@ function showBvaActualSpend(scope) {
   panel.id    = 'bva-memo-panel';
   panel.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;display:flex;align-items:center;justify-content:center';
 
+  // Widened from 760px (Phase 7A-7 follow-up, Part 2) — the previous width read as cramped on
+  // desktop. Still a lightweight read-only list: same 5 fields (Reference, Source, Project, Spend
+  // Type, Amount), no edit/assign action added here — that stays exclusive to the Budget
+  // Assignment Workspace.
   panel.innerHTML = `
-    <div class="card" style="width:760px;max-width:95vw;max-height:85vh;overflow-x:hidden;overflow-y:auto;padding:0">
-      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--surface)">
+    <div class="card" style="width:900px;max-width:96vw;max-height:85vh;overflow-x:hidden;overflow-y:auto;padding:0">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--surface)">
         <div>
-          <div style="font-size:14px;font-weight:600">${esc(title)}</div>
-          <div style="font-size:11px;color:var(--text-3)">${records.length} items · ${money(Math.round(total))}</div>
+          <div style="font-size:15px;font-weight:600">${esc(title)}</div>
+          <div style="font-size:12px;color:var(--text-3)">${records.length} items · ${money(Math.round(total))}</div>
         </div>
         <button class="btn-sm" onclick="document.getElementById('bva-memo-panel').remove()" style="padding:4px 10px">✕</button>
       </div>

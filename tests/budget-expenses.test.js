@@ -92,15 +92,26 @@ function createBvaContext() {
     return elements.get(id);
   };
   ['bva-year','bva-project','bva-content','bva-untagged-alert'].forEach(element);
-  context.document.getElementById = id => elements.get(id) || null;
+  // Dynamically created modal panels (e.g. bva-memo-panel, actual-spend-record-detail) are tracked
+  // by id as they're appended/removed, so getElementById(id)?.remove() calls used to prevent
+  // stacked modals (Phase 7A-7 follow-up, Part 1) are actually exercised, not silent no-ops.
+  const dynamicPanels = new Map();
+  context.document.getElementById = id => elements.get(id) || dynamicPanels.get(id) || null;
   context.document.createElement = () => ({
     value:'', textContent:'', innerHTML:'', style:{}, id:'', options:[],
     appendChild(child) { this.options.push(child); },
     addEventListener() {},
-    remove() {},
+    remove() { if (this.id) dynamicPanels.delete(this.id); },
   });
-  context.document.body = { appendChild(el) { context.__lastPanel = el; }, removeChild() {} };
+  context.document.body = {
+    appendChild(el) {
+      context.__lastPanel = el;
+      if (el.id) dynamicPanels.set(el.id, el);
+    },
+    removeChild() {},
+  };
   context.__elements = elements;
+  context.__dynamicPanels = dynamicPanels;
   return context;
 }
 
@@ -1395,8 +1406,10 @@ test('Phase 7A-7: Budget Assignment Workspace lists Unbudgeted and Needs PMO Rev
   assert.match(html, /No matching Budget Pool|Manual Actual Spend has no assigned Budget Pool/);
   assert.match(html, /Multiple Budget Pools match/);
 
-  // Memo reference remains clickable through to the existing read-only Memo viewer.
-  assert.match(html, /onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly\('WS-MEMO-1'\)"/);
+  // Memo reference remains clickable, but through the Actual Spend-style detail (Phase 7A-7
+  // follow-up, Part 3) — not the All Memo approval/history viewer.
+  assert.match(html, /onclick="showBvaRecordDetail\('ws-memo-unbudgeted'\)"/);
+  assert.doesNotMatch(html, /openMemoReadOnly/, 'the Budget Assignment Workspace must not open the All Memo detail path');
 
   // Rendered directly in the page (table, no horizontal scroll), not a popup.
   assert.match(html, /table-layout:fixed/);
@@ -1605,11 +1618,10 @@ test('Phase 7A-5v2: BvA "all" drill-down includes Mapped, Unbudgeted, and Needs 
   const exported = context.budgetVsActualExportDataset(dataset);
   assert.equal(exported.totals.actual, dataset.totals.actual, 'export total must equal the drill-down/KPI total');
 
-  // Approved Memo rows are clickable through to the existing read-only Memo viewer...
-  assert.match(html, /onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly\('MEMO-UI-1'\)"/);
-  // ...but Manual/Historical and Infra Cost rows (no backing Memo) are not.
-  assert.doesNotMatch(html, /openMemoReadOnly\('MAN-UI-1'\)/);
-  assert.doesNotMatch(html, /openMemoReadOnly\('INFRA-UI-1'\)/);
+  // Approved Memo rows are clickable through to the Actual Spend-style detail (Phase 7A-7
+  // follow-up, Part 3) — not the All Memo approval/history viewer.
+  assert.match(html, /onclick="showBvaRecordDetail\('bva-ui-mapped'\)"/);
+  assert.doesNotMatch(html, /openMemoReadOnly/, 'BvA drill-down must not open the All Memo detail path');
 });
 
 test('Phase 7A-5v2: Budget Pool row drill-down shows one row per item, single line, without horizontal scroll', () => {
@@ -1622,6 +1634,77 @@ test('Phase 7A-5v2: Budget Pool row drill-down shows one row per item, single li
   assert.match(html, /table-layout:fixed/);
   assert.match(html, /overflow-x:hidden/);
   assert.doesNotMatch(html, /MAN-UI-1|INFRA-UI-1/, 'a pool drill-down must only show that pool\'s own records');
+});
+
+test('Phase 7A-7 follow-up Part 1: opening a reference from the BvA Budget Pool drill-down never stacks two modals', () => {
+  const context = createBvaContext();
+  seedBvaScenario(context);
+
+  context.showBvaActualSpend('bva-ui-pool');
+  assert.ok(context.__dynamicPanels.has('bva-memo-panel'), 'sanity: the pool drill-down modal is open');
+  assert.equal(context.__dynamicPanels.size, 1, 'sanity: only the drill-down modal is open before clicking a reference');
+
+  context.showBvaRecordDetail('bva-ui-mapped');
+
+  assert.equal(context.__dynamicPanels.has('bva-memo-panel'), false, 'the BvA drill-down modal must be closed before the detail opens');
+  assert.ok(context.__dynamicPanels.has('actual-spend-record-detail'), 'the Actual Spend detail must now be open');
+  assert.equal(context.__dynamicPanels.size, 1, 'exactly one modal/backdrop may be visible at a time');
+});
+
+test('Phase 7A-7 follow-up Part 2: Budget Pool drill-down modal is wider and keeps the same five fields, with no edit/assign action added', () => {
+  const context = createBvaContext();
+  seedBvaScenario(context);
+  context.showBvaActualSpend('bva-ui-pool');
+  const html = context.__lastPanel.innerHTML;
+  assert.match(html, /width:900px/, 'the modal must be widened for readability on desktop');
+  assert.match(html, /Reference<\/th>/);
+  assert.match(html, /Source<\/th>/);
+  assert.match(html, /Project<\/th>/);
+  assert.match(html, /Spend Type<\/th>/);
+  assert.match(html, /Amount<\/th>/);
+  assert.doesNotMatch(html, /assignBudgetPoolFromWorkspace/, 'the pool drill-down must stay read-only, not become the assignment workspace');
+});
+
+test('Phase 7A-7 follow-up Part 3: BvA reference detail opens the Actual Spend-style detail, not the All Memo approval detail', () => {
+  const context = createBvaContext();
+  seedBvaScenario(context);
+
+  let memoReadOnlyCalled = false;
+  context.openMemoReadOnly = () => { memoReadOnlyCalled = true; };
+
+  context.showBvaRecordDetail('bva-ui-mapped');
+  const html = context.__lastPanel.innerHTML;
+
+  assert.equal(memoReadOnlyCalled, false, 'the All Memo detail path must not be invoked from a BvA context');
+  assert.equal(context.__lastPanel.id, 'actual-spend-record-detail', 'must open the same detail modal already used from the Actual Spend tab');
+  assert.match(html, /Actual Spend Detail/);
+  assert.match(html, /Spend Details/, 'must use the Actual Spend-style grouped layout (Spend Details / Audit / Notes)');
+  assert.match(html, /MEMO-UI-1/, 'the canonical Reference No is still shown');
+});
+
+test('Phase 7A-7 follow-up Part 4: BvA manual assignment opens the exact same Manual Actual Spend modal as Manual Entries Edit', async () => {
+  const context = createBvaContext();
+  await context.saveManualExpenseAsync({
+    id:'consistency-manual-1', entryKind:'historical', referenceNo:'CONS-1', project:'AOA-MP',
+    expenseType:'hw', description:'Consistency check', frequency:'one_time', expenseDate:'2026-03-15',
+    quantity:1, unitCost:1500, amount:1500, vendorProgram:'', notes:'',
+  });
+  context.isPMO = () => true;
+  context.__elements.get('bva-year').value = '2569';
+  context.__elements.get('bva-project').value = 'all';
+  context._renderBvaWith([]); // reconciles the manual expense into canonical Actual Spend storage
+
+  // Simulates the Manual Entries "Edit" button: openManualExpenseModal(expense.id) directly.
+  context.openManualExpenseModal('consistency-manual-1');
+  const fromManualEntries = context.__lastPanel.innerHTML;
+
+  // Simulates assignBudgetPoolFromWorkspace()'s manual-origin path.
+  context.document.querySelector = () => null;
+  context.assignBudgetPoolFromWorkspace('actual-spend-manual-consistency-manual-1');
+  const fromWorkspace = context.__lastPanel.innerHTML;
+
+  assert.equal(fromWorkspace, fromManualEntries, 'both entry points must render the identical modal — no second manual edit modal exists');
+  assert.match(fromWorkspace, /Edit Manual Actual Spend/);
 });
 
 test('Phase 7A-5: Actual Spend source badges are distinct per source type', () => {
