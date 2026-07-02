@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "static-server",
+      "runtimeExecutable": "/opt/homebrew/opt/node/bin/node",
+      "runtimeArgs": ["/private/tmp/claude-501/-Users-chuenklommon-Documents-GitHub-PMO-dashboard-v0-1/0cea8028-738c-41d9-b70b-b8c0fa8bea00/scratchpad/static-server.js"],
+      "port": 8743
+    }
+  ]
+}
