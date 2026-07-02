@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## Phase 7A-11 — Overview Canonicalization (TD-7A-03) (2026-07-02)
+
+### Changed
+- Overview's Budget KPI card and Section B ("per-project Budget vs Actual bars") no longer read the legacy `loadSLBudgets()` store. Both now go through a new shared helper, `_ovCanonicalDataset()` (`views/budget.js`), which calls the exact same `calculateBudgetVsActualDataset()` engine the Budget vs Actual tab uses, scoped to the current BE year (Overview has no year selector).
+- `_ovUpdateKPIs()`: `annualBudget` is now `_ovCanonicalDataset().rows` filtered to Overview's active Project chips, summed by `row.budget` — replacing `loadSLBudgets()?.[currentYear][project]`. The existing month-range proration (`annualBudget / 12 * numMonths`) is unchanged.
+- `_ovRenderBvA()`: builds a `poolBudgetByProject` map from the same canonical dataset instead of `loadSLBudgets()?.[currentYear]`.
+- Updated two Thai UI label strings that named the old source ("งบ SL ตั้งไว้" → "งบจาก Budget Pool"; the Section B formula note's "Budget Settings" → "Budget Pool") and fixed a pre-existing dead link (`switchBudgetTab('sl-infra')` — not a real tab id — → `switchBudgetTab('bgt-settings')`) in the "no budget set yet" KPI empty state.
+- Overview's Actual Spend calculation, charts (bar/donut), month-range picker, Project/Type chip UI, and layout are all unchanged — they already read canonical Actual Spend via the shared `calculateActualSpendInRange()` helper, so no duplicated aggregation existed there.
+- Forecast tab (`_renderBudgetSLInfraWith()`, lines ~1147/1492) and Budget Settings still use `loadSLBudgets()` — intentionally untouched per this phase's explicit "do not change Forecast" scope boundary.
+
+### Unchanged (verified, not touched)
+- Actual Spend, Forecast, Assignment Workspace, Bulk Upload, Health Check — no files under those features were modified.
+- `calculateBudgetVsActualDataset()`, `calculateBudgetUtilization()`, `mapBudgetPool()`, and every other canonical calculation function (`app.js`) are untouched.
+- `loadSLBudgets()`, `loadSLBudgetsAsync()`, `storeSLBudgets()`, `getSLBudgetForProject()` remain defined and still used by the Forecast tab and Budget Settings — not dead code, not removed.
+
+### Manual verification (real browser data, not just test fixtures)
+- Confirmed Overview's Budget/Remaining/Utilization KPIs now derive from canonical Budget Pool data (Remaining went from the old always-nonsense figure to a real negative overage figure matching an actual over-budget Budget Pool total).
+- Confirmed a residual, pre-existing (not introduced by this phase) numeric gap between Overview and Budget vs Actual on real data for "current year, all projects": Overview showed Actual ฿250,173,597 / Budget ฿125,354,721 vs Budget vs Actual's Actual ฿250,857,150 / Budget ฿125,854,721. Root-caused to two UI-model differences explicitly out of scope for this phase (Overview's rolling month-window vs. Budget vs Actual's discrete calendar-year Actual calculation; Overview's Project chips being derived only from observed Actual Spend, excluding Budget-Pool-only projects) — documented as new technical debt **TD-7A-09**, not fixed here since fixing it requires an Overview UI redesign this phase explicitly disallows.
+
+### Tests
+- Added 4 tests to `tests/budget-expenses.test.js`: Budget KPI sourced from Budget Pool with `loadSLBudgets()` asserted to stay empty; full KPI (Budget/Actual/Remaining/Utilization) + Section B parity against `calculateBudgetVsActualDataset()` for a matching project/year (clean fixture, no Date mocking needed — the default 12-month preset is always exactly 12 months regardless of wall-clock time); chart/donut/KPI actual-total parity against the canonical dataset for the existing `seedOverview()` fixture; a static-scan regression test pinning "no remaining `loadSLBudgets(` call inside the Overview sub-tab section." Full suite: 265/265 passing (was 261; net +4).
+
+### Technical debt
+- TD-7A-03 (`docs/TECHNICAL_DEBT.md`): CLOSED.
+- TD-7A-09 (new): documents the residual rolling-window/chip-derivation gap above; explicitly deferred to a future Overview UI-design phase.
+
 ## Phase 7A-9E — Budget Pool overlap allowed (business rule update) (2026-07-02)
 
 ### Changed

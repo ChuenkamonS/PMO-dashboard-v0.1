@@ -1244,6 +1244,118 @@ test('Phase 7A-5v2: switching to Custom seeds the selectors with the currently a
   assert.equal(Number(fromIdx), 18, 'the "from" selector must reflect the currently applied 6-month window, not a stale default two years back');
 });
 
+// TD-7A-03 / Phase 7A-11: computes "what Budget vs Actual would show" the same way _renderBvaWith()
+// does internally (canonicalize pools, then calculateBudgetVsActualDataset()), without going
+// through DOM rendering — the same direct-call convention already used above (see the
+// 'Soft-deleting an imported manual expense...' test's `bva` variable).
+function bvaTotalsFor(context, filters) {
+  const canonicalPools = context.loadBudgetPools().map(context.createBudgetPoolRecord);
+  return context.calculateBudgetVsActualDataset(canonicalPools, context.loadActualSpendRecords(), filters).totals;
+}
+
+test('Phase 7A-11 (TD-7A-03): Overview Budget KPI is sourced from the canonical Budget Pool, not the legacy loadSLBudgets() store', () => {
+  const context = createOverviewContext();
+  const beYear = context.getCurrentBuddhistYear();
+  const gYear = Number(beYear) - 543;
+  context.storeBudgetPools([context.createBudgetPoolRecord({
+    id: 'parity-pool-basic', project: 'ParityCo', name: 'Parity Pool', budget: 24000,
+    startMonth: `${gYear}-01`, endMonth: `${gYear}-12`, spendTypes: ['Software'],
+  })]);
+  context.storeActualSpendRecords([context.createActualSpendRecord({
+    id: 'parity-actual-basic', source: 'Approved Memo', referenceNo: 'PARITY-BASIC-1', memoId: 'PARITY-BASIC-1',
+    project: 'ParityCo', spendType: 'Software', amount: 1000, startDate: monthKey(0), endDate: monthKey(0),
+  })]);
+
+  context.renderBudgetOverview();
+
+  // loadSLBudgets() is read cross-realm (vm context) — compare via JSON, not assert.deepEqual,
+  // which treats same-shaped objects from different vm realms as unequal.
+  assert.equal(JSON.stringify(context.loadSLBudgets()), '{}',
+    'the legacy SL budget store must stay empty — Overview must never read or write it');
+  const parseMoney = value => Number(String(value).replace(/[^\d.-]/g, ''));
+  assert.equal(parseMoney(context.__elements.get('bgt-kpi-budget').textContent), 24000,
+    'Overview must show the canonical Budget Pool total (24000/12*12), not "—", with no legacy SL budget configured');
+});
+
+test('Phase 7A-11 (TD-7A-03): Overview KPI (Budget/Actual/Remaining/Utilization) exactly matches Budget vs Actual for the same project and year', () => {
+  const context = createOverviewContext();
+
+  const beYear = context.getCurrentBuddhistYear();
+  const gYear = Number(beYear) - 543;
+  context.storeBudgetPools([context.createBudgetPoolRecord({
+    id: 'parity-pool', project: 'ParityCo', name: 'Parity Pool', budget: 24000,
+    startMonth: `${gYear}-01`, endMonth: `${gYear}-12`, spendTypes: ['Software'],
+  })]);
+  context.storeActualSpendRecords([context.createActualSpendRecord({
+    id: 'parity-actual', source: 'Approved Memo', referenceNo: 'PARITY-1', memoId: 'PARITY-1',
+    project: 'ParityCo', spendType: 'Software', amount: 6000,
+    startDate: monthKey(-11), endDate: monthKey(0),
+  })]);
+
+  // Overview: default preset is a rolling 12-month window (numMonths === 12 regardless of "now"),
+  // and the sole observed project/type are auto-activated by _ovInitState().
+  context.renderBudgetOverview();
+
+  // Budget vs Actual: same project, current BE year — the canonical engine directly, the exact
+  // same call _renderBvaWith() (the real BvA tab) makes.
+  const bva = bvaTotalsFor(context, { year: beYear, project: 'ParityCo' });
+
+  assert.equal(bva.budget, 24000);
+  assert.equal(bva.actual, 6000);
+  assert.equal(bva.remaining, 18000);
+  assert.equal(bva.utilizationPercent, 25);
+
+  const parseMoney = value => Number(String(value).replace(/[^\d.-]/g, ''));
+  assert.equal(parseMoney(context.__elements.get('bgt-kpi-budget').textContent), bva.budget,
+    'Overview Budget KPI must equal Budget vs Actual Budget for the same project/year');
+  assert.equal(parseMoney(context.__elements.get('bgt-kpi-total').textContent), bva.actual,
+    'Overview Actual KPI must equal Budget vs Actual Actual for the same project/year');
+  assert.equal(parseMoney(context.__elements.get('bgt-kpi-remaining').textContent), bva.remaining,
+    'Overview Remaining KPI must equal Budget vs Actual Remaining for the same project/year');
+  assert.match(context.__elements.get('bgt-kpi-remaining-sub').textContent, new RegExp(`${bva.utilizationPercent}%`),
+    'Overview Utilization % must equal Budget vs Actual utilizationPercent for the same project/year');
+
+  // Section B (per-project Budget vs Actual bars) must reconcile too — same source, same numbers.
+  const rowsHtml = context.__elements.get('ov-bva-rows').innerHTML;
+  assert.match(rowsHtml, /6,000 \/ ฿24,000/,
+    'Overview Section B must render the same canonical Budget/Actual figures as Budget vs Actual');
+});
+
+test('Phase 7A-11 (TD-7A-03): Overview chart/donut/KPI actual total matches Budget vs Actual actual total for the same scope', () => {
+  const context = createOverviewContext();
+  seedOverview(context);
+
+  context.renderBudgetOverview();
+  const overview = overviewTotals(context);
+
+  // No Budget Pool exists in this fixture (seedOverview() seeds Actual Spend only), so every record
+  // is Unbudgeted — Budget vs Actual's totals.actual still counts them (Phase 7A-4), giving a
+  // like-for-like Actual total to compare Overview's KPI/chart/donut against.
+  const bva = bvaTotalsFor(context, { year: context.getCurrentBuddhistYear() });
+
+  assert.equal(overview.kpi, bva.actual,
+    'Overview KPI Actual must equal Budget vs Actual Actual for the same (unfiltered) scope');
+  assert.equal(overview.chart, bva.actual,
+    'Overview chart total must equal Budget vs Actual Actual — no duplicated aggregation');
+  assert.equal(overview.donut, bva.actual,
+    'Overview donut total must equal Budget vs Actual Actual — no duplicated aggregation');
+});
+
+test('Phase 7A-11 (TD-7A-03): the Overview sub-tab section contains no remaining loadSLBudgets() dependency', () => {
+  const budgetSource = fs.readFileSync(path.join(root, 'views/budget.js'), 'utf8');
+  const start = budgetSource.indexOf('SUB-TAB 1: OVERVIEW');
+  const end = budgetSource.indexOf('SUB-TAB 2: SL + INFRA');
+  assert.ok(start > -1 && end > start, 'Overview sub-tab markers must exist in views/budget.js');
+  const overviewSection = budgetSource.slice(start, end);
+  // Strip full-line comments first — this file's own explanatory comments legitimately mention
+  // "loadSLBudgets(" in prose (documenting what was removed); only real code references matter here.
+  const codeOnly = overviewSection.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+  assert.doesNotMatch(codeOnly, /loadSLBudgets\(/,
+    'Overview must no longer read the legacy SL budget store directly (TD-7A-03)');
+  assert.match(overviewSection, /_ovCanonicalDataset\(\)/,
+    'Overview must source Budget figures from the shared Budget vs Actual dataset engine');
+});
+
 function seedOverviewManyProjects(context, count) {
   const records = Array.from({ length: count }, (_, i) => context.createActualSpendRecord({
     id: `many-proj-${i}`, source: 'Manual / Historical Expense', referenceNo: `MP-${i}`,

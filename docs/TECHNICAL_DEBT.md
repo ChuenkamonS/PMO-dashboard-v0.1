@@ -174,7 +174,7 @@ Legacy Overview Budget Source
 
 Status
 
-OPEN
+CLOSED (Phase 7A-11) — see residual gap TD-7A-09
 
 Priority
 
@@ -184,7 +184,7 @@ Owner Phase
 
 Overview Cleanup
 
-Current Situation
+Original Situation
 
 Overview BvA still reads
 
@@ -198,10 +198,100 @@ Risk
 
 Overview Budget totals may differ from Budget vs Actual.
 
+Resolution (Phase 7A-11)
+
+`_ovUpdateKPIs()` and `_ovRenderBvA()` (`views/budget.js`) no longer call `loadSLBudgets()`. Both now
+read a new shared helper, `_ovCanonicalDataset()`, which calls the exact same
+`calculateBudgetVsActualDataset()` engine the Budget vs Actual tab uses (`_renderBvaWith()`),
+scoped to the current BE year. Overview's Budget KPI card and Section B project bars sum
+`row.budget` from that dataset's `rows` per active project, instead of an independent
+`loadSLBudgets()[year][project]` lookup. `loadSLBudgets()` itself, and its remaining call sites in
+the Forecast tab (`_renderBudgetSLInfraWith()`) and Budget Settings, are unchanged and untouched —
+out of scope per this phase's explicit "do not change Forecast" instruction (see TD-7A-09).
+
+Exit Criteria (met)
+
+- [x] Overview uses canonical Budget Pool (via the shared dataset engine, not a re-derived query).
+- [x] Overview and Budget vs Actual reconcile exactly for the same project + full current year
+      (proven by tests in `tests/budget-expenses.test.js`, Phase 7A-11).
+- [ ] Full reconciliation for every arbitrary Overview month-range/project-chip combination is a
+      separate, larger UI change — see TD-7A-09 (explicitly deferred, not required by this phase's
+      "do not redesign Overview UI" instruction).
+
+Regression Tests
+
+- `tests/budget-expenses.test.js`: Budget KPI sourced from Budget Pool with `loadSLBudgets()`
+  asserted empty; KPI/Section-B parity with `calculateBudgetVsActualDataset()` for a matching
+  project+year; chart/donut/KPI actual-total parity for the unfiltered scope; static scan confirming
+  no remaining `loadSLBudgets(` call inside the Overview sub-tab section.
+
+---
+
+# TD-7A-09
+
+Title
+
+Overview Rolling-Window vs Budget vs Actual Calendar-Year Divergence
+
+Status
+
+OPEN (documented, accepted for Phase 7A-11)
+
+Priority
+
+Low
+
+Introduced
+
+Phase 7A-11
+
+Owner Phase
+
+Overview Cleanup (future UI phase)
+
+Reason
+
+Phase 7A-11 replaced Overview's legacy `loadSLBudgets()` Budget source with the canonical Budget
+Pool total (TD-7A-03), so Budget now comes from the same engine as Budget vs Actual. Two other,
+pre-existing differences between the two views were explicitly out of scope ("do not redesign
+Overview UI / do not change layout") and remain:
+
+1. Overview's "Actual" figure (`calculateActualSpendInRange()`) allocates each record's amount
+   across its coverage months and sums only the months inside the selected rolling window (e.g. the
+   trailing 12 months ending "now"). Budget vs Actual's "Actual" (`calculateActualSpend()` +
+   `actualSpendOverlapsYear()`) counts a record's full amount once for any discrete calendar year it
+   overlaps. For a record that spans a year boundary, or an Overview window that isn't aligned to a
+   full Jan–Dec calendar year (the common case, since "now" is usually mid-year), the two totals can
+   differ by a small amount.
+2. Overview's Project/Spend Type chips (`_ov.activeProjKeys`/`_ov.activeTypeKeys`) are derived from
+   observed canonical Actual Spend records, not from Budget Pool. A project with a Budget Pool but
+   zero Actual Spend records never appears as a chip, so its budget is silently excluded from
+   Overview's Budget KPI sum — while Budget vs Actual's "All Projects" filter includes it. Verified
+   against real browser data during Phase 7A-11 manual testing (see CHANGELOG.md): Overview showed
+   Actual ฿250,173,597 / Budget ฿125,354,721 vs Budget vs Actual's Actual ฿250,857,150 / Budget
+   ฿125,854,721 for the same nominal "current year, all projects" scope.
+
+Current Situation
+
+Both are real, verified, reproducible differences on production-shaped data. Overview and Budget vs
+Actual reconcile exactly only when: Overview's active project chips already cover every project with
+a current-year Budget Pool, and Overview's selected month range is exactly Jan–Dec of the current
+Gregorian year (a full 12-month, calendar-aligned window) — not just "12 months" in general.
+
+Risk
+
+A PMO user comparing Overview's KPI card to the Budget vs Actual tab side-by-side for "the same
+project/year" can see numbers that are close but not bit-identical, unless the month range happens
+to be calendar-aligned and every relevant project has at least one Actual Spend record.
+
 Exit Criteria
 
-- Overview uses canonical Budget Pool.
-- Overview and BvA reconcile exactly.
+- Decide (separate UI-design phase, not a data-source fix) whether Overview's month-range picker
+  should gain a calendar-year-aligned mode, and whether its Project/Type chip universe should include
+  Budget-Pool-only projects — both are UI/behavior changes, not calculation-engine changes, so they
+  require their own reviewed scope, distinct from TD-7A-03's "duplicate calculation" fix.
+- Until then, this gap is accepted; it must not be quietly re-introduced as a "calculation bug" fix
+  attempt without addressing the chip-derivation and rolling-window design questions above.
 
 ---
 

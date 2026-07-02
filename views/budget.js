@@ -870,6 +870,18 @@ function _ovRenderChips() {
   if (tc) tc.textContent = _ov.activeTypeKeys.size === typeKeys.length ? '(all)' : `(${_ov.activeTypeKeys.size}/${typeKeys.length})`;
 }
 
+// Canonical Budget vs Actual dataset for Overview's Budget/Remaining/Utilization figures. Reads
+// the same Budget Pool + Actual Spend sources through the single shared
+// calculateBudgetVsActualDataset() engine that the Budget vs Actual tab uses (see _renderBvaWith()),
+// replacing the legacy loadSLBudgets() store (docs/TECHNICAL_DEBT.md TD-7A-03,
+// docs/MASTER_SPEC.md §11). Scoped to the current BE year only — Overview has no year selector, and
+// this matches the year loadSLBudgets() used to be keyed on. Overview's own Project/Spend Type chip
+// filters and month-range are applied by each caller afterward, not here.
+function _ovCanonicalDataset() {
+  const canonicalPools = loadBudgetPools().map(createBudgetPoolRecord);
+  return calculateBudgetVsActualDataset(canonicalPools, loadActualSpendRecords(), { year: getCurrentBuddhistYear() });
+}
+
 // ── KPIs ──
 function _ovUpdateKPIs() {
   const months    = _ov.allMonths.slice(_ov.fromIdx, _ov.toIdx + 1);
@@ -884,10 +896,10 @@ function _ovUpdateKPIs() {
   );
   const total = calculateActualSpendInRange(records, fromKey, toKey);
 
-  // ── Budget from SL settings (SL only — no budget for other types yet) ──
-  const currentYear  = getCurrentBuddhistYear();
-  const slBudgets    = loadSLBudgets()?.[currentYear] || {};
-  const annualBudget = projArr.reduce((s, p) => s + (slBudgets[p] || 0), 0);
+  // ── Budget from canonical Budget Pool, via the shared Budget vs Actual dataset engine (TD-7A-03) ──
+  const annualBudget = _ovCanonicalDataset().rows
+    .filter(row => projArr.includes(row.pool.project))
+    .reduce((s, row) => s + row.budget, 0);
   const budgetTotal  = annualBudget > 0 ? (annualBudget / 12) * numMonths : 0;
 
   // ── Forecast: smooth 3-month avg of SL spend × remaining months + non-SL YTD rate ──
@@ -914,7 +926,7 @@ function _ovUpdateKPIs() {
     const rem      = budgetTotal - total;
     const remColor = total > budgetTotal ? 'var(--red)' : pct >= 90 ? 'var(--amber)' : 'var(--green)';
     setText('bgt-kpi-budget', money(Math.round(budgetTotal)));
-    setText('bgt-kpi-budget-sub', `งบ SL ตั้งไว้ ${numMonths} เดือน`);
+    setText('bgt-kpi-budget-sub', `งบจาก Budget Pool ${numMonths} เดือน`);
     const remEl = document.getElementById('bgt-kpi-remaining');
     if (remEl) { remEl.textContent = money(Math.round(rem)); remEl.style.color = remColor; }
     setText('bgt-kpi-remaining-sub', `ใช้งบประมาณแล้ว ${pct}%`);
@@ -925,7 +937,7 @@ function _ovUpdateKPIs() {
   } else {
     setText('bgt-kpi-budget', '—');
     const budEl = document.getElementById('bgt-kpi-budget-sub');
-    if (budEl) budEl.innerHTML = `ยังไม่ได้ตั้งงบ — <span style="color:var(--blue);cursor:pointer;text-decoration:underline" onclick="switchBudgetTab('sl-infra');switchSLNav('budgetsettings')">ตั้งค่าที่นี่</span>`;
+    if (budEl) budEl.innerHTML = `ยังไม่ได้ตั้งงบ — <span style="color:var(--blue);cursor:pointer;text-decoration:underline" onclick="switchBudgetTab('bgt-settings')">ตั้งค่าที่นี่</span>`;
     setText('bgt-kpi-remaining', '—');
     setText('bgt-kpi-remaining-sub', 'ต้องตั้งงบก่อน');
     const fEl = document.getElementById('bgt-kpi-forecast');
@@ -1052,8 +1064,11 @@ function _ovRenderBvA() {
   const toKey     = months[months.length - 1]?.key;
   const numMonths = months.length;
   const projKeys  = [..._ov.activeProjKeys];
-  const currentYear = getCurrentBuddhistYear();
-  const slBudgets   = loadSLBudgets()?.[currentYear] || {};
+  // Canonical Budget Pool totals per project (TD-7A-03) — replaces the legacy loadSLBudgets() store.
+  const poolBudgetByProject = new Map();
+  _ovCanonicalDataset().rows.forEach(row => {
+    poolBudgetByProject.set(row.pool.project, (poolBudgetByProject.get(row.pool.project) || 0) + row.budget);
+  });
 
   // Render BvA project chips
   const canonical = loadActualSpendRecords();
@@ -1073,7 +1088,7 @@ function _ovRenderBvA() {
       fromKey, toKey, { project:proj },
     );
 
-    const annualBgt = slBudgets[proj] || 0;
+    const annualBgt = poolBudgetByProject.get(proj) || 0;
     const budget    = annualBgt > 0 ? (annualBgt / 12) * numMonths : null;
     const hasBudget = budget !== null && budget > 0;
     const pct       = hasBudget ? Math.round(actual / budget * 100) : null;
@@ -1091,7 +1106,7 @@ function _ovRenderBvA() {
   const noteEl = document.getElementById('ov-bva-formula');
   if (noteEl) {
     noteEl.innerHTML = `
-      <span style="font-weight:500">Budget</span> = งบรายปีที่ตั้งใน Budget Settings ÷ 12 × ${numMonths} เดือน &nbsp;·&nbsp;
+      <span style="font-weight:500">Budget</span> = งบรวมจาก Budget Pool ปีปัจจุบัน ÷ 12 × ${numMonths} เดือน &nbsp;·&nbsp;
       <span style="font-weight:500">Actual</span> = Actual Spend ที่ผ่านตัวกรอง โดยกระจายยอดตาม coverage period`;
   }
 
