@@ -576,7 +576,7 @@ async function saveSettings() {
 function refreshProjectDropdowns(projects) {
   const projectSelects = [
     'f-project',
-    'hist-project', 'bgt-project', 'lic-project',
+    'hist-project', 'lic-project',
     'dev-filter-project', 'dev-project',
   ];
   const opts = projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
@@ -589,7 +589,7 @@ function refreshProjectDropdowns(projects) {
     const prev = el.value;
     if(id === 'f-project') {
       el.innerHTML = `<option value="">— เลือกโครงการ —</option>` + opts + `<option value="other">อื่นๆ (กรอกเอง)</option>`;
-    } else if(['hist-project','bgt-project','dev-filter-project'].includes(id)) {
+    } else if(['hist-project','dev-filter-project'].includes(id)) {
       el.innerHTML = optsWithAll;
     } else {
       el.innerHTML = optsWithBlank;

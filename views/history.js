@@ -974,7 +974,7 @@ function openBudgetTagModal(memoNo) {
   const allMemos   = typeof loadMemos === 'function' ? loadMemos().filter(m => m.status === 'completed') : [];
 
   // Current year (BE) for default filter
-  const currentYear = String(new Date().getFullYear() + 543);
+  const currentYear = getCurrentBuddhistYear();
   const yearKey     = 'btm-year-filter-' + memoNo;
 
   function getFilterYear() {

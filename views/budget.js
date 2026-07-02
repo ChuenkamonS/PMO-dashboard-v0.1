@@ -867,7 +867,7 @@ function _ovUpdateKPIs() {
   const total = calculateActualSpendInRange(records, fromKey, toKey);
 
   // ── Budget from SL settings (SL only — no budget for other types yet) ──
-  const currentYear  = String(new Date().getFullYear() + 543);
+  const currentYear  = getCurrentBuddhistYear();
   const slBudgets    = loadSLBudgets()?.[currentYear] || {};
   const annualBudget = projArr.reduce((s, p) => s + (slBudgets[p] || 0), 0);
   const budgetTotal  = annualBudget > 0 ? (annualBudget / 12) * numMonths : 0;
@@ -1034,7 +1034,7 @@ function _ovRenderBvA() {
   const toKey     = months[months.length - 1]?.key;
   const numMonths = months.length;
   const projKeys  = [..._ov.activeProjKeys];
-  const currentYear = String(new Date().getFullYear() + 543);
+  const currentYear = getCurrentBuddhistYear();
   const slBudgets   = loadSLBudgets()?.[currentYear] || {};
 
   // Render BvA project chips
@@ -1111,7 +1111,7 @@ function _renderBudgetSLInfraWith(infraEntries) {
   const infraProjs = getInfraProjects(infraEntries);
 
   // Include Company-Wide + projects from SL memo budget sources
-  const slBudgetProjects = Object.keys(loadSLBudgets()?.[String(new Date().getFullYear()+543)] || {});
+  const slBudgetProjects = Object.keys(loadSLBudgets()?.[getCurrentBuddhistYear()] || {});
   const memoSources = [...new Set(
     loadMemos().filter(m=>memoStatusKey(m)==='completed'&&m.type==='sl')
       .map(m => m.budgetSource || m.project || '(ไม่ระบุ)')
@@ -1164,7 +1164,9 @@ function parseThaiDate(str) {
   const m1 = cleaned.match(/^(\d{1,2})\s+(\S+)\s+(\d{4})$/);
   if(m1) {
     const mo = THAI_MONTHS[m1[2]];
-    const yr = parseInt(m1[3]) - 543; // Buddhist Era to CE
+    // Thai month-name dates are always BE; route through the one shared BE->CE helper instead of
+    // a local "-543" (Phase 7A-9A, folding parseThaiDate onto financialYearToGregorian()).
+    const yr = Number(financialYearToGregorian(m1[3]));
     if(mo !== undefined && yr > 1900) return new Date(yr, mo, parseInt(m1[1]));
   }
   // dd/mm/yy or dd/mm/yyyy
@@ -1172,7 +1174,7 @@ function parseThaiDate(str) {
   if(m2) {
     let yr = parseInt(m2[3]);
     if(yr < 100) yr += 2500; // treat as Buddhist Era short
-    if(yr > 2100) yr -= 543;
+    yr = Number(financialYearToGregorian(yr));
     return new Date(yr, parseInt(m2[2])-1, parseInt(m2[1]));
   }
   console.warn('[parseThaiDate] ไม่สามารถ parse วันที่ได้:', str, '— จะใช้ createdAt/approvedAt แทน');
@@ -1453,7 +1455,7 @@ function _renderBudgetVsActual(allProjects, infraEntries, licByProj) {
   });
 
   // Budget per project — from Budget Settings (annual ÷ 12 × range)
-  const currentYear = String(new Date().getFullYear() + 543); // Thai Buddhist year
+  const currentYear = getCurrentBuddhistYear(); // Thai Buddhist year
   const slBudgets   = loadSLBudgets()?.[currentYear] || {};
   const projData = allProjects.map(proj => {
     // Infra: sum monthly costs for entries active within the range
@@ -2471,8 +2473,22 @@ function closeBudgetAssignmentWorkspace() {
   return renderBudgetVsActual();
 }
 
+// Shared BE year options for the Budget Pool year selects (`bva-year`, `bset-year`). Replaces the
+// two independently hardcoded 2568/2569/2570 option lists that used to live in index.html — those
+// would have silently run out of "current year" past BE 2570 (Phase 7A-9A, closing
+// docs/BvA_REQUIREMENT.md "Phase 7A-1" §2 Known Issue #2 at the UI layer). Populated once per page
+// load (guarded by an empty `<select>`), not re-derived on every render.
+function populateBudgetYearSelect(id) {
+  const el = document.getElementById(id);
+  if (!el || el.options.length) return;
+  const current = Number(getCurrentBuddhistYear());
+  const years = [current - 1, current, current + 1];
+  el.innerHTML = years.map(y => `<option value="${y}" ${y === current ? 'selected' : ''}>${y}</option>`).join('');
+}
+
 function _renderBvaWith(pools) {
-  const yearVal   = document.getElementById('bva-year')?.value || '2569';
+  populateBudgetYearSelect('bva-year');
+  const yearVal   = document.getElementById('bva-year')?.value || getCurrentBuddhistYear();
   const projVal   = document.getElementById('bva-project')?.value || 'all';
   const typeVal   = document.getElementById('bva-type')?.value || 'all';
   const searchVal = document.getElementById('bva-search')?.value || '';
@@ -2863,7 +2879,7 @@ function downloadBudgetPoolTemplate() {
   const headers = ['Project','Pool Name','Budget (THB)','Year (BE)','Start Month (YYYY-MM)','End Month (YYYY-MM)','Memo Types (SL,HW,INT,ENT,DEP or blank=all)'];
   const s = typeof loadSettings === 'function' ? loadSettings() : null;
   const projects = s?.projects || ['AOA-MP','TTB','Geo9','Release 2.1','Release 3'];
-  const year = document.getElementById('bset-year')?.value || '2569';
+  const year = document.getElementById('bset-year')?.value || getCurrentBuddhistYear();
 
   const examples = projects.map(proj => [proj, 'SL ' + year, '', year, '', '', 'SL']);
   const allRows  = [headers, ...examples];
@@ -3010,7 +3026,8 @@ async function _confirmPoolImport() {
 function renderBudgetSettings() {
   const body = document.getElementById('bset-budget-body');
   if (!body) return;
-  const year  = document.getElementById('bset-year')?.value || '2569';
+  populateBudgetYearSelect('bset-year');
+  const year  = document.getElementById('bset-year')?.value || getCurrentBuddhistYear();
   const pools = loadBudgetPools().filter(p => p.year === year);
 
   if (!pools.length) {
@@ -3048,14 +3065,30 @@ function renderBudgetSettings() {
     </div>`).join('');
 }
 
+// Keeps the read-only BE year field in the Budget Pool modal honest: it must always reflect the
+// Start Month the user picked, via the one shared gregorianYearToBuddhistEra() conversion, rather
+// than the ambient Budget Settings year filter — the backend (createBudgetPoolRecord()) already
+// derives `year` from `startDate`/`startMonth` and ignores a disagreeing input when dates exist, so
+// the field would otherwise show a value the save silently overrides. Phase 7A-9A UI half of
+// docs/TECHNICAL_DEBT.md TD-7A-01's "Budget Pool create/edit derives year" exit criterion.
+function _updateBpoolYearFromStart() {
+  const yearEl = document.getElementById('bpool-year');
+  if (!yearEl) return;
+  const startVal = document.getElementById('bpool-start')?.value || '';
+  const derived = startVal ? gregorianYearToBuddhistEra(startVal) : '';
+  yearEl.value = derived || document.getElementById('bset-year')?.value || getCurrentBuddhistYear();
+}
+
 function openBudgetPoolModal(editId) {
-  const s       = typeof loadSettings === 'function' ? loadSettings() : null;
-  const projects = s?.projects || [];
+  const projects = getCanonicalProjectList();
   const pool    = editId ? loadBudgetPools().find(p => p.id === editId) : null;
-  const year    = document.getElementById('bset-year')?.value || '2569';
+  populateBudgetYearSelect('bset-year');
+  const year    = document.getElementById('bset-year')?.value || getCurrentBuddhistYear();
 
   const g = (f, def = '') => pool ? (pool[f] ?? def) : def;
   const projOpts = projects.map(p => `<option value="${esc(p)}" ${g('project') === p ? 'selected' : ''}>${esc(p)}</option>`).join('');
+  const initialStart = g('startMonth');
+  const initialYear  = (initialStart ? gregorianYearToBuddhistEra(initialStart) : '') || g('year', year);
 
   // Create inline modal
   const existing = document.getElementById('bpool-modal');
@@ -3082,10 +3115,10 @@ function openBudgetPoolModal(editId) {
           <input id="bpool-budget" class="ri" type="number" min="0.01" step="0.01" required value="${g('budget')}">
         </div>
         <div class="fg"><label>ปี (Thai Buddhist Era)</label>
-          <input id="bpool-year" class="ri" value="${g('year', year)}" readonly style="background:var(--bg)">
+          <input id="bpool-year" class="ri" value="${initialYear}" readonly style="background:var(--bg)">
         </div>
         <div class="fg"><label>Start Month (YYYY-MM)</label>
-          <input id="bpool-start" class="ri" type="month" required value="${g('startMonth')}">
+          <input id="bpool-start" class="ri" type="month" required value="${initialStart}" oninput="_updateBpoolYearFromStart()">
         </div>
         <div class="fg"><label>End Month (YYYY-MM)</label>
           <input id="bpool-end" class="ri" type="month" required value="${g('endMonth')}">

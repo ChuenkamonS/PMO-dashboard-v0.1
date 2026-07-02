@@ -1003,3 +1003,34 @@ test('Phase 7A-8: calculateBudgetVsActualDataset is unchanged when spendType/sea
   assert.equal(dataset.totals.actual, 4000);
   assert.equal(dataset.rows[0].records.length, 1);
 });
+
+// ══════════════════════════════════════════════════════════════════
+// PHASE 7A-9A — Year/BE normalization foundation + Project dropdown foundation
+// ══════════════════════════════════════════════════════════════════
+
+test('Phase 7A-9A: getCurrentBuddhistYear() wraps gregorianYearToBuddhistEra(currentYear), matching the formula it replaces', () => {
+  const ctx = context();
+  const expected = String(new Date().getFullYear() + 543);
+  assert.equal(ctx.getCurrentBuddhistYear(), expected);
+  assert.equal(ctx.getCurrentBuddhistYear(), ctx.gregorianYearToBuddhistEra(new Date().getFullYear()));
+});
+
+test('Phase 7A-9A: getCanonicalProjectList() returns [] when loadSettings is unavailable, and settings.projects when it is', () => {
+  const ctx = context();
+  // Arrays returned from vm-sandboxed app.js code are foreign Array instances to this realm's
+  // assert, so round-trip through JSON (same convention used elsewhere in this suite) instead of
+  // deepEqual-ing them directly.
+  const list = () => JSON.parse(JSON.stringify(ctx.getCanonicalProjectList()));
+  assert.deepEqual(list(), []);
+  ctx.loadSettings = () => ({ projects: ['Alpha', 'Beta'] });
+  assert.deepEqual(list(), ['Alpha', 'Beta']);
+  ctx.loadSettings = () => ({});
+  assert.deepEqual(list(), []);
+});
+
+test('Phase 7A-9A: financialYearToGregorian and gregorianYearToBuddhistEra remain exact inverses for realistic years', () => {
+  const ctx = context();
+  assert.equal(ctx.financialYearToGregorian('2569'), '2026');
+  assert.equal(ctx.gregorianYearToBuddhistEra('2026'), '2569');
+  assert.equal(ctx.financialYearToGregorian('2026'), '2026', 'a Gregorian-looking year must pass through unchanged');
+});

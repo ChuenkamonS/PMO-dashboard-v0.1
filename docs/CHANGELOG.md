@@ -22,6 +22,83 @@
 
 ## Current Baseline
 
+### Phase 7A-9A - Year/BE Normalization Foundation & Project Dropdown Foundation
+#### Added
+- `getCurrentBuddhistYear()` (`app.js`) — the single "what year is it right now, in BE" helper,
+  wrapping the existing `gregorianYearToBuddhistEra()`. Replaces the ad hoc
+  `String(new Date().getFullYear() + 543)` duplicated in `_ovUpdateKPIs()`, `_ovRenderBvA()`,
+  `_renderBudgetVsActual()` (`views/budget.js`), and the Tag Budget modal (`views/history.js`) —
+  closing `docs/BvA_REQUIREMENT.md` "Phase 7A-1" §2 Known Issue #2. Also replaces the hardcoded
+  `'2569'` fallback used whenever `bva-year`/`bset-year` is momentarily absent from the DOM.
+- `getCanonicalProjectList()` (`app.js`) — a single Settings-backed Project list helper. Foundation
+  only: `bpool-project` (Budget Pool Settings) is migrated onto it in this phase; every other
+  Project dropdown keeps its existing data source (see Deferred below).
+- `populateBudgetYearSelect(id)` (`views/budget.js`) — generates BE year options (current year ± 1)
+  for `bva-year` and `bset-year`, replacing two independently hardcoded `2568/2569/2570` `<option>`
+  lists in `index.html` that would have silently run out of a "current year" choice after BE 2570.
+  Populated once per page load (no-ops once the `<select>` already has options), same convention as
+  the existing `bva-project` one-time populate.
+- `_updateBpoolYearFromStart()` (`views/budget.js`) — recomputes the read-only `bpool-year` field
+  live from `bpool-start` via `gregorianYearToBuddhistEra()`, wired through `bpool-start`'s
+  `oninput`. Addresses the UI half of `docs/TECHNICAL_DEBT.md` TD-7A-01's "Budget Pool create/edit
+  derives year" exit criterion — the data layer already derived `year` from dates since Phase 7A-3,
+  but the modal could still visually show a stale/independently-seeded value while open.
+
+#### Changed
+- `openBudgetPoolModal()` now sources its Project `<select>` from `getCanonicalProjectList()`
+  instead of an inline `loadSettings()?.projects || []` read, and seeds `bpool-year` from the
+  pool's own `startMonth` (when present) rather than always trusting the pool's possibly-stale
+  stored `year` label or the ambient `bset-year` filter.
+- `parseThaiDate()` (`views/budget.js`) now converts BE→CE for both the Thai month-name format and
+  the `dd/mm/yy(yy)` format through the shared `financialYearToGregorian()` helper instead of two
+  separate local `-543` computations. Verified equivalent for all realistic inputs (Thai month-name
+  years and post-short-year-expansion `dd/mm/yy` years are always well above the function's `>2400`
+  BE-detection threshold); only a never-occurring 4-digit literal year in the narrow 2101–2400 band
+  would convert differently, which no real date in this app produces.
+- `index.html`'s `bva-year` and `bset-year` `<select>` elements are now empty and populated at
+  render time by `populateBudgetYearSelect()` — no more hardcoded BE year lists in markup.
+- `refreshProjectDropdowns()` (`views/settings.js`) no longer references `bgt-project` — a dead id
+  left over from a since-renamed/removed tab; it was already a silent no-op (`getElementById`
+  returned `null`), so this is pure dead-code removal, not a behavior change.
+
+#### Unchanged (explicitly out of scope for this phase)
+- Persistence model, Supabase integration, Forecast, Import/bulk-import logic (including the Budget
+  Pool bulk import's own `'2569'` fallback and inline duplicate/year checks — TD-7A-01/TD-7A-04),
+  Budget Assignment Workspace behavior, Budget Pool CRUD redesign, and Archive/Delete workflows were
+  not touched.
+- No other Project dropdown (Pending's data-derived filter, Actual Spend's data-derived filter, BvA
+  Budget Pool's data-derived filter, Resource's mixed source, etc.) was migrated onto
+  `getCanonicalProjectList()` — see Deferred below.
+
+#### Deferred (documented, not fixed in this phase)
+- **Project dropdown data-source fragmentation**: roughly a dozen Project dropdowns across the app
+  are split between Settings-canonical (`loadSettings().projects`) and data-derived (observed
+  project values from memos/Actual Spend/pools/resources) sources, with no single refresh path.
+  `getCanonicalProjectList()` is the foundation for eventually unifying the Settings-backed half;
+  the data-derived dropdowns are an intentionally separate, larger decision (do they *want*
+  Settings-only values, or do they need to keep surfacing legacy/renamed projects still present in
+  historical data?) left for a future phase. Tracked as new TD-7A-07 in `docs/TECHNICAL_DEBT.md`.
+- Budget Pool bulk import's hardcoded `'2569'` fallback (`handlePoolBulkUpload()`) was left
+  untouched — it sits inside the Import code path, explicitly out of scope this phase.
+- TD-7A-01's remaining exit criteria (bulk import derives year; existing pools audited/migrated;
+  regression tests proving no mismatched legacy pools remain) are still open.
+
+#### Tests
+- `tests/financial-models.test.js`: `getCurrentBuddhistYear()` matches the formula it replaces;
+  `getCanonicalProjectList()` returns `[]` without `loadSettings` and `settings.projects` with it;
+  `financialYearToGregorian()`/`gregorianYearToBuddhistEra()` remain exact inverses.
+- `tests/budget-expenses.test.js`: `populateBudgetYearSelect()` renders current year ± 1 with the
+  current year selected and is a no-op once populated; `index.html` no longer hardcodes
+  `2568/2569/2570` for `bva-year`/`bset-year`; `renderBudgetSettings()` populates `bset-year`
+  dynamically; `openBudgetPoolModal()` uses `getCanonicalProjectList()` and seeds `bpool-year` from
+  a pool's own `startMonth` (including the TD-7A-01 legacy-mismatch case) or the ambient `bset-year`
+  filter for a brand-new pool; `_updateBpoolYearFromStart()`'s three-tier fallback
+  (`startMonth` → `bset-year` → `getCurrentBuddhistYear()`); `parseThaiDate()` still parses Thai
+  month-name, `dd/mm/yy`, and `dd/mm/yyyy` BE dates correctly after the refactor.
+- Full existing suite (183 tests total after these additions) re-run and passes unchanged.
+
+---
+
 ### Phase 7A-8 - Budget vs Actual UX Consistency & Polish (pending review — not committed)
 #### Added
 - BvA filter row (`index.html`, `#bgt-tab-bva`) gains a Spend Type filter (`#bva-type`) and a free-

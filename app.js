@@ -598,6 +598,24 @@ function gregorianYearToBuddhistEra(dateOrYear) {
   return numeric ? String(numeric + 543) : '';
 }
 
+// Shared "what year is it right now, in Thai Buddhist Era" helper. Every year filter/default that
+// needs "today's" BE year (Budget vs Actual, Budget Settings, Overview KPIs) must call this instead
+// of re-deriving `new Date().getFullYear() + 543` locally — Phase 7A-9A closes
+// docs/BvA_REQUIREMENT.md "Phase 7A-1" §2 Known Issue #2.
+function getCurrentBuddhistYear() {
+  return gregorianYearToBuddhistEra(new Date().getFullYear());
+}
+
+// Canonical Project list — the single source of truth for "Project" dropdowns that should reflect
+// Settings' configured project list (as opposed to dropdowns that intentionally derive their
+// options from observed data, e.g. Pending's project filter). Phase 7A-9A foundation: only
+// Budget Pool Settings (`bpool-project`) is migrated onto this helper in this phase; the rest of
+// the app's Project dropdowns are deferred, not redesigned, here — see docs/TECHNICAL_DEBT.md.
+function getCanonicalProjectList() {
+  const s = typeof loadSettings === 'function' ? loadSettings() : null;
+  return s?.projects || [];
+}
+
 function actualSpendOverlapsYear(record = {}, year) {
   const target = financialYearToGregorian(year);
   if (!target) return true;

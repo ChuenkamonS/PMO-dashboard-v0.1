@@ -115,6 +115,34 @@ function createBvaContext() {
   return context;
 }
 
+// Phase 7A-9A: mocks the elements touched by the Budget Pool Settings tab and its Add/Edit modal
+// (`bset-year`, `bset-budget-body`, and the dynamically-created `bpool-modal`). The modal's own
+// fields (`bpool-year`, `bpool-start`, ...) are rendered as one HTML string, not separately
+// createElement()'d, so tests inspect them either via `context.__lastPanel.innerHTML` (structural
+// checks) or, for `_updateBpoolYearFromStart()`, via pre-registered elements standing in for the
+// fields a real browser would have parsed out of that HTML and made queryable by id.
+function createBudgetPoolModalContext() {
+  const context = createActualSpendContext();
+  const elements = new Map();
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, { id, value:'', innerHTML:'', style:{}, options:[] });
+    return elements.get(id);
+  };
+  ['bpool-start', 'bpool-year', 'bset-year', 'bset-budget-body'].forEach(element);
+  const dynamicPanels = new Map();
+  context.document.getElementById = id => elements.get(id) || dynamicPanels.get(id) || null;
+  context.document.createElement = () => ({
+    value:'', innerHTML:'', style:{}, id:'', options:[],
+    appendChild(child) { this.options.push(child); },
+    remove() { if (this.id) dynamicPanels.delete(this.id); },
+  });
+  context.document.body = {
+    appendChild(el) { context.__lastPanel = el; if (el.id) dynamicPanels.set(el.id, el); },
+  };
+  context.__elements = elements;
+  return context;
+}
+
 function monthKey(offset) {
   const now = new Date();
   const date = new Date(now.getFullYear(), now.getMonth() + offset, 1);
@@ -1875,4 +1903,128 @@ test('Phase 7A-8: the Budget Pool table, drill-down table, and Assignment Worksp
   const workspaceHtml = context.__elements.get('bva-content').innerHTML;
   assert.match(workspaceHtml, /class="hist-table hist-table--ellipsis"/, 'the Assignment Workspace table must use the same shared classes as the other two tables');
   assert.doesNotMatch(workspaceHtml, /padding:7px 10px/, 'the old ad-hoc Assignment Workspace padding must be gone');
+});
+
+// ══════════════════════════════════════════════════════════════════
+// PHASE 7A-9A — Year/BE normalization foundation + Project dropdown foundation
+// ══════════════════════════════════════════════════════════════════
+
+test('Phase 7A-9A: populateBudgetYearSelect renders current BE year ± 1 with the current year selected, and is a no-op once already populated', () => {
+  const context = createActualSpendContext();
+  const el = { id: 'bva-year', value: '', innerHTML: '', options: [] };
+  context.document.getElementById = id => (id === 'bva-year' ? el : null);
+
+  context.populateBudgetYearSelect('bva-year');
+  const current = Number(context.getCurrentBuddhistYear());
+  assert.match(el.innerHTML, new RegExp(`<option value="${current - 1}"[^>]*>${current - 1}</option>`));
+  assert.match(el.innerHTML, new RegExp(`<option value="${current}" selected>${current}</option>`));
+  assert.match(el.innerHTML, new RegExp(`<option value="${current + 1}"[^>]*>${current + 1}</option>`));
+
+  el.options.push({}); // simulate an already-populated <select> (real browser: options.length > 0)
+  el.innerHTML = 'unchanged-marker';
+  context.populateBudgetYearSelect('bva-year');
+  assert.equal(el.innerHTML, 'unchanged-marker', 'must not re-populate (and must not reset the user\'s selection) once options already exist');
+});
+
+test('Phase 7A-9A: renderBudgetSettings populates bset-year dynamically instead of relying on hardcoded HTML options', () => {
+  const context = createBudgetPoolModalContext();
+  context.loadBudgetPools = () => [];
+  context.renderBudgetSettings();
+  const el = context.__elements.get('bset-year');
+  const current = Number(context.getCurrentBuddhistYear());
+  assert.match(el.innerHTML, new RegExp(`<option value="${current}" selected>${current}</option>`));
+  assert.match(el.innerHTML, new RegExp(`<option value="${current - 1}"`));
+  assert.match(el.innerHTML, new RegExp(`<option value="${current + 1}"`));
+});
+
+test('Phase 7A-9A: index.html no longer hardcodes 2568/2569/2570 for bva-year or bset-year', () => {
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const bvaYearBlock = html.match(/<select id="bva-year"[^>]*>[\s\S]*?<\/select>/)[0];
+  const bsetYearBlock = html.match(/<select id="bset-year"[^>]*>[\s\S]*?<\/select>/)[0];
+  assert.doesNotMatch(bvaYearBlock, /2568|2569|2570/, 'bva-year must be populated by populateBudgetYearSelect(), not hardcoded');
+  assert.doesNotMatch(bsetYearBlock, /2568|2569|2570/, 'bset-year must be populated by populateBudgetYearSelect(), not hardcoded');
+});
+
+test('Phase 7A-9A: openBudgetPoolModal sources Project options from getCanonicalProjectList(), not an inline settings read', () => {
+  const context = createBudgetPoolModalContext();
+  context.loadSettings = () => ({ projects: ['Alpha', 'Beta'] });
+  context.loadBudgetPools = () => [];
+  context.openBudgetPoolModal();
+  const html = context.__lastPanel.innerHTML;
+  assert.match(html, /<option value="Alpha"[^>]*>Alpha<\/option>/);
+  assert.match(html, /<option value="Beta"[^>]*>Beta<\/option>/);
+  assert.match(budgetCode, /getCanonicalProjectList\(\)/, 'openBudgetPoolModal must delegate to the canonical project-list helper');
+});
+
+test('Phase 7A-9A: openBudgetPoolModal seeds bpool-year from the pool\'s own Start Month, not its (possibly stale) stored year label', () => {
+  const context = createBudgetPoolModalContext();
+  context.loadSettings = () => ({ projects: ['Alpha'] });
+  // TD-7A-01 legacy-mismatch scenario: stored year (2568) disagrees with startMonth's real year (2569).
+  context.loadBudgetPools = () => [{ id: 'p1', project: 'Alpha', name: 'SL 2025', year: '2568', startMonth: '2026-01', endMonth: '2026-12' }];
+  context.openBudgetPoolModal('p1');
+  const html = context.__lastPanel.innerHTML;
+  assert.match(html, /id="bpool-year"[^>]*value="2569"/, 'bpool-year must reflect the date-derived year, not the stale stored label');
+});
+
+test('Phase 7A-9A: openBudgetPoolModal defaults bpool-year to the ambient bset-year filter for a brand-new pool with no Start Month yet', () => {
+  const context = createBudgetPoolModalContext();
+  context.loadSettings = () => ({ projects: [] });
+  context.loadBudgetPools = () => [];
+  context.__elements.get('bset-year').value = '2570';
+  context.openBudgetPoolModal();
+  const html = context.__lastPanel.innerHTML;
+  assert.match(html, /id="bpool-year"[^>]*value="2570"/);
+});
+
+test('Phase 7A-9A: Budget Pool modal wires Start Month to live year re-derivation via _updateBpoolYearFromStart()', () => {
+  assert.match(budgetCode, /id="bpool-start"[^>]*oninput="_updateBpoolYearFromStart\(\)"/);
+});
+
+test('Phase 7A-9A: _updateBpoolYearFromStart recomputes bpool-year live via gregorianYearToBuddhistEra, falling back to bset-year then getCurrentBuddhistYear', () => {
+  const context = createBudgetPoolModalContext();
+  const start = context.__elements.get('bpool-start');
+  const year = context.__elements.get('bpool-year');
+  const bsetYear = context.__elements.get('bset-year');
+
+  start.value = '2026-05';
+  context._updateBpoolYearFromStart();
+  assert.equal(year.value, context.gregorianYearToBuddhistEra('2026-05'));
+  assert.equal(year.value, '2569');
+
+  start.value = '';
+  bsetYear.value = '2570';
+  context._updateBpoolYearFromStart();
+  assert.equal(year.value, '2570', 'must fall back to the ambient bset-year filter when Start Month is cleared');
+
+  bsetYear.value = '';
+  context._updateBpoolYearFromStart();
+  assert.equal(year.value, context.getCurrentBuddhistYear(), 'must fall back to the shared current-year helper as a last resort');
+});
+
+test('Phase 7A-9A: parseThaiDate still parses Thai month-name, dd/mm/yy, and dd/mm/yyyy BE dates after folding onto the shared financialYearToGregorian() helper', () => {
+  const context = createActualSpendContext();
+
+  const d1 = context.parseThaiDate('27 พฤษภาคม 2569');
+  assert.equal(d1.getFullYear(), 2026);
+  assert.equal(d1.getMonth(), 4);
+  assert.equal(d1.getDate(), 27);
+
+  const d2 = context.parseThaiDate('27 พฤษภาคม พ.ศ. 2569');
+  assert.equal(d2.getFullYear(), 2026);
+  assert.equal(d2.getMonth(), 4);
+
+  const d3 = context.parseThaiDate('26/05/69');
+  assert.equal(d3.getFullYear(), 2026);
+  assert.equal(d3.getMonth(), 4);
+  assert.equal(d3.getDate(), 26);
+
+  const d4 = context.parseThaiDate('26/05/2569');
+  assert.equal(d4.getFullYear(), 2026);
+  assert.equal(d4.getMonth(), 4);
+  assert.equal(d4.getDate(), 26);
+
+  assert.equal(context.parseThaiDate('not a date'), null);
+
+  assert.match(budgetCode, /financialYearToGregorian\(m1\[3\]\)/, 'Thai month-name BE conversion must go through the shared helper');
+  assert.match(budgetCode, /financialYearToGregorian\(yr\)/, 'dd\\/mm\\/y[y] BE conversion must go through the shared helper');
 });

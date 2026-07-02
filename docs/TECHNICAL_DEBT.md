@@ -78,6 +78,17 @@ Regression Tests
 - Budget vs Actual totals
 - Budget Pool mapping parity
 
+Phase 7A-9A Update
+
+"Budget Pool create/edit derives year" is now also true at the UI layer: the Add/Edit modal's
+read-only `bpool-year` field recomputes live from `bpool-start` via `_updateBpoolYearFromStart()`
+instead of trusting a possibly-stale stored label or the ambient year filter. The data layer already
+satisfied this criterion since Phase 7A-3.
+
+Still OPEN: Budget Pool import still does not derive year (bulk import untouched this phase),
+existing pools are not audited/migrated, and no regression test yet proves zero mismatched legacy
+pools remain in real data.
+
 ---
 
 # TD-7A-02
@@ -274,6 +285,68 @@ Future migrations cannot safely assume production schema.
 Exit Criteria
 
 Baseline migration committed.
+
+---
+
+# TD-7A-07
+
+Title
+
+Project Dropdown Data-Source Fragmentation
+
+Status
+
+OPEN
+
+Priority
+
+Low
+
+Introduced
+
+Phase 7A-9A
+
+Owner Phase
+
+Project Dropdown Unification
+
+Reason
+
+Roughly a dozen "Project" dropdowns across the app split between two different data sources:
+
+- Settings-canonical (`loadSettings().projects`), now available via `getCanonicalProjectList()`
+  (`app.js`, Phase 7A-9A).
+- Data-derived (observed project values from memos, canonical Actual Spend, Budget Pools, or
+  Resources), e.g. Pending's `pend-filter-project`, Actual Spend's `as-project`, BvA's
+  `bva-project`, and Resource's `rf-project`/`rtf-project`.
+
+There is also no single refresh path: `refreshProjectDropdowns()` (`views/settings.js`) only covers
+6 of the Settings-sourced dropdowns; the data-derived ones re-populate themselves independently on
+their own next render.
+
+Current Situation
+
+Phase 7A-9A migrated only `bpool-project` (Budget Pool Settings) onto `getCanonicalProjectList()`.
+No other dropdown was changed.
+
+Risk
+
+A project renamed or removed in Settings can disagree with what a data-derived dropdown still shows
+(and vice versa) — e.g. a decommissioned project with historical memos stays visible in Pending's
+filter but disappears from Create Memo's dropdown.
+
+Exit Criteria
+
+- Decide, per dropdown, whether it should be Settings-canonical or intentionally data-derived (some
+  legitimately need to keep surfacing legacy/renamed projects present in historical data).
+- Migrate the Settings-canonical dropdowns onto `getCanonicalProjectList()`.
+- `refreshProjectDropdowns()` covers every Settings-canonical dropdown id (no silently-uncovered
+  ones).
+
+Regression Tests
+
+- Per-dropdown source assertions once each is migrated.
+- `refreshProjectDropdowns()` coverage test against the full canonical dropdown id list.
 
 ---
 

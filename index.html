@@ -1612,11 +1612,9 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <div id="bgt-tab-bva" class="cost-tab-panel" style="display:none">
 
           <div class="filter-row">
-            <select id="bva-year" onchange="renderBudgetVsActual()">
-              <option value="2568">2568</option>
-              <option value="2569" selected>2569</option>
-              <option value="2570">2570</option>
-            </select>
+            <!-- Options populated dynamically by populateBudgetYearSelect('bva-year') (views/budget.js)
+                 from getCurrentBuddhistYear() — never hardcode a BE year list here (Phase 7A-9A). -->
+            <select id="bva-year" onchange="renderBudgetVsActual()"></select>
             <select id="bva-project" onchange="renderBudgetVsActual()">
               <option value="all">ทุกโปรเจค</option>
             </select>
@@ -1655,11 +1653,9 @@ svg.icon { display: inline-block; vertical-align: middle; }
                     <span style="font-size:11px;color:var(--text-3);margin-left:8px">ตั้งงบประมาณต่อโปรเจค แยกตาม pool และช่วงเวลา</span>
                   </div>
                   <div style="display:flex;gap:8px;align-items:center">
-                    <select id="bset-year" onchange="renderBudgetSettings()" style="font-size:11px;padding:3px 8px">
-                      <option value="2568">2568</option>
-                      <option value="2569" selected>2569</option>
-                      <option value="2570">2570</option>
-                    </select>
+                    <!-- Options populated dynamically by populateBudgetYearSelect('bset-year')
+                         (views/budget.js) from getCurrentBuddhistYear() (Phase 7A-9A). -->
+                    <select id="bset-year" onchange="renderBudgetSettings()" style="font-size:11px;padding:3px 8px"></select>
                     <button class="btn-sm" style="font-size:11px;padding:4px 10px" onclick="downloadBudgetPoolTemplate()">⬇ Template</button>
                     <label class="btn-sm" style="font-size:11px;padding:4px 10px;cursor:pointer">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
