@@ -541,6 +541,23 @@ function excelImportDateParts(value) {
   return null;
 }
 
+// Phase 7A-9C bug fix: Budget Pool bulk import Start/End Month cells. Excel commonly auto-converts
+// a typed "2026-01" (or "2569-01") cell into a real date/serial value instead of keeping it as
+// text (sheet_to_json then returns a raw Excel serial number, or a JS Date if the caller ever reads
+// with `cellDates:true`) — neither of which normalizeMonthValueToGregorian() (app.js) can parse, so
+// every such row was failing "Valid start/end month or date range is required" even though the cell
+// visibly shows a valid month. Reuses the existing excelImportDateParts() decoder (already used by
+// Actual Spend import for the same Excel behavior) instead of a new date-parsing engine, and
+// collapses to "YYYY-MM" (day discarded) since this is a MONTH field, not a date field. A plain
+// text cell (BE or CE "YYYY-MM") passes through unchanged — normalizeMonthValueToGregorian() still
+// does the BE-to-CE conversion, same as every other Budget Pool write path; this only fixes what
+// reaches it.
+function excelImportMonthValue(value) {
+  const parts = excelImportDateParts(value);
+  if (parts) return `${parts.year}-${String(parts.month).padStart(2, '0')}`;
+  return String(value ?? '').trim() || null;
+}
+
 function normalizeActualSpendImportDates(startValue, endValue) {
   const startParts = excelImportDateParts(startValue);
   const endParts = excelImportDateParts(endValue);
@@ -2872,9 +2889,16 @@ async function handlePoolBulkUpload(input) {
   const defaultYear = document.getElementById('bset-year')?.value || '2569';
   const parsed = rows.map(row => {
     const keys = Object.keys(row);
-    const get  = prefix => {
-      const key = keys.find(k => k.toLowerCase().replace(/[\s(]/g,'').startsWith(prefix.toLowerCase().replace(/[\s(]/g,'')));
+    const findKey = prefix => keys.find(k => k.toLowerCase().replace(/[\s(]/g,'').startsWith(prefix.toLowerCase().replace(/[\s(]/g,'')));
+    const get = prefix => {
+      const key = findKey(prefix);
       return key ? String(row[key] || '').trim() : '';
+    };
+    // Start/End Month need the RAW cell value (not pre-stringified by get()) so
+    // excelImportMonthValue() can tell an Excel serial/Date apart from typed text.
+    const getRaw = prefix => {
+      const key = findKey(prefix);
+      return key ? row[key] : '';
     };
     const proj   = get('project');
     const name   = get('poolname') || get('pool');
@@ -2882,8 +2906,8 @@ async function handlePoolBulkUpload(input) {
     // flipped positive by stripping the minus sign (Phase 7A-9C bug fix).
     const budget = parseFloat(String(get('budget')).replace(/[^0-9.\-]/g,'')) || 0;
     const yr     = get('year') || defaultYear;
-    const start  = get('startmonth') || get('start') || null;
-    const end    = get('endmonth')   || get('end')   || null;
+    const start  = excelImportMonthValue(getRaw('startmonth') || getRaw('start'));
+    const end    = excelImportMonthValue(getRaw('endmonth')   || getRaw('end'));
     const typesRaw = get('memotypes') || get('memo') || '';
     const memoTypes = typesRaw
       ? typesRaw.split(/[,;|\s]+/).map(t => t.trim().toLowerCase()).filter(t => ['sl','hw','int','ent','dep'].includes(t))
@@ -2921,10 +2945,13 @@ function _showPoolImportErrors(rowResults) {
   modal.innerHTML =
     '<div class="card" style="width:760px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;padding:0;overflow:hidden">' +
       '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">' +
-        '<span style="font-size:15px;font-weight:700;color:var(--red)">พบข้อผิดพลาด ' + errorRows.length + ' รายการ — ไม่มีการ import</span>' +
+        '<span style="font-size:15px;font-weight:700;color:var(--red)">พบข้อผิดพลาด ' + errorRows.length + ' จาก ' + rowResults.length + ' รายการ</span>' +
         '<button class="btn-sm" onclick="document.getElementById(\'pool-import-errors\').remove()" style="padding:4px 10px">✕</button>' +
       '</div>' +
-      '<div style="padding:12px 20px;font-size:12px;color:var(--text-3)">Budget Pool import เป็นแบบ all-or-nothing — หากมีแถวที่ผิดพลาดแม้เพียงรายการเดียว ระบบจะไม่ import รายการใดเลย กรุณาแก้ไขไฟล์แล้วอัปโหลดใหม่</div>' +
+      '<div style="padding:12px 20px;font-size:12px;color:var(--text-3)">' +
+        '<div style="font-weight:600;color:var(--text)">Import แล้ว 0 รายการ — ไม่มีการ import บางส่วน (all-or-nothing)</div>' +
+        'Budget Pool import เป็นแบบ all-or-nothing — หากมีแถวที่ผิดพลาดแม้เพียงรายการเดียว ระบบจะไม่ import รายการใดเลย กรุณาแก้ไขไฟล์แล้วอัปโหลดใหม่' +
+      '</div>' +
       '<div style="overflow:auto;flex:1">' +
         '<table class="hist-table" style="min-width:680px">' +
           '<thead><tr>' +

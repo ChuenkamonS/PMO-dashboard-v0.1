@@ -80,6 +80,23 @@ Project Dropdown migration, and Overview legacy budget cleanup were all explicit
   check compared against a stale pre-import snapshot that was never refreshed as rows committed.
 - A negative budget value typed in an imported spreadsheet cell is now rejected, not silently
   coerced positive by the previous sign-stripping regex.
+- **Post-review manual test bug**: Bulk Upload rejected every row with "Valid start/end month or
+  date range is required" even when the Start/End Month cells visibly showed valid values
+  (`2026-01`, `2026-12`, `2569-01`, `2569-12`). Root cause: Excel commonly auto-converts a typed
+  `"2026-01"`/`"2569-01"` cell into a real date/serial value instead of keeping it as text, so
+  `XLSX.utils.sheet_to_json()` returned a raw Excel serial number (or a `Date`, depending on read
+  options) for that cell — a shape `normalizeMonthValueToGregorian()` (app.js) was never designed to
+  parse, unlike plain `"YYYY-MM"` text. New `excelImportMonthValue()` (`views/budget.js`, reusing the
+  existing `excelImportDateParts()` Excel serial/Date decoder already used by Actual Spend import)
+  decodes a serial number or `Date` to `"YYYY-MM"` (day discarded — this is a month field) before it
+  ever reaches the shared validator; plain BE/CE text passes through unchanged, with
+  `normalizeMonthValueToGregorian()` still doing the BE-to-CE conversion exactly as before.
+  `handlePoolBulkUpload()` now reads the RAW cell value for Start/End Month (a new `getRaw()`
+  helper) instead of the pre-stringified value the rest of the row parsing uses. The Budget Pool
+  data contract and all-or-nothing behavior are unchanged — this only fixes what reaches the
+  existing, unmodified validation path. The error report was also clarified to explicitly state
+  `Import แล้ว 0 รายการ` (0 imported) and `N จาก M รายการ` (N of M rejected) alongside the existing
+  all-or-nothing explanation.
 
 #### Removed
 - `matchMemoToPool()`, `autoTagBudgetPool()`, `getPoolMemos()`, `getPoolActual()` (`views/budget.js`)
@@ -96,8 +113,17 @@ Project Dropdown migration, and Overview legacy budget cleanup were all explicit
 - `tests/budget-expenses.test.js`: 5 new tests covering the removed-functions check, the
   sign-preserving fix, intra-file and overlap rejection through `handlePoolBulkUpload()` end-to-end,
   and a full valid-batch import proving New/Update tagging, in-place update (no duplication), and
-  exactly one remap call for a multi-row batch.
-- Full regression suite: 221/221 passing (up from 205 before this phase).
+  exactly one remap call for a multi-row batch. Plus 9 more for the Excel Start/End Month bug fix:
+  unit tests for `excelImportMonthValue()` (CE text, BE text, Excel serial number, `Date` object,
+  empty/missing), end-to-end `handlePoolBulkUpload()` regression tests for the exact reported CE/BE
+  text case, the serial-number case, and the `Date`-object case, and a control test proving a
+  genuinely invalid row (missing Start Month entirely) still correctly reports 0 imported / N of M
+  rejected with no partial import.
+- Full regression suite: 230/230 passing (up from 205 before this phase; 221 before this bug fix).
+- Manually reproduced the exact reported bug and confirmed the fix live in the browser (serial-date,
+  CE-text, and BE-text Start/End Month cells all resolved to the same canonical `"2026-01"` →
+  `"2026-12"`; a genuinely missing Start Month cell still correctly triggered the all-or-nothing
+  error report with 0 pools persisted).
 
 #### Remaining Work
 - Budget Pool Lifecycle (Active/Archived), Archive-as-delete-alternative, and the DB FK

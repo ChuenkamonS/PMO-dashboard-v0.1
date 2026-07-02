@@ -2372,3 +2372,120 @@ test('Phase 7A-9C: a fully valid bulk import batch is previewed with create/upda
   assert.equal(pools.find(p => p.name === 'SL 2026').budget, 9000, 'confirming the import must overwrite the existing pool\'s budget');
   assert.equal(remapCalls, 1, 'remap must run exactly once for the whole batch, not once per imported pool');
 });
+
+// ══════════════════════════════════════════════════════════════════
+// Phase 7A-9C bug fix — Bulk Upload rejected every row when Start/End Month cells were
+// Excel-auto-converted to a date/serial value instead of staying text (reported after manual
+// testing: "2026-01", "2026-12", "2569-01", "2569-12" all rejected with "Valid start/end month or
+// date range is required").
+// ══════════════════════════════════════════════════════════════════
+
+test('Phase 7A-9C bug fix: excelImportMonthValue passes plain CE text through unchanged', () => {
+  const context = createBudgetPoolModalContext();
+  assert.equal(context.excelImportMonthValue('2026-01'), '2026-01');
+});
+
+test('Phase 7A-9C bug fix: excelImportMonthValue passes plain BE text through unchanged (createBudgetPoolRecord\'s normalizeMonthValueToGregorian converts it downstream, same as every other write path)', () => {
+  const context = createBudgetPoolModalContext();
+  assert.equal(context.excelImportMonthValue('2569-01'), '2569-01');
+});
+
+test('Phase 7A-9C bug fix: excelImportMonthValue decodes an Excel serial date number to "YYYY-MM", discarding the day', () => {
+  const context = createBudgetPoolModalContext();
+  const serialFor20260101 = Math.floor((Date.UTC(2026, 0, 1) - Date.UTC(1899, 11, 30)) / 86400000);
+  assert.equal(context.excelImportMonthValue(serialFor20260101), '2026-01');
+  const serialFor20261215 = Math.floor((Date.UTC(2026, 11, 15) - Date.UTC(1899, 11, 30)) / 86400000);
+  assert.equal(context.excelImportMonthValue(serialFor20261215), '2026-12', 'day must be discarded -- this is a MONTH field');
+});
+
+test('Phase 7A-9C bug fix: excelImportMonthValue decodes a real JS Date object (the shape produced if the caller ever reads with cellDates:true) to "YYYY-MM"', () => {
+  const context = createBudgetPoolModalContext();
+  assert.equal(context.excelImportMonthValue(new Date(Date.UTC(2026, 0, 1))), '2026-01');
+  assert.equal(context.excelImportMonthValue(new Date(Date.UTC(2026, 11, 1))), '2026-12');
+});
+
+test('Phase 7A-9C bug fix: excelImportMonthValue returns null for an empty/missing cell, same as before', () => {
+  const context = createBudgetPoolModalContext();
+  assert.equal(context.excelImportMonthValue(''), null);
+  assert.equal(context.excelImportMonthValue(null), null);
+  assert.equal(context.excelImportMonthValue(undefined), null);
+});
+
+test('Phase 7A-9C bug fix regression: handlePoolBulkUpload no longer rejects rows whose Start/End Month cells are plain CE or BE text ("2026-01"/"2569-01"), reproducing the exact reported symptom', async () => {
+  const context = createBudgetPoolModalContext();
+  stubXLSX(context, [
+    xlsxRow({ 'Project': 'Alpha', 'Pool Name': 'CE Text Pool', 'Start Month (YYYY-MM)': '2026-01', 'End Month (YYYY-MM)': '2026-12' }),
+    // Different project so this row's canonically-identical 2026-01..2026-12 range (BE 2569
+    // resolves to the same Gregorian months as the row above) does not overlap it -- this test is
+    // only about proving the BE cell parses to the same canonical month, not about two pools
+    // coexisting in the same project/period/Spend Type.
+    xlsxRow({ 'Project': 'Beta', 'Pool Name': 'BE Text Pool', 'Start Month (YYYY-MM)': '2569-01', 'End Month (YYYY-MM)': '2569-12' }),
+  ]);
+  let shownPreview = null, shownErrors = null;
+  context._showPoolImportPreview = rowResults => { shownPreview = rowResults; };
+  context._showPoolImportErrors = rowResults => { shownErrors = rowResults; };
+
+  await context.handlePoolBulkUpload(fakeFileInput());
+
+  assert.equal(shownErrors, null, 'plain text CE/BE month cells must not be rejected');
+  assert.ok(shownPreview, 'a batch with only valid text month cells must reach the preview');
+  assert.equal(shownPreview.length, 2);
+  assert.equal(shownPreview.find(r => r.record.name === 'CE Text Pool').record.startMonth, '2026-01');
+  assert.equal(shownPreview.find(r => r.record.name === 'BE Text Pool').record.startMonth, '2026-01', 'the BE cell must resolve to the same canonical Gregorian month as the CE cell');
+});
+
+test('Phase 7A-9C bug fix regression: handlePoolBulkUpload accepts Start/End Month cells that Excel auto-converted to serial date numbers, matching what sheet_to_json returns by default for a date-formatted cell', async () => {
+  const context = createBudgetPoolModalContext();
+  const startSerial = Math.floor((Date.UTC(2026, 0, 1) - Date.UTC(1899, 11, 30)) / 86400000);
+  const endSerial = Math.floor((Date.UTC(2026, 11, 1) - Date.UTC(1899, 11, 30)) / 86400000);
+  stubXLSX(context, [
+    xlsxRow({ 'Pool Name': 'Serial Date Pool', 'Start Month (YYYY-MM)': startSerial, 'End Month (YYYY-MM)': endSerial }),
+  ]);
+  let shownPreview = null, shownErrors = null;
+  context._showPoolImportPreview = rowResults => { shownPreview = rowResults; };
+  context._showPoolImportErrors = rowResults => { shownErrors = rowResults; };
+
+  await context.handlePoolBulkUpload(fakeFileInput());
+
+  assert.equal(shownErrors, null, 'an Excel serial date number must not be rejected -- it must be decoded to "YYYY-MM" before validation');
+  assert.ok(shownPreview);
+  assert.equal(shownPreview[0].record.startMonth, '2026-01');
+  assert.equal(shownPreview[0].record.endMonth, '2026-12');
+});
+
+test('Phase 7A-9C bug fix regression: handlePoolBulkUpload accepts Start/End Month cells that are real JS Date objects', async () => {
+  const context = createBudgetPoolModalContext();
+  stubXLSX(context, [
+    xlsxRow({ 'Pool Name': 'Date Object Pool', 'Start Month (YYYY-MM)': new Date(Date.UTC(2026, 0, 1)), 'End Month (YYYY-MM)': new Date(Date.UTC(2026, 11, 1)) }),
+  ]);
+  let shownPreview = null, shownErrors = null;
+  context._showPoolImportPreview = rowResults => { shownPreview = rowResults; };
+  context._showPoolImportErrors = rowResults => { shownErrors = rowResults; };
+
+  await context.handlePoolBulkUpload(fakeFileInput());
+
+  assert.equal(shownErrors, null);
+  assert.ok(shownPreview);
+  assert.equal(shownPreview[0].record.startMonth, '2026-01');
+  assert.equal(shownPreview[0].record.endMonth, '2026-12');
+});
+
+test('Phase 7A-9C bug fix: a batch that is still genuinely invalid (e.g. missing Start Month entirely) reports 0 imported / N of M rejected, with no partial import', async () => {
+  const context = createBudgetPoolModalContext();
+  stubXLSX(context, [
+    xlsxRow(),
+    xlsxRow({ 'Pool Name': 'Missing Start Month', 'Start Month (YYYY-MM)': '', 'End Month (YYYY-MM)': '2026-12' }),
+  ]);
+  let shownErrors = null;
+  context._showPoolImportErrors = rowResults => { shownErrors = rowResults; };
+  context._showPoolImportPreview = () => { throw new Error('preview must never be shown for an invalid batch'); };
+
+  await context.handlePoolBulkUpload(fakeFileInput());
+
+  assert.ok(shownErrors);
+  assert.equal(shownErrors.length, 2, 'row results must report every row in the file, not just the failing ones');
+  assert.equal(shownErrors[0].ok, true, 'the first row (valid) is still marked ok individually');
+  assert.equal(shownErrors[1].ok, false);
+  assert.match(shownErrors[1].errors.join(' '), /Valid start\/end month or date range is required/);
+  assert.equal(context.loadBudgetPools().length, 0, 'nothing may be imported -- all-or-nothing, no partial import');
+});
