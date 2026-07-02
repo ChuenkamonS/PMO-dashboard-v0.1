@@ -432,7 +432,7 @@ Project Dropdown Data-Source Fragmentation
 
 Status
 
-OPEN
+DEFERRED (Phase 7A-12 design review completed 2026-07-02; implementation paused — see below)
 
 Priority
 
@@ -444,7 +444,7 @@ Phase 7A-9A
 
 Owner Phase
 
-Project Dropdown Unification
+Project Dropdown Unification — deferred until the Project Master module exists
 
 Reason
 
@@ -483,6 +483,65 @@ Regression Tests
 
 - Per-dropdown source assertions once each is migrated.
 - `refreshProjectDropdowns()` coverage test against the full canonical dropdown id list.
+
+Phase 7A-12 Design Review (2026-07-02) — completed, implementation paused
+
+A design review was performed for a Budget & Spend-scoped fix (a new `getBudgetSpendProjectList()`
+union helper over Budget Pools + Approved Memos + Manual Expenses + Infra Costs + canonical Actual
+Spend, explicitly excluding `loadSLBudgets()`). No code was written. Decision: **do not implement
+this now** — the long-term roadmap calls for a future Master Settings module introducing a real
+Project Master (alongside Approvers, Reviewers, Signers, Signature images, Memo Reasons, etc.).
+Every Budget & Spend Project dropdown will migrate to that single source once it exists; building a
+union-based intermediate source now would only be replaced shortly afterward. This section preserves
+the review's findings so the eventual Project Master migration (or a future revisit of this exact
+plan) does not have to be re-derived from scratch.
+
+Inventory of every Project dropdown/filter found in Budget & Spend (full detail, file:line, current
+source, and DOM ids captured in the Phase 7A-12 conversation transcript — condensed here):
+
+- Overview: chips (`ov-proj-chips`), not a `<select>` — `_ovInitState()` (`views/budget.js:756-759`),
+  sourced from Actual Spend only.
+- Actual Spend (Report): `as-project` — `renderActualSpend()` (`views/budget.js:2142-2149`), Actual
+  Spend only.
+- Actual Spend (Manual Entries): `as-manual-project` — `renderManualEntries()`
+  (`views/budget.js:1991`), Manual Expenses only.
+- Forecast: `sl-forecast-proj` — `_renderForecastTable()` (`views/budget.js:1284-1297`), derived from
+  `calculateForecast()` rows (Software+Infra, Complete coverage only — narrower by design).
+- Budget vs Actual: `bva-project` — `_renderBvaWith()` (`views/budget.js:2478-2486`), Budget Pools ∪
+  Actual Spend (closest to the target union already); populates once per session
+  (`options.length <= 1` guard).
+- Budget Settings Add/Edit Pool modal: `bpool-project` — `openBudgetPoolModal()`
+  (`views/budget.js:3247, 3258`), sourced from `getCanonicalProjectList()` (Settings), migrated there
+  in Phase 7A-9A.
+- Budget Settings pool list: `bset-search` is a free-text search over already-loaded pools, not a
+  project list — nothing to unify.
+- Bulk Upload (import/template/export): no dropdown; Project is a data column or inherited from
+  `_bvaDataset`/the full pool list.
+- Assignment Workspace: no dropdown; operates on `_bvaDataset`, so it inherits whatever `bva-project`
+  already produced.
+- Tag Budget modal (`views/history.js`, `openBudgetTagModal()`): not a project filter — shows all of
+  a memo's candidate pools grouped by `pool.project` for section headers
+  (`Object.entries(byProject).sort(...)`); no project list is ever selectively hidden/shown.
+- Export dialogs: confirmed none have their own modal project dropdown; every export reads the
+  already-rendered tab's filter value or dataset, so fixing the source dropdowns would have fixed
+  their exports automatically.
+
+Key conflict surfaced (relevant again if/when this is revisited before Project Master lands, or as
+input to Project Master's own design): `bpool-project` is a **creation** input (picking the project
+for a brand-new Budget Pool), not a filter, and unlike `f-project` it has no free-text "type your own
+project" fallback. Moving it onto a financial-history-derived union (rather than an admin-curated
+list) would silently remove the ability to create the *first* Budget Pool for a project with zero
+prior financial footprint — a functional regression, not just a display inconsistency. Whatever
+eventually replaces `getCanonicalProjectList()`/this dropdown's source must keep supporting
+"pick a project that has no financial history yet."
+
+Exit Criteria (superseded)
+
+The exit criteria above (decide per-dropdown Settings-canonical vs. data-derived, migrate, cover via
+`refreshProjectDropdowns()`) are superseded by "migrate every Budget & Spend Project dropdown to the
+Project Master module once it ships." Do not build the union-based `getBudgetSpendProjectList()`
+helper described above as a permanent fix — it was scoped as an intermediate step and is no longer
+planned.
 
 ---
 
