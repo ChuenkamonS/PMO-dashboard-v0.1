@@ -2149,7 +2149,7 @@ test('Phase 7A-9B: deleteBudgetPool names the pool in the confirm prompt when th
   assert.match(confirmMsg, /Unlinked Pool/, 'confirm prompt must name the specific pool being deleted');
 });
 
-test('Phase 7A-9B: saveBudgetPool\'s overlap warning names the specific conflicting pool(s) instead of a bare count', async () => {
+test('Business rule update: saveBudgetPool saves an overlapping Project + Spend Type + Period pool immediately, with no confirm dialog', async () => {
   const context = createBudgetPoolModalContext();
   context.loadSettings = () => ({ projects: ['Alpha'] });
   context.storeBudgetPools([
@@ -2167,14 +2167,42 @@ test('Phase 7A-9B: saveBudgetPool\'s overlap warning names the specific conflict
   el('bpool-end-month').value = '9';
   el('bpool-edit-id').value = '';
 
-  let confirmMsg = null;
-  context.confirm = msg => { confirmMsg = msg; return true; };
+  let confirmCalled = false;
+  context.confirm = () => { confirmCalled = true; return true; };
 
   await context.saveBudgetPool();
 
-  assert.ok(confirmMsg, 'must show a confirm before saving an overlapping pool');
-  assert.match(confirmMsg, /Alpha \/ Existing SL Pool/, 'must name the specific conflicting pool, not just a bare count');
-  assert.match(confirmMsg, /01\/2569 → 06\/2569/, 'must show the conflicting pool\'s period in BE display format, reusing the existing validateBudgetPoolChange() conflicts data');
+  assert.equal(confirmCalled, false, 'overlapping Project + Spend Type + Period must never prompt a confirm -- PMO may intentionally create separate buckets');
+  const pools = context.loadBudgetPools();
+  assert.ok(pools.find(p => p.name === 'Overlapping SL Pool'), 'the overlapping pool must be saved, not blocked');
+  assert.equal(pools.length, 2, 'both the pre-existing and the new overlapping pool must coexist');
+});
+
+test('Business rule update: saveBudgetPool still blocks an exact duplicate identity (Project + Pool Name + Year) even though overlap is now allowed', async () => {
+  const context = createBudgetPoolModalContext();
+  context.loadSettings = () => ({ projects: ['Alpha'] });
+  context.storeBudgetPools([
+    context.createBudgetPoolRecord({ id: 'existing-pool-2', project: 'Alpha', name: 'Same Name Pool', budget: 5000, startMonth: '2026-01', endMonth: '2026-06', spendTypes: ['Software'] }),
+  ]);
+  ['bpool-project', 'bpool-name', 'bpool-budget', 'bpool-edit-id'].forEach(id => {
+    if (!context.__elements.has(id)) context.__elements.set(id, { id, value: '' });
+  });
+  const el = id => context.__elements.get(id);
+  el('bpool-project').value = 'Alpha';
+  el('bpool-name').value = 'Same Name Pool';
+  el('bpool-budget').value = '2000';
+  el('bpool-year').value = '2569';
+  el('bpool-start-month').value = '3';
+  el('bpool-end-month').value = '9';
+  el('bpool-edit-id').value = '';
+
+  let alertMsg = null;
+  context.alert = msg => { alertMsg = msg; };
+
+  await context.saveBudgetPool();
+
+  assert.match(alertMsg || '', /Duplicate Budget Pool for Project, Pool Name, and Year/);
+  assert.equal(context.loadBudgetPools().length, 1, 'the duplicate-identity pool must not be saved');
 });
 
 // ══════════════════════════════════════════════════════════════════
@@ -2328,21 +2356,70 @@ test('Phase 7A-9C: handlePoolBulkUpload rejects the whole batch when two rows in
   assert.match(shownErrors[1].errors.join(' '), /Duplicate Budget Pool/);
 });
 
-test('Phase 7A-9C: handlePoolBulkUpload rejects the whole batch on an overlapping/conflicting row, and shows the preview only when every row is valid', async () => {
+test('Business rule update: handlePoolBulkUpload accepts an overlapping/conflicting Create row -- overlap is no longer an import error', async () => {
   const context = createBudgetPoolModalContext();
   await context.savePoolAsync({ id: 'pool-overlap-existing', project: 'Alpha', name: 'Existing Pool', budget: 5000, startMonth: '2026-01', endMonth: '2026-06', memoTypes: ['sl'] });
   stubXLSX(context, [xlsxRow({ 'Pool Name': 'New Overlapping Pool', 'Start Month (YYYY-MM)': '2026-03', 'End Month (YYYY-MM)': '2026-09' })]);
-  let shownErrors = null;
+  let shownErrors = null, shownPreview = null;
   context._showPoolImportErrors = rowResults => { shownErrors = rowResults; };
-  context._showPoolImportPreview = () => { throw new Error('preview must never be shown for an invalid batch'); };
+  context._showPoolImportPreview = rowResults => { shownPreview = rowResults; };
 
   await context.handlePoolBulkUpload(fakeFileInput());
 
-  assert.ok(shownErrors);
-  assert.match(shownErrors[0].errors.join(' '), /Overlaps existing Budget Pool/);
+  assert.equal(shownErrors, null, 'overlap must never be treated as an import error');
+  assert.ok(shownPreview, 'an overlapping-but-otherwise-valid batch must reach the preview');
+  assert.equal(shownPreview[0].action, 'create');
+
+  context._poolImportPending = shownPreview;
+  await context._confirmPoolImport();
+  const pools = context.loadBudgetPools();
+  assert.equal(pools.length, 2, 'both the pre-existing and the new overlapping pool must be saved');
 });
 
-test('Phase 7A-9C: a fully valid bulk import batch is previewed with create/update tags and, once confirmed, saves all pools while remapping Actual Spend exactly once', async () => {
+test('Business rule update: handlePoolBulkUpload accepts an overlapping Update row -- overlap is no longer an import error', async () => {
+  const context = createBudgetPoolModalContext();
+  await context.savePoolAsync({ id: 'pool-overlap-a', project: 'Alpha', name: 'Pool A', budget: 5000, startMonth: '2026-01', endMonth: '2026-06', memoTypes: ['sl'] });
+  await context.savePoolAsync({ id: 'pool-overlap-b', project: 'Alpha', name: 'Pool B', budget: 3000, startMonth: '2026-05', endMonth: '2026-09', memoTypes: ['sl'] });
+  stubXLSX(context, [xlsxRow({ 'Pool ID': 'pool-overlap-b', 'Pool Name': 'Pool B', 'Budget (THB)': '4500', 'Start Month (YYYY-MM)': '2026-05', 'End Month (YYYY-MM)': '2026-09' })]);
+  let shownErrors = null, shownPreview = null;
+  context._showPoolImportErrors = rowResults => { shownErrors = rowResults; };
+  context._showPoolImportPreview = rowResults => { shownPreview = rowResults; };
+
+  await context.handlePoolBulkUpload(fakeFileInput());
+
+  assert.equal(shownErrors, null, 'an Update row that still overlaps Pool A must not be treated as an error');
+  assert.ok(shownPreview);
+  assert.equal(shownPreview[0].action, 'update');
+
+  context._poolImportPending = shownPreview;
+  await context._confirmPoolImport();
+  assert.equal(context.loadBudgetPools().find(p => p.id === 'pool-overlap-b').budget, 4500);
+});
+
+test('Business rule update: handlePoolBulkUpload accepts multiple overlapping pools created together in one workbook', async () => {
+  const context = createBudgetPoolModalContext();
+  stubXLSX(context, [
+    xlsxRow({ 'Pool Name': 'Bucket A', 'Start Month (YYYY-MM)': '2026-01', 'End Month (YYYY-MM)': '2026-12' }),
+    xlsxRow({ 'Pool Name': 'Bucket B', 'Start Month (YYYY-MM)': '2026-01', 'End Month (YYYY-MM)': '2026-12' }),
+    xlsxRow({ 'Pool Name': 'Bucket C', 'Start Month (YYYY-MM)': '2026-01', 'End Month (YYYY-MM)': '2026-12' }),
+  ]);
+  let shownErrors = null, shownPreview = null;
+  context._showPoolImportErrors = rowResults => { shownErrors = rowResults; };
+  context._showPoolImportPreview = rowResults => { shownPreview = rowResults; };
+
+  await context.handlePoolBulkUpload(fakeFileInput());
+
+  assert.equal(shownErrors, null, 'three pools sharing Project + Spend Type + Period must all be accepted together');
+  assert.ok(shownPreview);
+  assert.equal(shownPreview.length, 3);
+  assert.ok(shownPreview.every(r => r.action === 'create'));
+
+  context._poolImportPending = shownPreview;
+  await context._confirmPoolImport();
+  assert.equal(context.loadBudgetPools().length, 3);
+});
+
+test('Phase 7A-9D: a fully valid bulk import batch is previewed with create/update tags (Update decided by Pool ID) and, once confirmed, saves all pools while remapping Actual Spend exactly once', async () => {
   const context = createBudgetPoolModalContext();
   await context.savePoolAsync({ id: 'pool-existing-1', project: 'Alpha', name: 'SL 2026', budget: 5000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'] });
 
@@ -2351,7 +2428,7 @@ test('Phase 7A-9C: a fully valid bulk import batch is previewed with create/upda
   context.remapActualSpendForBudgetPools = (...args) => { remapCalls++; return originalRemap(...args); };
 
   stubXLSX(context, [
-    xlsxRow({ 'Pool Name': 'SL 2026', 'Budget (THB)': '9000' }),
+    xlsxRow({ 'Pool ID': 'pool-existing-1', 'Pool Name': 'SL 2026', 'Budget (THB)': '9000' }),
     xlsxRow({ 'Pool Name': 'HW 2026', 'Budget (THB)': '4000', 'Memo Types (SL,HW,INT,ENT,DEP or blank=all)': 'HW' }),
   ]);
   let shownPreview = null;
@@ -2488,4 +2565,232 @@ test('Phase 7A-9C bug fix: a batch that is still genuinely invalid (e.g. missing
   assert.equal(shownErrors[1].ok, false);
   assert.match(shownErrors[1].errors.join(' '), /Valid start\/end month or date range is required/);
   assert.equal(context.loadBudgetPools().length, 0, 'nothing may be imported -- all-or-nothing, no partial import');
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Phase 7A-9D — Budget Pool Bulk Upload redesign: one workbook, Create + Update, Pool ID contract
+// ══════════════════════════════════════════════════════════════════
+
+function stubXLSXWrite(context) {
+  let written = null;
+  context.XLSX = {
+    utils: {
+      aoa_to_sheet: aoa => ({ __aoa: aoa }),
+      book_new: () => ({ SheetNames: [], Sheets: {} }),
+      book_append_sheet: (wb, sheet, name) => { wb.SheetNames.push(name); wb.Sheets[name] = sheet; },
+    },
+    writeFile: (wb, filename) => { written = { wb, filename }; },
+  };
+  return () => written;
+}
+
+function sheetAoaToRowObjects(aoa) {
+  const [headers, ...dataRows] = aoa;
+  return dataRows.map(row => Object.fromEntries(headers.map((h, i) => [h, row[i]])));
+}
+
+test('Phase 7A-9D: downloadBudgetPoolTemplate generates a .xlsx workbook with "Budget Pools" and "Instructions" sheets in the required column order, including Pool ID for existing visible pools', async () => {
+  const context = createBudgetPoolModalContext();
+  await context.savePoolAsync({ id: 'pool-dl-1', project: 'Alpha', name: 'SL 2026', budget: 5000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'] });
+  context.__elements.get('bset-year').value = '2569';
+  const getWritten = stubXLSXWrite(context);
+
+  context.downloadBudgetPoolTemplate();
+
+  const written = getWritten();
+  assert.ok(written, 'XLSX.writeFile must be called');
+  assert.match(written.filename, /\.xlsx$/, 'Download Template must produce .xlsx only, never .csv');
+  assert.deepEqual(written.wb.SheetNames, ['Budget Pools', 'Instructions']);
+
+  const [headerRow, ...dataRows] = written.wb.Sheets['Budget Pools'].__aoa;
+  assert.deepEqual(JSON.parse(JSON.stringify(headerRow)), ['Pool ID','Project','Pool Name','Budget','Budget Year (BE)','Start Month','End Month','Spend Types']);
+  assert.equal(dataRows.length, 1, 'must contain the currently-visible (year-filtered) pool, not a synthetic sample row');
+  assert.equal(dataRows[0][0], 'pool-dl-1', 'the existing pool\'s real Pool ID must be included');
+
+  const instructionsAoa = written.wb.Sheets['Instructions'].__aoa;
+  const instructionsText = instructionsAoa.flat().join(' ');
+  assert.match(instructionsText, /Pool ID/);
+  assert.match(instructionsText, /does NOT delete the Budget Pool/);
+  assert.match(instructionsText, /all-or-nothing/i);
+  assert.match(instructionsText, /Unknown Pool ID/);
+  assert.match(instructionsText, /Duplicate Pool ID/);
+  assert.match(instructionsText, /Blank Pool ID matching existing Pool/);
+});
+
+test('Phase 7A-9D: downloadBudgetPoolTemplate only includes pools visible under the active Budget Settings year filter', async () => {
+  const context = createBudgetPoolModalContext();
+  await context.savePoolAsync({ id: 'pool-dl-2569', project: 'Alpha', name: 'A', budget: 1000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'] });
+  await context.savePoolAsync({ id: 'pool-dl-2568', project: 'Alpha', name: 'B', budget: 1000, startMonth: '2025-01', endMonth: '2025-12', memoTypes: ['sl'] });
+  context.__elements.get('bset-year').value = '2569';
+  const getWritten = stubXLSXWrite(context);
+
+  context.downloadBudgetPoolTemplate();
+
+  const [, ...dataRows] = getWritten().wb.Sheets['Budget Pools'].__aoa;
+  assert.equal(dataRows.length, 1);
+  assert.equal(dataRows[0][0], 'pool-dl-2569');
+});
+
+test('Phase 7A-9D: Download Template -> Upload unmodified is a true round-trip -- every row classifies as No Changes, with no errors', async () => {
+  const context = createBudgetPoolModalContext();
+  await context.savePoolAsync({ id: 'pool-rt-1', project: 'Alpha', name: 'SL 2026', budget: 5000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'] });
+  await context.savePoolAsync({ id: 'pool-rt-2', project: 'Beta', name: 'HW 2026', budget: 3000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['hw'] });
+  context.__elements.get('bset-year').value = '2569';
+
+  const getWritten = stubXLSXWrite(context);
+  context.downloadBudgetPoolTemplate();
+  const roundTripRows = sheetAoaToRowObjects(getWritten().wb.Sheets['Budget Pools'].__aoa);
+
+  stubXLSX(context, roundTripRows);
+  let shownPreview = null, shownErrors = null;
+  context._showPoolImportPreview = rowResults => { shownPreview = rowResults; };
+  context._showPoolImportErrors = rowResults => { shownErrors = rowResults; };
+
+  await context.handlePoolBulkUpload(fakeFileInput());
+
+  assert.equal(shownErrors, null, 'an unmodified re-upload must never error');
+  assert.ok(shownPreview);
+  assert.equal(shownPreview.length, 2);
+  assert.ok(shownPreview.every(r => r.action === 'none'), 'every row must classify as No Changes: ' + JSON.stringify(shownPreview.map(r => r.action)));
+});
+
+test('Phase 7A-9D: a No Changes row does not call savePoolAsync, does not touch audit fields, and does not trigger a remap', async () => {
+  const context = createBudgetPoolModalContext();
+  await context.savePoolAsync({ id: 'pool-nochg-1', project: 'Alpha', name: 'SL 2026', budget: 5000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'] });
+  const before = context.loadBudgetPools()[0];
+
+  let saveCalls = 0;
+  const originalSave = context.savePoolAsync;
+  context.savePoolAsync = (...args) => { saveCalls++; return originalSave(...args); };
+  let remapCalls = 0;
+  const originalRemap = context.remapActualSpendForBudgetPools;
+  context.remapActualSpendForBudgetPools = (...args) => { remapCalls++; return originalRemap(...args); };
+
+  stubXLSX(context, [xlsxRow({ 'Pool ID': 'pool-nochg-1', 'Pool Name': 'SL 2026', 'Budget (THB)': '5000' })]);
+  let shownPreview = null;
+  context._showPoolImportPreview = rowResults => { shownPreview = rowResults; };
+  await context.handlePoolBulkUpload(fakeFileInput());
+
+  assert.equal(shownPreview[0].action, 'none');
+  context._poolImportPending = shownPreview;
+  await context._confirmPoolImport();
+
+  assert.equal(saveCalls, 0, 'savePoolAsync must never be called for a No Changes row');
+  assert.equal(remapCalls, 0, 'a batch with zero real changes must not remap');
+  assert.deepEqual(context.loadBudgetPools()[0], before, 'createdAt/createdBy/updatedAt/updatedBy must remain byte-identical');
+});
+
+test('Phase 7A-9D: handlePoolBulkUpload reads the Pool ID column end-to-end -- present = Update, blank = Create, unknown = Error, duplicate-in-file = Error', async () => {
+  const context = createBudgetPoolModalContext();
+  await context.savePoolAsync({ id: 'pool-e2e-1', project: 'Alpha', name: 'SL 2026', budget: 5000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'] });
+
+  stubXLSX(context, [
+    xlsxRow({ 'Pool ID': 'pool-e2e-1', 'Pool Name': 'SL 2026', 'Budget (THB)': '6000' }),
+    xlsxRow({ 'Pool Name': 'New Pool 2026', 'Budget (THB)': '2000', 'Memo Types (SL,HW,INT,ENT,DEP or blank=all)': 'HW' }),
+  ]);
+  let shownPreview = null;
+  context._showPoolImportPreview = rowResults => { shownPreview = rowResults; };
+  await context.handlePoolBulkUpload(fakeFileInput());
+  assert.equal(shownPreview.find(r => r.record.name === 'SL 2026').action, 'update');
+  assert.equal(shownPreview.find(r => r.record.name === 'New Pool 2026').action, 'create');
+
+  stubXLSX(context, [xlsxRow({ 'Pool ID': 'does-not-exist' })]);
+  let shownErrors = null;
+  context._showPoolImportErrors = rowResults => { shownErrors = rowResults; };
+  context._showPoolImportPreview = () => { throw new Error('must not preview an Unknown Pool ID batch'); };
+  await context.handlePoolBulkUpload(fakeFileInput());
+  assert.match(shownErrors[0].errors.join(' '), /Unknown Pool ID/);
+
+  stubXLSX(context, [
+    xlsxRow({ 'Pool ID': 'pool-e2e-1', 'Pool Name': 'SL 2026' }),
+    xlsxRow({ 'Pool ID': 'pool-e2e-1', 'Pool Name': 'SL 2026 v2' }),
+  ]);
+  shownErrors = null;
+  context._showPoolImportErrors = rowResults => { shownErrors = rowResults; };
+  await context.handlePoolBulkUpload(fakeFileInput());
+  assert.match(shownErrors[0].errors.join(' '), /Duplicate Pool ID/);
+  assert.match(shownErrors[1].errors.join(' '), /Duplicate Pool ID/);
+});
+
+test('Phase 7A-9D: handlePoolBulkUpload surfaces the specific "existing Budget Pool detected, but Pool ID is blank" error, not just the generic duplicate message', async () => {
+  const context = createBudgetPoolModalContext();
+  await context.savePoolAsync({ id: 'pool-blank-id-1', project: 'Alpha', name: 'SL 2026', budget: 5000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'] });
+
+  stubXLSX(context, [xlsxRow({ 'Pool Name': 'SL 2026', 'Budget (THB)': '9000' })]);
+  let shownErrors = null;
+  context._showPoolImportErrors = rowResults => { shownErrors = rowResults; };
+  context._showPoolImportPreview = () => { throw new Error('must not preview when a blank Pool ID matches an existing pool'); };
+
+  await context.handlePoolBulkUpload(fakeFileInput());
+
+  assert.ok(shownErrors);
+  assert.match(shownErrors[0].errors.join(' '), /Existing Budget Pool detected, but Pool ID is blank/);
+});
+
+test('Phase 7A-9D: handlePoolBulkUpload accepts the new "Spend Types" column with canonical names mixed with legacy short codes, case-insensitively', async () => {
+  const context = createBudgetPoolModalContext();
+  stubXLSX(context, [
+    xlsxRow({ 'Pool Name': 'Canonical Pool', 'Spend Types': 'infra, Team Activity, hw' }),
+  ]);
+  let shownPreview = null, shownErrors = null;
+  context._showPoolImportPreview = rowResults => { shownPreview = rowResults; };
+  context._showPoolImportErrors = rowResults => { shownErrors = rowResults; };
+
+  await context.handlePoolBulkUpload(fakeFileInput());
+
+  assert.equal(shownErrors, null);
+  assert.ok(shownPreview);
+  assert.deepEqual(JSON.parse(JSON.stringify(shownPreview[0].record.memoTypes)).sort(), ['hw','infra','int'].sort());
+});
+
+test('Phase 7A-9D: handlePoolBulkUpload still accepts the previous "Memo Types" short-code header for backward compatibility', async () => {
+  const context = createBudgetPoolModalContext();
+  stubXLSX(context, [xlsxRow({ 'Pool Name': 'Legacy Header Pool', 'Memo Types (SL,HW,INT,ENT,DEP or blank=all)': 'SL,HW' })]);
+  let shownPreview = null, shownErrors = null;
+  context._showPoolImportPreview = rowResults => { shownPreview = rowResults; };
+  context._showPoolImportErrors = rowResults => { shownErrors = rowResults; };
+
+  await context.handlePoolBulkUpload(fakeFileInput());
+
+  assert.equal(shownErrors, null);
+  assert.deepEqual(JSON.parse(JSON.stringify(shownPreview[0].record.memoTypes)).sort(), ['hw','sl']);
+});
+
+test('Phase 7A-9D: handlePoolBulkUpload surfaces "Invalid Spend Type" for an unrecognized token instead of silently dropping it', async () => {
+  const context = createBudgetPoolModalContext();
+  stubXLSX(context, [xlsxRow({ 'Pool Name': 'Bad Type Pool', 'Spend Types': 'Software, Nonsense' })]);
+  let shownErrors = null;
+  context._showPoolImportErrors = rowResults => { shownErrors = rowResults; };
+  context._showPoolImportPreview = () => { throw new Error('preview must never show for a batch with an invalid Spend Type'); };
+
+  await context.handlePoolBulkUpload(fakeFileInput());
+
+  assert.ok(shownErrors);
+  assert.match(shownErrors[0].errors.join(' '), /Invalid Spend Type: Nonsense/);
+});
+
+test('Phase 7A-9D: preview summary counts Create / Update / No Changes correctly', () => {
+  const context = createBudgetPoolModalContext();
+  const rowResults = [
+    { record: context.createBudgetPoolRecord({ id:'p1', project:'Alpha', name:'A', budget:1000, startMonth:'2026-01', endMonth:'2026-12', memoTypes:['sl'] }), action:'create', previous:null },
+    { record: context.createBudgetPoolRecord({ id:'p2', project:'Alpha', name:'B', budget:2000, startMonth:'2026-01', endMonth:'2026-12', memoTypes:['hw'] }), action:'update', previous: context.createBudgetPoolRecord({ id:'p2', project:'Alpha', name:'B', budget:1000, startMonth:'2026-01', endMonth:'2026-12', memoTypes:['hw'] }) },
+    { record: context.createBudgetPoolRecord({ id:'p3', project:'Alpha', name:'C', budget:3000, startMonth:'2026-01', endMonth:'2026-12', memoTypes:['dep'] }), action:'none', previous: null },
+  ];
+  context._showPoolImportPreview(rowResults);
+  const html = context.__lastPanel.innerHTML;
+  assert.match(html, /Created 1/);
+  assert.match(html, /Updated 1/);
+  assert.match(html, /No Changes 1/);
+  assert.match(html, /Errors 0/);
+});
+
+test('Phase 7A-9D: error summary reports Created 0 / Updated 0 / No Changes 0 / Errors N and includes the Pool ID column', () => {
+  const context = createBudgetPoolModalContext();
+  const rowResults = [
+    { ok:false, row:2, errors:['Unknown Pool ID — no existing Budget Pool has this ID. Leave Pool ID blank to create a new pool instead.'], input:{ id:'ghost-id', proj:'Alpha', name:'X' } },
+  ];
+  context._showPoolImportErrors(rowResults);
+  const html = context.__lastPanel.innerHTML;
+  assert.match(html, /Created 0 · Updated 0 · No Changes 0 · Errors 1/);
+  assert.match(html, /ghost-id/);
 });

@@ -1146,14 +1146,14 @@ test('Phase 7A-9B: formatMonthBE returns an empty string for missing/invalid inp
 // Phase 7A-9C — Budget Pool Bulk Upload validation redesign (TD-7A-04)
 // ══════════════════════════════════════════════════════════════════
 
-test('Phase 7A-9C: validateBudgetPoolImportBatch accepts a fully valid batch and classifies new vs. update rows', () => {
+test('Phase 7A-9D: validateBudgetPoolImportBatch accepts a fully valid batch and classifies Create vs. Update by Pool ID, not identity', () => {
   const ctx = context();
   const existingPools = [
     ctx.createBudgetPoolRecord({ id: 'pool-imp-existing', project: 'Alpha', name: 'SL 2026', budget: 5000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'] }),
   ];
   const rows = [
-    { proj: 'Alpha', name: 'SL 2026', budget: 9000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
-    { proj: 'Alpha', name: 'HW 2026', budget: 4000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['hw'] },
+    { id: 'pool-imp-existing', proj: 'Alpha', name: 'SL 2026', budget: 9000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
+    { id: '', proj: 'Alpha', name: 'HW 2026', budget: 4000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['hw'] },
   ];
   const result = ctx.validateBudgetPoolImportBatch(rows, existingPools);
   assert.equal(result.valid, true);
@@ -1189,44 +1189,141 @@ test('Phase 7A-9C: validateBudgetPoolImportBatch rejects two rows in the same fi
   assert.match(result.rowResults[1].errors.join(' '), /Duplicate Budget Pool/);
 });
 
-test('Phase 7A-9C: validateBudgetPoolImportBatch recognizes a row as updating an existing pool using the canonical derived year, not the raw imported year cell', () => {
+test('Phase 7A-9D: validateBudgetPoolImportBatch updates the exact pool named by Pool ID even when the imported Year cell disagrees with the canonical derived year', () => {
   const ctx = context();
   const existingPools = [
     ctx.createBudgetPoolRecord({ id: 'pool-imp-existing-2', project: 'Alpha', name: 'SL 2026', budget: 5000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'] }),
   ];
-  // Raw imported year cell says "2026" (wrong era) but Start/End Month agree with the existing
-  // pool -- createBudgetPoolRecord() derives the true year from the month range regardless, so
-  // this must still be recognized as the SAME pool (an update) rather than missing the match on a
-  // mismatched year cell and treating it as an unrelated new pool.
+  // Raw imported year cell says "2026" (wrong era) -- createBudgetPoolRecord() derives the true
+  // year from Start/End Month regardless, and Pool ID (not identity) decides which pool this
+  // updates, so a stale/mismatched Year cell must not block or misroute the update.
   const rows = [
-    { proj: 'Alpha', name: 'SL 2026', budget: 9000, yr: '2026', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
+    { id: 'pool-imp-existing-2', proj: 'Alpha', name: 'SL 2026', budget: 9000, yr: '2026', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
   ];
   const result = ctx.validateBudgetPoolImportBatch(rows, existingPools);
   assert.equal(result.valid, true);
   assert.equal(result.rowResults[0].action, 'update');
-  assert.equal(result.records[0].id, 'pool-imp-existing-2', 'must resolve to the SAME existing pool id, not generate a new one');
+  assert.equal(result.records[0].id, 'pool-imp-existing-2');
+  assert.equal(result.records[0].year, '2569', 'year is always re-derived from Start Month, never taken from the raw imported cell');
 });
 
-test('Phase 7A-9C: validateBudgetPoolImportBatch rejects the batch when two rows both resolve to updating the SAME existing pool', () => {
+test('Phase 7A-9D: validateBudgetPoolImportBatch rejects the batch when two rows carry the SAME non-blank Pool ID', () => {
   const ctx = context();
   const existingPools = [
     ctx.createBudgetPoolRecord({ id: 'pool-imp-existing-3', project: 'Alpha', name: 'SL 2026', budget: 5000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'] }),
   ];
   const rows = [
-    { proj: 'Alpha', name: 'SL 2026', budget: 9000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
-    { proj: 'Alpha', name: 'sl 2026', budget: 7000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
+    { id: 'pool-imp-existing-3', proj: 'Alpha', name: 'SL 2026', budget: 9000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
+    { id: 'pool-imp-existing-3', proj: 'Alpha', name: 'SL 2026 Renamed', budget: 7000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
   ];
-  // Without an explicit claimed-id check, each row independently resolves to the same existingMatch
-  // and validateBudgetPoolChange excludes that pool's id from "others" for BOTH rows (each thinks
-  // it alone is "updating" it), so neither would ever see the other as a duplicate.
   const result = ctx.validateBudgetPoolImportBatch(rows, existingPools);
-  assert.equal(result.valid, false, 'two rows updating the same existing pool must be rejected as an ambiguous duplicate, not silently apply the last one');
-  assert.equal(result.rowResults[0].ok, true);
+  assert.equal(result.valid, false, 'two rows targeting the same Pool ID must be rejected, not silently apply the last one');
+  assert.equal(result.rowResults[0].ok, false);
+  assert.equal(result.rowResults[1].ok, false);
+  assert.match(result.rowResults[0].errors.join(' '), /Duplicate Pool ID/);
+  assert.match(result.rowResults[1].errors.join(' '), /Duplicate Pool ID/);
+});
+
+test('Phase 7A-9D: validateBudgetPoolImportBatch rejects an Unknown Pool ID that does not match any existing Budget Pool', () => {
+  const ctx = context();
+  const rows = [
+    { id: 'pool-does-not-exist', proj: 'Alpha', name: 'Ghost Pool', budget: 1000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: [] },
+  ];
+  const result = ctx.validateBudgetPoolImportBatch(rows, []);
+  assert.equal(result.valid, false);
+  assert.match(result.rowResults[0].errors.join(' '), /Unknown Pool ID/);
+});
+
+test('Phase 7A-9D: a blank Pool ID that matches an existing pool\'s identity gets its own explicit "restore the Pool ID" error, not just the generic duplicate-identity message', () => {
+  const ctx = context();
+  const existingPools = [
+    ctx.createBudgetPoolRecord({ id: 'pool-imp-existing-4', project: 'Alpha', name: 'SL 2026', budget: 5000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'] }),
+  ];
+  const rows = [
+    { id: '', proj: 'Alpha', name: 'SL 2026', budget: 9000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
+  ];
+  const result = ctx.validateBudgetPoolImportBatch(rows, existingPools);
+  assert.equal(result.valid, false);
+  const message = result.rowResults[0].errors.join(' ');
+  assert.match(message, /Duplicate Budget Pool for Project, Pool Name, and Year/, 'the generic identity-duplicate message must still be present');
+  assert.match(message, /Existing Budget Pool detected, but Pool ID is blank/, 'plus the specific, actionable message required by the redesigned workflow');
+});
+
+test('Phase 7A-9D: validateBudgetPoolImportBatch rejects the batch when two different existing pools are both updated into the same resulting identity (Duplicate Identity after Update)', () => {
+  const ctx = context();
+  const existingPools = [
+    ctx.createBudgetPoolRecord({ id: 'pool-imp-existing-5a', project: 'Alpha', name: 'SL 2026', budget: 5000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'] }),
+    ctx.createBudgetPoolRecord({ id: 'pool-imp-existing-5b', project: 'Alpha', name: 'HW 2026', budget: 3000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['hw'] }),
+  ];
+  const rows = [
+    { id: 'pool-imp-existing-5a', proj: 'Alpha', name: 'Renamed 2026', budget: 9000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
+    { id: 'pool-imp-existing-5b', proj: 'Alpha', name: 'Renamed 2026', budget: 7000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['hw'] },
+  ];
+  const result = ctx.validateBudgetPoolImportBatch(rows, existingPools);
+  assert.equal(result.valid, false, 'both rows have explicit, distinct, valid Pool IDs -- the collision is in the resulting identity, not the Pool ID');
+  assert.equal(result.rowResults[0].ok, true, 'the first update is fine on its own');
   assert.equal(result.rowResults[1].ok, false);
   assert.match(result.rowResults[1].errors.join(' '), /Duplicate Budget Pool/);
 });
 
-test('Phase 7A-9C: validateBudgetPoolImportBatch escalates an overlap/shared-Spend-Type conflict to a hard failure (stricter than the manual single-save confirm-through flow)', () => {
+test('Phase 7A-9D: a row with Pool ID whose every effective field matches the existing pool classifies as "none" (No Changes) -- the true no-op the round-trip contract requires', () => {
+  const ctx = context();
+  const existing = ctx.createBudgetPoolRecord({
+    id: 'pool-imp-unchanged', project: 'Alpha', name: 'SL 2026', budget: 5000,
+    startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'],
+    createdBy: 'PMO A', createdAt: '2026-01-01T00:00:00.000Z', updatedBy: 'PMO A', updatedAt: '2026-01-01T00:00:00.000Z',
+  });
+  const rows = [
+    { id: 'pool-imp-unchanged', proj: 'Alpha', name: 'SL 2026', budget: 5000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
+  ];
+  const result = ctx.validateBudgetPoolImportBatch(rows, [existing]);
+  assert.equal(result.valid, true);
+  assert.equal(result.rowResults[0].action, 'none');
+  assert.deepEqual(result.records[0], existing, 'an unchanged row must reuse the existing record untouched -- not even updatedAt/updatedBy may change');
+});
+
+test('Phase 7A-9D: an Update row preserves the existing pool\'s createdBy/createdAt and only refreshes updatedBy/updatedAt', () => {
+  const ctx = context();
+  const existing = ctx.createBudgetPoolRecord({
+    id: 'pool-imp-audit', project: 'Alpha', name: 'SL 2026', budget: 5000,
+    startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'],
+    createdBy: 'PMO A', createdAt: '2026-01-01T00:00:00.000Z', updatedBy: 'PMO A', updatedAt: '2026-01-01T00:00:00.000Z',
+  });
+  const rows = [
+    { id: 'pool-imp-audit', proj: 'Alpha', name: 'SL 2026', budget: 9000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
+  ];
+  const result = ctx.validateBudgetPoolImportBatch(rows, [existing]);
+  assert.equal(result.rowResults[0].action, 'update');
+  const saved = result.records[0];
+  assert.equal(saved.id, 'pool-imp-audit');
+  assert.equal(saved.createdBy, 'PMO A', 'createdBy must be preserved from the existing pool, not blanked/reset');
+  assert.equal(saved.createdAt, '2026-01-01T00:00:00.000Z', 'createdAt must be preserved from the existing pool, not reset to now');
+  assert.notEqual(saved.updatedAt, '2026-01-01T00:00:00.000Z', 'updatedAt must be refreshed for an actual update');
+});
+
+test('Phase 7A-9D: a Create row (blank Pool ID) sets fresh createdBy/createdAt rather than leaving them blank', () => {
+  const ctx = context();
+  const rows = [
+    { id: '', proj: 'Alpha', name: 'New Pool', budget: 1000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
+  ];
+  const result = ctx.validateBudgetPoolImportBatch(rows, []);
+  assert.equal(result.rowResults[0].action, 'create');
+  const saved = result.records[0];
+  assert.ok(saved.createdAt, 'a newly created pool must have a createdAt timestamp');
+  assert.ok(saved.id, 'a newly created pool must have a generated id');
+});
+
+test('Phase 7A-9D: an unrecognized Spend Type token surfaces an "Invalid Spend Type" row error', () => {
+  const ctx = context();
+  const rows = [
+    { proj: 'Alpha', name: 'Bad Type Pool', budget: 1000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: [], invalidSpendTypes: ['NotARealType'] },
+  ];
+  const result = ctx.validateBudgetPoolImportBatch(rows, []);
+  assert.equal(result.valid, false);
+  assert.match(result.rowResults[0].errors.join(' '), /Invalid Spend Type: NotARealType/);
+});
+
+test('Business rule update: validateBudgetPoolImportBatch accepts an overlapping/shared-Spend-Type Create row -- overlap is an allowed, intentional PMO workflow, never an import error', () => {
   const ctx = context();
   const existingPools = [
     ctx.createBudgetPoolRecord({ id: 'pool-imp-conflict-A', project: 'Alpha', name: 'Pool A', budget: 5000, startMonth: '2026-01', endMonth: '2026-06', memoTypes: ['sl'] }),
@@ -1235,8 +1332,37 @@ test('Phase 7A-9C: validateBudgetPoolImportBatch escalates an overlap/shared-Spe
     { proj: 'Alpha', name: 'Pool B', budget: 3000, yr: '2569', start: '2026-03', end: '2026-09', memoTypes: ['sl'] },
   ];
   const result = ctx.validateBudgetPoolImportBatch(rows, existingPools);
-  assert.equal(result.valid, false, 'an overlapping period with a shared Spend Type must block the whole import, unlike the manual single-save confirm-through warning');
-  assert.match(result.rowResults[0].errors.join(' '), /Overlaps existing Budget Pool/);
+  assert.equal(result.valid, true, 'overlapping period with a shared Spend Type must no longer block the import');
+  assert.equal(result.rowResults[0].ok, true);
+  assert.equal(result.rowResults[0].action, 'create');
+  assert.equal(result.records.length, 1, 'the new overlapping pool must be accepted into the batch result');
+});
+
+test('Business rule update: validateBudgetPoolImportBatch accepts several overlapping Create rows sharing Project + Spend Type + Period in the same workbook', () => {
+  const ctx = context();
+  const rows = [
+    { proj: 'Alpha', name: 'Bucket A', budget: 1000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
+    { proj: 'Alpha', name: 'Bucket B', budget: 2000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
+    { proj: 'Alpha', name: 'Bucket C', budget: 3000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
+  ];
+  const result = ctx.validateBudgetPoolImportBatch(rows, []);
+  assert.equal(result.valid, true);
+  assert.equal(result.records.length, 3);
+  assert.ok(result.rowResults.every(r => r.ok && r.action === 'create'));
+});
+
+test('Business rule update: validateBudgetPoolImportBatch accepts an overlapping Update row (Pool ID present) -- overlap does not block Update either', () => {
+  const ctx = context();
+  const existingPools = [
+    ctx.createBudgetPoolRecord({ id: 'pool-imp-conflict-b', project: 'Alpha', name: 'Pool A', budget: 5000, startMonth: '2026-01', endMonth: '2026-06', memoTypes: ['sl'] }),
+    ctx.createBudgetPoolRecord({ id: 'pool-imp-conflict-c', project: 'Alpha', name: 'Pool B', budget: 3000, startMonth: '2026-05', endMonth: '2026-09', memoTypes: ['sl'] }),
+  ];
+  const rows = [
+    { id: 'pool-imp-conflict-c', proj: 'Alpha', name: 'Pool B', budget: 4500, yr: '2569', start: '2026-05', end: '2026-09', memoTypes: ['sl'] },
+  ];
+  const result = ctx.validateBudgetPoolImportBatch(rows, existingPools);
+  assert.equal(result.valid, true, 'an Update row that still overlaps another pool must not be blocked');
+  assert.equal(result.rowResults[0].action, 'update');
 });
 
 test('Phase 7A-9C: validateBudgetPoolImportBatch rejects a negative budget value instead of accepting it', () => {

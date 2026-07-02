@@ -313,23 +313,61 @@ function validateBudgetPoolChange(input, existingPools = [], editId = null) {
   return { valid: errors.length === 0, errors, conflicts, record };
 }
 
-// Phase 7A-9C: Budget Pool bulk import validation. Reuses validateBudgetPoolChange() row-by-row —
-// no separate validation/duplicate engine — against a context that grows with every row already
-// accepted earlier in the SAME batch, so two identical rows in one file are caught by the exact
-// same duplicate check that already protects manual add/edit, not just rows vs. pre-existing pools.
+// Phase 7A-9D: Budget Pool bulk import validation — Create + Update in one workbook.
+// Reuses validateBudgetPoolChange() row-by-row — no separate validation/duplicate engine — against
+// a context that grows with every row already accepted earlier in the SAME batch, so two identical
+// rows in one file are caught by the exact same duplicate check that already protects manual
+// add/edit, not just rows vs. pre-existing pools.
 // Import is strict all-or-nothing (docs/BvA_REQUIREMENT.md "Phase 7A-1" §7/§8, TD-7A-04): a
 // row-level overlap conflict — merely a confirmable warning in the manual single-save flow — is
 // escalated to a hard failure here, since Budget Pool is master data and there is no per-row
 // "confirm through it" UI in a batch import.
+//
+// Update-decision contract (per the redesigned Bulk Upload workflow): Pool ID (`row.id`) is the
+// ONLY thing that decides Create vs. Update. Business identity (project, name, year) remains
+// validated for uniqueness via validateBudgetPoolChange() exactly as before, but it is never used
+// to infer which pool a row updates — that inference was the pre-7A-9D behavior and could silently
+// overwrite the wrong pool. A blank Pool ID always creates; a non-blank Pool ID must match a real
+// existing pool.
 function validateBudgetPoolImportBatch(rows, existingPools = []) {
   const canonicalExisting = existingPools.map(createBudgetPoolRecord);
+  const existingById = new Map(canonicalExisting.map(pool => [pool.id, pool]));
   const accepted = [];
-  const claimedIds = new Set();
   const rowResults = [];
   let valid = true;
 
+  const idOccurrences = new Map();
+  (rows || []).forEach(row => {
+    const id = String(row.id || '').trim();
+    if (!id) return;
+    idOccurrences.set(id, (idOccurrences.get(id) || 0) + 1);
+  });
+
   (rows || []).forEach((row, index) => {
     const rowNumber = index + 2; // header is row 1, matching the template's own row numbering
+    const rowId = String(row.id || '').trim();
+
+    if (rowId && idOccurrences.get(rowId) > 1) {
+      valid = false;
+      rowResults.push({
+        row: rowNumber, ok: false,
+        errors: ['Duplicate Pool ID — this Pool ID appears more than once in this file. Each Pool ID may be used by only one row.'],
+        input: row,
+      });
+      return;
+    }
+
+    const existingMatch = rowId ? (existingById.get(rowId) || null) : null;
+    if (rowId && !existingMatch) {
+      valid = false;
+      rowResults.push({
+        row: rowNumber, ok: false,
+        errors: ['Unknown Pool ID — no existing Budget Pool has this ID. Leave Pool ID blank to create a new pool instead.'],
+        input: row,
+      });
+      return;
+    }
+
     const candidate = createBudgetPoolRecord({
       project: row.proj,
       name: row.name,
@@ -339,47 +377,62 @@ function validateBudgetPoolImportBatch(rows, existingPools = []) {
       endMonth: row.end,
       memoTypes: row.memoTypes,
     });
-    // Identity match is against REAL existing pools only (never against another batch row's own
-    // freshly-generated id) — this decides New vs. Update classification.
-    const existingMatch = canonicalExisting.find(pool =>
-      pool.project === candidate.project &&
-      pool.name.trim().toLowerCase() === candidate.name.trim().toLowerCase() &&
-      String(pool.year || '') === String(candidate.year || '')
-    );
-    // Two rows in the same file both resolving to the SAME existing pool (both would classify as
-    // "update" against it) is exactly as much a duplicate as two rows both creating the same new
-    // identity — without this check, validateBudgetPoolChange's own comparison would exclude this
-    // pool's id from "others" for BOTH rows (each treats it as "the pool I'm updating") and neither
-    // row would ever see the other as a duplicate.
-    if (existingMatch && claimedIds.has(existingMatch.id)) {
-      valid = false;
-      rowResults.push({
-        row: rowNumber, ok: false,
-        errors: ['Duplicate Budget Pool for Project, Pool Name, and Year (already targeted by an earlier row in this file)'],
-        input: row,
-      });
-      return;
-    }
     const id = existingMatch
       ? existingMatch.id
       : `pool-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}-${index}`;
     const context = canonicalExisting.concat(accepted);
     const result = validateBudgetPoolChange({ ...candidate, id }, context, existingMatch ? existingMatch.id : null);
     const errors = [...result.errors];
-    if (result.conflicts.length) {
-      errors.push(
-        'Overlaps existing Budget Pool(s) sharing a Spend Type: ' +
-        result.conflicts.map(pool => `${pool.project} / ${pool.name}`).join(', ')
-      );
+
+    if (row.invalidSpendTypes && row.invalidSpendTypes.length) {
+      errors.push('Invalid Spend Type: ' + row.invalidSpendTypes.join(', '));
     }
+    // Business rule update: overlapping Project + Spend Type + Period is allowed (PMO may
+    // intentionally create multiple buckets for the same project/type/period to separate budget
+    // purposes) -- result.conflicts is informational only and must never become an import error.
+    // A record that resolves to more than one matching pool still becomes Needs PMO Review at
+    // mapping time (mapBudgetPool(), unchanged) -- that is where ambiguity is handled, not here.
+    // A blank Pool ID that nonetheless collides with an existing pool's business identity gets its
+    // own explicit, actionable message — in addition to (not instead of) the generic duplicate
+    // message above — since the fix ("restore the Pool ID, or rename") is different from the
+    // fix for a genuine two-new-rows duplicate ("rename one of them").
+    if (!rowId && result.errors.some(message => message.includes('Duplicate Budget Pool for Project, Pool Name, and Year'))) {
+      errors.push('Existing Budget Pool detected, but Pool ID is blank. Restore Pool ID to update this Pool, or change Project / Pool Name / Budget Year to create a new Pool.');
+    }
+
     if (errors.length) {
       valid = false;
       rowResults.push({ row: rowNumber, ok: false, errors, input: row });
       return;
     }
-    claimedIds.add(id);
-    accepted.push(result.record);
-    rowResults.push({ row: rowNumber, ok: true, record: result.record, action: existingMatch ? 'update' : 'create' });
+
+    let record = result.record;
+    let action;
+    if (!existingMatch) {
+      action = 'create';
+      record = { ...record, createdBy: currentUser(), updatedBy: currentUser() };
+    } else {
+      const sameSpendTypes = JSON.stringify([...existingMatch.spendTypes].sort()) === JSON.stringify([...record.spendTypes].sort());
+      const unchanged = existingMatch.project === record.project &&
+        existingMatch.name === record.name &&
+        Number(existingMatch.budget) === Number(record.budget) &&
+        String(existingMatch.year || '') === String(record.year || '') &&
+        existingMatch.startMonth === record.startMonth &&
+        existingMatch.endMonth === record.endMonth &&
+        sameSpendTypes;
+      if (unchanged) {
+        // True no-op: reuse the existing record as-is so nothing (not even updatedAt/updatedBy)
+        // changes if this row is later saved — callers should skip saving 'none' rows entirely.
+        action = 'none';
+        record = existingMatch;
+      } else {
+        action = 'update';
+        record = { ...record, createdBy: existingMatch.createdBy, createdAt: existingMatch.createdAt, updatedBy: currentUser(), updatedAt: new Date().toISOString() };
+      }
+    }
+
+    accepted.push(record);
+    rowResults.push({ row: rowNumber, ok: true, record, action, previous: existingMatch || null });
   });
 
   return { valid, rowResults, records: valid ? accepted : [] };

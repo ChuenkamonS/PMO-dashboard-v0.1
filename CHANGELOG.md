@@ -1,5 +1,47 @@
 # CHANGELOG
 
+## Phase 7A-9E — Budget Pool overlap allowed (business rule update) (2026-07-02)
+
+### Changed
+- Overlapping Budget Pools (same Project + Spend Type + Period) are now explicitly allowed. Reason: PMO may intentionally create multiple buckets with the same Project, Spend Type, and Period to separate budget purposes.
+- Manual Add/Edit (`saveBudgetPool()`, `views/budget.js`): removed the `confirm()` warning dialog for overlapping Project + Spend Type + Period — an overlapping pool now saves immediately, with no prompt.
+- Bulk Upload / Bulk Update (`validateBudgetPoolImportBatch()`, `app.js`): removed the `errors.push('Overlaps existing Budget Pool(s)...')` escalation — overlap no longer fails a row or blocks the workbook (all-or-nothing still applies, but only to real errors: invalid month, negative budget, unknown Pool ID, duplicate Pool ID, duplicate identity, invalid Spend Type).
+- Removed the now-inaccurate "Overlapping Pool" row from the Bulk Upload workbook's Instructions sheet Common Errors table; added a short note explaining overlap is allowed by design.
+- `validateBudgetPoolChange()`'s `conflicts` field is unchanged (still computed) but is no longer treated as blocking by either caller — it is informational only.
+
+### Unchanged (verified, not touched)
+- Exact duplicate business identity (Project + Pool Name + Budget Year) still blocks in both manual add/edit and bulk import — unchanged.
+- Canonical automatic mapping (`mapBudgetPool()`, `findMatchingBudgetPools()`, `app.js`) is untouched: manual override (`manualBudgetPoolId`/`finalBudgetPoolId`) is still always respected; an Actual Spend record matching exactly one pool still auto-maps (`Mapped`); a record matching more than one pool still becomes `Needs PMO Review` with no auto-pick — so allowing overlapping pools can never cause double-counting, a record still resolves to exactly one final Budget Pool or `Needs PMO Review`.
+- Pool ID Create/Update decision logic, Export/Template workflow (columns, sheets, round-trip contract), and Lifecycle/Archive/Delete are all unchanged — out of scope per this update.
+- `docs/BvA_REQUIREMENT.md` §8 amended in place (Phase 7A-9E note) rather than silently left contradicting the code, per that document's own "wins unless a future phase explicitly amends it" rule.
+
+### Tests
+- Replaced the 3 tests that pinned the old overlap-blocks behavior (`tests/financial-models.test.js`, `tests/budget-expenses.test.js`) with tests confirming overlap is now accepted (manual save with no confirm, bulk Create, bulk Update, and multiple overlapping pools created together in one workbook), plus a dedicated test that exact duplicate identity still blocks. Full suite: 253/253 passing (was 248; net +5 new/replaced tests).
+
+## Phase 7A-9D — Budget Pool Bulk Upload redesign: one workbook, Create + Update (2026-07-02)
+
+### Changed
+- Replaced the CSV "one example row per project" Download Template with a real `.xlsx` workbook (SheetJS) containing the Budget Pools currently visible under Budget Settings' active filters (today: Budget Year), each with its real Pool ID, plus an Instructions sheet documenting the workflow and common errors.
+- Bulk Upload now supports Create and Update in a single workbook: **Pool ID** (new column) is the only signal that decides Update vs. Create — a blank Pool ID always creates, a Pool ID matching an existing pool updates that exact pool. Business identity `(Project, Pool Name, Budget Year)` uniqueness is still enforced via the existing shared `validateBudgetPoolChange()`, but no longer used to infer which pool a row updates.
+- Sheet 1 column order is fixed: `Pool ID, Project, Pool Name, Budget, Budget Year (BE), Start Month, End Month, Spend Types`.
+- Added a true no-op "No Changes" classification: a row whose Pool ID matches an existing pool and whose every effective field is identical is neither created nor updated — no save, no audit-field change, no remap — satisfying the Download → Upload-unmodified round-trip contract.
+- Preview and error modals now show Pool ID and a Created/Updated/No Changes/Errors summary; Update rows whose Period or Budget Year changed show an inline mapping-impact warning.
+- `#pool-excel-upload` now accepts `.xlsx` only (previously `.xlsx,.xls`).
+- Extracted `visibleBudgetSettingsPools()` (`views/budget.js`) as the single source for "what's visible under Budget Settings' active filters," shared by `renderBudgetSettings()` and Download Template, so a future filter (Project/Spend Type/Search) needs updating in one place.
+- Spend Types column accepts canonical names (Software, Hardware, Team Activity, Client Expense, Deployment, Infra, Others) and legacy short codes (SL, HW, INT, ENT, DEP, plus INFRA/OTHER) — closing a pre-existing gap where bulk import could not set Infra/Others. The previous "Memo Types" header remains readable for backward compatibility. An unrecognized token now surfaces an explicit "Invalid Spend Type" row error instead of being silently dropped.
+
+### Fixed
+- Bulk-imported Update rows now preserve the existing pool's `createdBy`/`createdAt` and only refresh `updatedBy`/`updatedAt` (previously every bulk-updated pool silently got a fresh `createdAt` and blank `createdBy`).
+
+### New errors
+- `Unknown Pool ID`, `Duplicate Pool ID` (same Pool ID used twice in one file), and a specific "Existing Budget Pool detected, but Pool ID is blank" message (in addition to the existing generic duplicate-identity message) when a blank-Pool-ID row's identity collides with an existing pool.
+
+### Unchanged
+- All-or-nothing validation, `validateBudgetPoolRecord()`/`validateBudgetPoolChange()` as the single validators, overlap-conflict detection, year derivation from Start/End Month, `savePoolAsync()`/batch-remap-once behavior, and every other Budget & Spend tab (Overview, Actual Spend, Forecast, Budget vs Actual). No Lifecycle/Archive/Delete/Dashboard/Health Check/Supabase changes.
+
+### Tests
+- Added/updated coverage in `tests/financial-models.test.js` and `tests/budget-expenses.test.js` for: Pool-ID-driven Create/Update classification, Unknown Pool ID, Duplicate Pool ID, blank-ID-matches-existing-identity, Duplicate Identity after Update, No Changes (validator level and full `handlePoolBulkUpload`→`_confirmPoolImport` pipeline — no save/audit/remap), audit preservation on Update and fresh audit on Create, backward-compatible Spend Type parsing (canonical names, legacy short codes, mixed, invalid token), Download Template shape (`.xlsx`, sheet names, column order, Pool ID inclusion, year-filter scoping), the full Download→Upload-unmodified round trip, and preview/error summary counts. Full suite: 248/248 passing.
+
 ## Phase 4 completion verification (2026-07-01)
 
 ### Completed

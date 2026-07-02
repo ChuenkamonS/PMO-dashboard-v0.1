@@ -2839,34 +2839,77 @@ function showBvaActualSpend(scope) {
 // isPMO() defined in app.js — do not redefine here
 
 // ══════════════════════════════════════════════════════════════════
-// BUDGET POOL — EXCEL TEMPLATE DOWNLOAD
+// BUDGET POOL — EXCEL TEMPLATE DOWNLOAD (Phase 7A-9D)
 // ══════════════════════════════════════════════════════════════════
+// Official Sheet 1 column order — Download Template and the Instructions sheet below must always
+// agree with this, and handlePoolBulkUpload()'s parser below must keep accepting it.
+const BGT_POOL_IMPORT_HEADERS = ['Pool ID','Project','Pool Name','Budget','Budget Year (BE)','Start Month','End Month','Spend Types'];
+
+// Replaces the previous CSV "one example row per project" scaffold. The workbook now contains the
+// REAL Budget Pools currently visible under Budget Settings (visibleBudgetSettingsPools(), shared
+// with renderBudgetSettings() so both always agree), each with its real Pool ID — so downloading
+// and re-uploading unmodified is a true no-op (round-trip contract) instead of importing samples.
 function downloadBudgetPoolTemplate() {
-  const headers = ['Project','Pool Name','Budget (THB)','Year (BE)','Start Month (YYYY-MM)','End Month (YYYY-MM)','Memo Types (SL,HW,INT,ENT,DEP or blank=all)'];
-  const s = typeof loadSettings === 'function' ? loadSettings() : null;
-  const projects = s?.projects || ['AOA-MP','TTB','Geo9','Release 2.1','Release 3'];
-  const year = document.getElementById('bset-year')?.value || getCurrentBuddhistYear();
+  if (typeof XLSX === 'undefined') { alert('ไม่พบ SheetJS library'); return; }
+  const pools = visibleBudgetSettingsPools();
+  const rows = pools.map(p => [
+    p.id, p.project, p.name, p.budget, p.year || '',
+    p.startMonth || '', p.endMonth || '',
+    (p.spendTypes || []).join(', '),
+  ]);
 
-  const examples = projects.map(proj => [proj, 'SL ' + year, '', year, '', '', 'SL']);
-  const allRows  = [headers, ...examples];
+  const sheet = XLSX.utils.aoa_to_sheet([BGT_POOL_IMPORT_HEADERS, ...rows]);
+  sheet['!cols'] = [22, 18, 22, 12, 16, 14, 14, 46].map(wch => ({ wch }));
+  if (rows.length) sheet['!autofilter'] = { ref: `A1:H${rows.length + 1}` };
 
-  const esc2 = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-  const csv  = allRows.map(r => r.map(esc2).join(',')).join('\r\n');
-  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href     = url;
-  a.download = 'budget_pool_template.csv';
-  a.click();
-  URL.revokeObjectURL(url);
+  const instructions = XLSX.utils.aoa_to_sheet([
+    ['Budget Pool Bulk Upload — Instructions'],
+    ['Purpose', 'One workbook both creates new Budget Pools and updates existing ones.'],
+    ['Create', 'Leave Pool ID blank on a row. A new Budget Pool is created from that row.'],
+    ['Update', "Keep an existing row's Pool ID exactly as downloaded. That exact Budget Pool is updated — do not edit Pool ID on existing rows."],
+    ['Deleting a row', "Deleting a row from this sheet does NOT delete the Budget Pool. Use the app's Delete action instead."],
+    ['All-or-nothing', 'The entire file is validated before anything is saved. If any row has an error, nothing is created or updated.'],
+    ['Date format', "Start Month / End Month use YYYY-MM, e.g. 2026-01. Budget Year (BE) is informational — the pool's real year is always derived from Start Month."],
+    ['Spend Types', 'Comma-separated. Accepts Software, Hardware, Team Activity, Client Expense, Deployment, Infra, Others (or short codes SL, HW, INT, ENT, DEP). Blank = all types.'],
+    [''],
+    ['Common Errors', 'Meaning', 'Resolution'],
+    ['Unknown Pool ID', 'The Pool ID does not match any existing Budget Pool.', 'Leave Pool ID blank to create a new pool, or correct the ID.'],
+    ['Duplicate Pool ID', 'The same Pool ID appears on more than one row in this file.', 'Each Pool ID may appear on only one row per upload.'],
+    ['Blank Pool ID matching existing Pool', 'An existing Budget Pool already has this Project + Pool Name + Budget Year, but Pool ID is blank.', 'Restore the Pool ID to update it, or change Project / Pool Name / Budget Year to create a new pool.'],
+    ['Invalid Month', 'Start Month / End Month could not be read as a valid month.', 'Use YYYY-MM, e.g. 2026-01.'],
+    ['Duplicate Identity', 'Two rows resolve to the same Project + Pool Name + Budget Year.', 'Each Budget Pool must have a unique Project + Pool Name + Budget Year.'],
+    ['Invalid Spend Type', 'A Spend Type value was not recognized.', 'Use Software, Hardware, Team Activity, Client Expense, Deployment, Infra, or Others.'],
+    [''],
+    ['Note', 'Two Budget Pools may intentionally share the same Project + Spend Type + Period (e.g. separate budget buckets for the same purpose). This is allowed and is not an error.'],
+  ]);
+  instructions['!cols'] = [{ wch: 34 }, { wch: 70 }, { wch: 50 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, 'Budget Pools');
+  XLSX.utils.book_append_sheet(workbook, instructions, 'Instructions');
+  XLSX.writeFile(workbook, 'budget_pool_template.xlsx');
 }
 
 // ══════════════════════════════════════════════════════════════════
-// BUDGET POOL — EXCEL BULK UPLOAD
+// BUDGET POOL — EXCEL BULK UPLOAD (Phase 7A-9D)
 // ══════════════════════════════════════════════════════════════════
-// Phase 7A-9C: parsing only — every field-level, duplicate, and overlap check is delegated to the
-// shared validateBudgetPoolImportBatch() (app.js), the same canonical validator manual add/edit
-// uses. Import is strict all-or-nothing: if any row fails, nothing is imported (see
+// Backward/forward-compatible Spend Type token resolution: accepts a canonical Spend Type name
+// (e.g. "Software", "Infra") case-insensitively, or a legacy short memo-type code (sl, hw, int,
+// ent, dep, infra, other/others — the same codes previous templates used). Returns the short code
+// (what memoTypes already expects downstream) or null if the token is unrecognized.
+function resolveSpendTypeToken(token) {
+  const raw = String(token || '').trim();
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+  const canonicalMatch = SPEND_TYPE_VALUES.find(value => value.toLowerCase() === lower);
+  if (canonicalMatch) return SPEND_TYPE_TO_MEMO_TYPE[canonicalMatch];
+  const shortCode = lower === 'others' ? 'other' : lower;
+  return ['sl','hw','int','ent','dep','infra','other'].includes(shortCode) ? shortCode : null;
+}
+
+// Phase 7A-9C/D: parsing only — every field-level, duplicate, overlap, Pool ID, and identity check
+// is delegated to the shared validateBudgetPoolImportBatch() (app.js), the same canonical validator
+// manual add/edit uses. Import is strict all-or-nothing: if any row fails, nothing is imported (see
 // _showPoolImportErrors below) — there is no partial-success path.
 async function handlePoolBulkUpload(input) {
   const file = input.files[0];
@@ -2880,7 +2923,7 @@ async function handlePoolBulkUpload(input) {
     const ws  = wb.Sheets[wb.SheetNames[0]];
     rows      = XLSX.utils.sheet_to_json(ws, { defval: '' });
   } catch(e) {
-    alert('ไม่สามารถอ่านไฟล์ได้ — กรุณาใช้ไฟล์ .xlsx หรือ .xls\n' + e.message);
+    alert('ไม่สามารถอ่านไฟล์ได้ — กรุณาใช้ไฟล์ .xlsx\n' + e.message);
     return;
   }
 
@@ -2900,19 +2943,29 @@ async function handlePoolBulkUpload(input) {
       const key = findKey(prefix);
       return key ? row[key] : '';
     };
+    const id     = get('poolid');
     const proj   = get('project');
-    const name   = get('poolname') || get('pool');
+    // "pool" is a looser fallback than "poolname" — guard it from matching the "Pool ID" column
+    // (which also normalizes to a "pool..." prefix) when "Pool Name" itself can't be found.
+    const name   = get('poolname') || (findKey('pool') && findKey('pool') !== findKey('poolid') ? get('pool') : '');
     // Preserve the sign — a mistyped negative budget must be REJECTED by validation, not silently
     // flipped positive by stripping the minus sign (Phase 7A-9C bug fix).
     const budget = parseFloat(String(get('budget')).replace(/[^0-9.\-]/g,'')) || 0;
-    const yr     = get('year') || defaultYear;
+    const yr     = get('budgetyear') || get('year') || defaultYear;
     const start  = excelImportMonthValue(getRaw('startmonth') || getRaw('start'));
     const end    = excelImportMonthValue(getRaw('endmonth')   || getRaw('end'));
-    const typesRaw = get('memotypes') || get('memo') || '';
-    const memoTypes = typesRaw
-      ? typesRaw.split(/[,;|\s]+/).map(t => t.trim().toLowerCase()).filter(t => ['sl','hw','int','ent','dep'].includes(t))
-      : [];
-    return { proj, name, budget, yr, start, end, memoTypes };
+    // Accepts the new "Spend Types" column (canonical names) as well as the previous "Memo Types"
+    // header (short codes) for backward compatibility. Split on comma/semicolon/pipe only — NOT
+    // whitespace — since canonical names like "Team Activity" contain spaces.
+    const typesRaw = get('spendtypes') || get('memotypes') || get('memo') || '';
+    const tokens = typesRaw ? typesRaw.split(/[,;|]+/).map(t => t.trim()).filter(Boolean) : [];
+    const memoTypes = [];
+    const invalidSpendTypes = [];
+    tokens.forEach(token => {
+      const code = resolveSpendTypeToken(token);
+      if (code) memoTypes.push(code); else invalidSpendTypes.push(token);
+    });
+    return { id, proj, name, budget, yr, start, end, memoTypes, invalidSpendTypes };
   });
 
   const result = validateBudgetPoolImportBatch(parsed, loadBudgetPools());
@@ -2936,6 +2989,7 @@ function _showPoolImportErrors(rowResults) {
   const rows = errorRows.map(r =>
     '<tr>' +
       '<td style="' + tdS + '">' + r.row + '</td>' +
+      '<td style="' + tdS + '">' + esc(r.input?.id || '—') + '</td>' +
       '<td style="' + tdS + '">' + esc(r.input?.proj || '') + '</td>' +
       '<td style="' + tdS + '">' + esc(r.input?.name || '') + '</td>' +
       '<td style="' + tdS + ';color:var(--red)">' + r.errors.map(esc).join('<br>') + '</td>' +
@@ -2943,19 +2997,20 @@ function _showPoolImportErrors(rowResults) {
   ).join('');
 
   modal.innerHTML =
-    '<div class="card" style="width:760px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;padding:0;overflow:hidden">' +
+    '<div class="card" style="width:820px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;padding:0;overflow:hidden">' +
       '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">' +
         '<span style="font-size:15px;font-weight:700;color:var(--red)">พบข้อผิดพลาด ' + errorRows.length + ' จาก ' + rowResults.length + ' รายการ</span>' +
         '<button class="btn-sm" onclick="document.getElementById(\'pool-import-errors\').remove()" style="padding:4px 10px">✕</button>' +
       '</div>' +
       '<div style="padding:12px 20px;font-size:12px;color:var(--text-3)">' +
-        '<div style="font-weight:600;color:var(--text)">Import แล้ว 0 รายการ — ไม่มีการ import บางส่วน (all-or-nothing)</div>' +
-        'Budget Pool import เป็นแบบ all-or-nothing — หากมีแถวที่ผิดพลาดแม้เพียงรายการเดียว ระบบจะไม่ import รายการใดเลย กรุณาแก้ไขไฟล์แล้วอัปโหลดใหม่' +
+        '<div style="font-weight:600;color:var(--text)">Created 0 · Updated 0 · No Changes 0 · Errors ' + errorRows.length + ' — ไม่มีการ import บางส่วน (all-or-nothing)</div>' +
+        'Budget Pool import เป็นแบบ all-or-nothing — หากมีแถวที่ผิดพลาดแม้เพียงรายการเดียว ระบบจะไม่สร้างหรืออัปเดตรายการใดเลย กรุณาแก้ไขไฟล์แล้วอัปโหลดใหม่' +
       '</div>' +
       '<div style="overflow:auto;flex:1">' +
-        '<table class="hist-table" style="min-width:680px">' +
+        '<table class="hist-table" style="min-width:740px">' +
           '<thead><tr>' +
             '<th style="' + tdS + '">Row</th>' +
+            '<th style="' + tdS + '">Pool ID</th>' +
             '<th style="' + tdS + '">Project</th>' +
             '<th style="' + tdS + '">Pool Name</th>' +
             '<th style="' + tdS + '">ปัญหา</th>' +
@@ -2971,6 +3026,11 @@ function _showPoolImportErrors(rowResults) {
   document.body.appendChild(modal);
 }
 
+// Action → Thai label/color, including the round-trip-safe 'none' (No Changes) state — a row whose
+// Pool ID matched an existing pool but every effective field is identical, so nothing will be saved.
+const BGT_POOL_IMPORT_ACTION_LABELS = { create: 'สร้างใหม่', update: 'อัปเดต', none: 'ไม่มีการเปลี่ยนแปลง' };
+const BGT_POOL_IMPORT_ACTION_COLORS = { create: 'var(--green-800)', update: 'var(--amber-800)', none: 'var(--text-3)' };
+
 function _showPoolImportPreview(rowResults) {
   document.getElementById('pool-import-preview')?.remove();
 
@@ -2979,36 +3039,52 @@ function _showPoolImportPreview(rowResults) {
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:400;display:flex;align-items:center;justify-content:center';
 
   const tdS  = 'padding:7px 12px;border-bottom:1px solid var(--border);font-size:11px';
+  const counts = { create: 0, update: 0, none: 0 };
+  rowResults.forEach(r => { counts[r.action] = (counts[r.action] || 0) + 1; });
+
   const rows = rowResults.map(r => {
     const p = r.record;
-    const actionLabel = r.action === 'update' ? 'อัปเดต' : 'สร้างใหม่';
-    const actionColor = r.action === 'update' ? 'var(--amber-800)' : 'var(--green-800)';
+    const actionLabel = BGT_POOL_IMPORT_ACTION_LABELS[r.action] || r.action;
+    const actionColor = BGT_POOL_IMPORT_ACTION_COLORS[r.action] || 'var(--text)';
+    // For an Update whose Period or Budget Year differs from the existing pool, warn that Actual
+    // Spend mappings against this pool may be affected — display-only, no new mapping logic.
+    const periodChanged = r.action === 'update' && r.previous && (
+      r.previous.startMonth !== p.startMonth ||
+      r.previous.endMonth !== p.endMonth ||
+      String(r.previous.year || '') !== String(p.year || '')
+    );
+    const warning = periodChanged ? '<div style="color:var(--amber-800);font-size:10px;margin-top:2px">⚠ ช่วงเวลา/ปีเปลี่ยน — อาจกระทบการ mapping เดิม</div>' : '';
     return '<tr>' +
+      '<td style="' + tdS + '">' + esc(p.id && r.action !== 'create' ? p.id : '—') + '</td>' +
       '<td style="' + tdS + '">' + esc(p.project) + '</td>' +
       '<td style="' + tdS + '">' + esc(p.name) + '</td>' +
       '<td style="' + tdS + ';text-align:right">' + money(p.budget) + '</td>' +
       '<td style="' + tdS + '">' + esc(p.year) + '</td>' +
       '<td style="' + tdS + '">' + esc(formatMonthBE(p.startMonth) || '—') + ' → ' + esc(formatMonthBE(p.endMonth) || '—') + '</td>' +
       '<td style="' + tdS + '">' + (p.memoTypes.length ? p.memoTypes.map(t => t.toUpperCase()).join(', ') : 'ทุกประเภท') + '</td>' +
-      '<td style="' + tdS + ';color:' + actionColor + ';font-weight:600">' + actionLabel + '</td>' +
+      '<td style="' + tdS + ';color:' + actionColor + ';font-weight:600">' + actionLabel + warning + '</td>' +
     '</tr>';
   }).join('');
 
   modal.innerHTML =
-    '<div class="card" style="width:760px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;padding:0;overflow:hidden">' +
+    '<div class="card" style="width:820px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;padding:0;overflow:hidden">' +
       '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">' +
-        '<span style="font-size:15px;font-weight:700">Preview — Budget Pool Import (' + rowResults.length + ' รายการ ผ่านการตรวจสอบทั้งหมด)</span>' +
+        '<span style="font-size:15px;font-weight:700">Preview — Budget Pool Import</span>' +
         '<button class="btn-sm" onclick="document.getElementById(\'pool-import-preview\').remove()" style="padding:4px 10px">✕</button>' +
       '</div>' +
+      '<div style="padding:10px 20px;font-size:12px;color:var(--text-3);border-bottom:1px solid var(--border)">' +
+        'Created ' + counts.create + ' · Updated ' + counts.update + ' · No Changes ' + counts.none + ' · Errors 0' +
+      '</div>' +
       '<div style="overflow:auto;flex:1">' +
-        '<table class="hist-table" style="min-width:680px">' +
+        '<table class="hist-table" style="min-width:760px">' +
           '<thead><tr>' +
+            '<th style="' + tdS + '">Pool ID</th>' +
             '<th style="' + tdS + '">Project</th>' +
             '<th style="' + tdS + '">Pool Name</th>' +
             '<th style="' + tdS + ';text-align:right">Budget</th>' +
             '<th style="' + tdS + '">ปี</th>' +
             '<th style="' + tdS + '">ช่วงเวลา</th>' +
-            '<th style="' + tdS + '">Memo Types</th>' +
+            '<th style="' + tdS + '">Spend Types</th>' +
             '<th style="' + tdS + '">การดำเนินการ</th>' +
           '</tr></thead>' +
           '<tbody>' + rows + '</tbody>' +
@@ -3028,19 +3104,34 @@ async function _confirmPoolImport() {
   const rowResults = window._poolImportPending;
   if (!rowResults) return;
 
-  let created = 0, updated = 0;
-  // Phase 7A-9C: save every row with remap suppressed, then remap once at the end — the previous
-  // per-row savePoolAsync() triggered a full Actual Spend remap on every single imported pool.
+  let created = 0, updated = 0, noChange = 0;
+  // Phase 7A-9C/D: save every row with remap suppressed, then remap once at the end — the previous
+  // per-row savePoolAsync() triggered a full Actual Spend remap on every single imported pool. A
+  // 'none' row (round-trip-safe no-op) is skipped entirely: no save, no audit-field touch, no
+  // contribution to the remap decision below.
   for (const r of rowResults) {
+    if (r.action === 'none') { noChange++; continue; }
     await savePoolAsync(r.record, { skipRemap: true });
     if (r.action === 'update') updated++; else created++;
   }
-  remapActualSpendForBudgetPools();
+  if (created || updated) remapActualSpendForBudgetPools();
 
   document.getElementById('pool-import-preview')?.remove();
   window._poolImportPending = null;
-  alert('Import สำเร็จ — สร้างใหม่ ' + created + ' pool, อัปเดต ' + updated + ' pool');
+  alert('Import สำเร็จ — สร้างใหม่ ' + created + ' pool, อัปเดต ' + updated + ' pool, ไม่มีการเปลี่ยนแปลง ' + noChange + ' pool');
   renderBudgetSettings();
+}
+
+// Phase 7A-9D: single place that computes "the Budget Pools currently visible under Budget
+// Settings' active filters" — used by both the on-screen list (renderBudgetSettings) and Download
+// Template, so the two always agree and a future filter (Project, Spend Type, Search) only needs
+// to be added here once instead of in every consumer.
+// Phase 7A-9A note preserved: filters/groups by the canonical derived year, not a possibly-stale
+// raw stored `year` — otherwise this list can disagree with the Edit modal (which already derives
+// from normalized Start Month) for any legacy/mismatched pool.
+function visibleBudgetSettingsPools() {
+  const year = document.getElementById('bset-year')?.value || getCurrentBuddhistYear();
+  return loadBudgetPools().map(createBudgetPoolRecord).filter(p => p.year === year);
 }
 
 function renderBudgetSettings() {
@@ -3048,10 +3139,7 @@ function renderBudgetSettings() {
   if (!body) return;
   populateBudgetYearSelect('bset-year');
   const year  = document.getElementById('bset-year')?.value || getCurrentBuddhistYear();
-  // Phase 7A-9A: filter/group by the canonical derived year, not a possibly-stale raw stored
-  // `year` — otherwise this list can disagree with the Edit modal (which already derives from
-  // normalized Start Month) for any legacy/mismatched pool.
-  const pools = loadBudgetPools().map(createBudgetPoolRecord).filter(p => p.year === year);
+  const pools = visibleBudgetSettingsPools();
 
   if (!pools.length) {
     body.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:12px">ยังไม่มี Budget Pool สำหรับปี ${year} — กด "+ Add Pool" เพื่อเริ่ม</div>`;
@@ -3216,15 +3304,11 @@ async function saveBudgetPool() {
   const entry = { id, project, name, budget, year: yearBE, startMonth: start, endMonth: end, memoTypes };
   const validation = validateBudgetPoolChange(entry, loadBudgetPools(), editId || null);
   if (!validation.valid) { alert(validation.errors.join('\n')); return; }
-  if (validation.conflicts.length) {
-    // Phase 7A-9B: name the specific conflicting pool(s) instead of a bare count, so PMO can make
-    // an informed decision — still using validateBudgetPoolChange()'s existing conflicts data, no
-    // new validation engine (this is a presentation-only change).
-    const details = validation.conflicts
-      .map(p => `- ${p.project} / ${p.name} (${formatMonthBE(p.startMonth)} → ${formatMonthBE(p.endMonth)})`)
-      .join('\n');
-    if (!confirm(`พบ Budget Pool ที่ช่วงเวลาและ Spend Type ซ้อนกัน ${validation.conflicts.length} รายการ:\n${details}\n\nActual Spend ที่ match ได้มากกว่า 1 pool จะถูกทำเครื่องหมายเป็น Needs PMO Review ให้ PMO ตรวจสอบภายหลัง\nต้องการบันทึกต่อหรือไม่?`)) return;
-  }
+  // Business rule update: overlapping Project + Spend Type + Period is an allowed, intentional PMO
+  // workflow (separate budget buckets for the same project/type/period) -- no warning/confirmation
+  // is shown for it. validation.conflicts is still computed by validateBudgetPoolChange() but is no
+  // longer treated as blocking here. Exact duplicate identity (Project + Pool Name + Year) remains
+  // blocked above via validation.valid/validation.errors, unchanged.
   try {
     await savePoolAsync(entry);
     document.getElementById('bpool-modal')?.remove();

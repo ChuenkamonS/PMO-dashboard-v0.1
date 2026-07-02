@@ -488,3 +488,61 @@ No Automatic Data Repair
 Legacy data may be normalized at runtime.
 
 No automatic migration or rewrite is allowed in this phase.
+
+---
+
+# Phase 7A-9D — Budget Pool Bulk Upload Redesign (2026-07-02)
+
+Status
+
+✅ Done
+
+"Bulk Upload redesign" was explicitly out of scope for 7A-9A above; this later sub-phase implements
+it against the foundation 7A-9A/7A-9B/9C already locked in (canonical model, derived year, shared
+`validateBudgetPoolChange()`).
+
+Scope completed
+
+- One `.xlsx` workbook download/upload workflow supporting both Create and Update, replacing the
+  CSV template.
+- Pool ID (new column) is the sole Create/Update decision signal — business identity
+  `(Project, Pool Name, Budget Year)` uniqueness remains enforced but is no longer used to infer
+  Update, closing the ambiguity the original 7A-9C bulk import carried.
+- Round-trip contract: Download → Upload unmodified = No Changes only, with no save/audit/remap
+  side effects.
+- Audit preservation fix on bulk Update (`createdBy`/`createdAt` no longer reset).
+- Spend Types column supports all 7 canonical Spend Types (previously bulk import could not set
+  Infra/Others), with backward-compatible short-code and legacy-header parsing.
+
+See `CHANGELOG.md` ("Phase 7A-9D — Budget Pool Bulk Upload redesign") for full detail.
+
+Explicitly not touched in 7A-9D: Lifecycle, Archive, Delete redesign, Health Dashboard, Data
+repair, Bulk Delete, Project dropdown refactor, unrelated UI redesign, Supabase migration.
+
+---
+
+# Phase 7A-9E — Budget Pool Overlap Allowed (Business Rule Update) (2026-07-02)
+
+Status
+
+✅ Done
+
+Reason: PMO may intentionally create multiple Budget Pools with the same Project, Spend Type, and
+Period to separate budget purposes. Overlap is no longer validated as a blocking error.
+
+Scope completed
+
+- Manual Add/Edit: no confirm/warning shown for overlapping Project + Spend Type + Period; exact
+  duplicate identity (Project + Pool Name + Year) still blocks.
+- Bulk Upload / Bulk Update: overlap no longer escalates to an import error; all-or-nothing still
+  applies to real errors only (invalid month, negative budget, unknown Pool ID, duplicate Pool ID,
+  duplicate identity, invalid Spend Type).
+- Canonical automatic mapping untouched: manual override always respected, exactly-one-match still
+  auto-maps, multi-match still becomes Needs PMO Review with no auto-pick — allowing overlap cannot
+  cause an Actual Spend record to double-count or resolve to more than one final Budget Pool.
+
+See `CHANGELOG.md` ("Phase 7A-9E — Budget Pool overlap allowed") and `docs/BvA_REQUIREMENT.md` §8
+amendment for full detail.
+
+Explicitly not touched in 7A-9E: Pool ID Create/Update decision logic, Export/Template workflow,
+Lifecycle/Archive/Delete redesign.

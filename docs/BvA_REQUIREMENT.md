@@ -429,6 +429,16 @@ The canonical, and only permitted, automatic mapping rule is:
   been confirmed to match `validateBudgetPoolRecord()` exactly.
 - Contract for a later implementation phase: unify bulk import onto the same shared validation
   function used by manual add/edit, with no bypass path. Do not implement this in Phase 7A-1.
+- **Amendment (Phase 7A-9E, business rule update):** the "overlap conflicts (project + year +
+  overlapping date range + shared spend type)" clause above is superseded. Overlapping Budget Pools
+  (same Project + Spend Type + Period) are now an explicitly allowed, intentional PMO workflow —
+  PMO may create multiple buckets for the same project/type/period to separate budget purposes.
+  Overlap is no longer validated as a blocking error in either manual add/edit
+  (`saveBudgetPool()`) or bulk import (`validateBudgetPoolImportBatch()`); only exact duplicate
+  business identity (§1/§7: Project + Pool Name + Year) remains blocked. `validateBudgetPoolChange()`
+  still computes `conflicts` (informational only, never surfaced as an error). This does not change
+  automatic mapping (§5): an Actual Spend record matching more than one pool still resolves to
+  `Needs PMO Review`, never an auto-pick.
 
 ## 9. Deleted / Orphaned Pools
 
