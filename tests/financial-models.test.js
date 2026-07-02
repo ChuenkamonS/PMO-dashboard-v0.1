@@ -663,6 +663,25 @@ test('Phase 7A-3: saveBudgetTag guards against a cross-project selection before 
     'the cross-project guard must run and return before both the cross-year guard and updateActualSpendBudgetOverride, so an invalid cross-project selection is never persisted');
 });
 
+test('Phase 7A-9A Step 7: openBudgetTagModal (the Tag Budget / Assignment Budget Pool selector) canonicalizes pools before building its year filter and pool options', () => {
+  // Same convention as the saveBudgetTag structural tests above: no execution harness exists for
+  // views/history.js here, so this is a structural check confirming the canonicalization call
+  // exists and runs before the raw `year`/`startMonth`/`endMonth` fields are read for the year
+  // filter dropdown and the pool-option list — otherwise a legacy corrupted pool (e.g. a raw
+  // `year: "3112"`) would be directly selectable/visible in this Assignment selector.
+  const openBudgetTagModalSource = (historyCode.match(/function openBudgetTagModal[\s\S]*?\n}/) || [''])[0];
+  assert.ok(openBudgetTagModalSource, 'openBudgetTagModal() must still exist in views/history.js');
+  assert.match(openBudgetTagModalSource, /const allPools\s*=[\s\S]*?createBudgetPoolRecord/,
+    'allPools must be canonicalized via createBudgetPoolRecord(), not the raw loadBudgetPools() result');
+  const canonicalizeIndex = openBudgetTagModalSource.indexOf('const allPools');
+  const yearSetIndex = openBudgetTagModalSource.indexOf('const yearSet');
+  const filteredIndex = openBudgetTagModalSource.indexOf('const filtered');
+  assert.ok(canonicalizeIndex >= 0 && yearSetIndex > canonicalizeIndex,
+    'allPools must be canonicalized before the year filter dropdown (yearSet) is built from it');
+  assert.ok(filteredIndex > canonicalizeIndex,
+    'allPools must be canonicalized before pool options are filtered by year');
+});
+
 test('Phase 7A-3: mappingWarning survives createActualSpendRecord normalization (a store/reload cycle), not just mapBudgetPool\'s immediate return value', () => {
   const ctx = context();
   const poolA = ctx.createBudgetPoolRecord({ id:'pool-mw-A', project:'AOA-MP', name:'Pool A', budget:100000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });

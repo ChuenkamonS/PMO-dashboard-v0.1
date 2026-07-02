@@ -164,6 +164,30 @@
   `openBudgetPoolModal()`'s legacy-BE-typed-pool test extended to also assert `bpool-end` displays
   the normalized value. Full suite (194 tests) re-run and passes unchanged.
 
+#### Follow-up (Step 7 — Assignment Contract Audit), same phase
+- **Bug found**: `openBudgetTagModal()` (`views/history.js`) — the "Assign Budget Pool" selector
+  used from All Memo's Tag Budget action and from the Budget Assignment Workspace's "Assign" button
+  for Approved Memo records — built its year filter dropdown and pool option list from raw
+  `loadBudgetPools()`. A legacy corrupted pool (e.g. `year: "3112"`, pre-dating the "3112" fix) would
+  be directly selectable as a literal `"3112"` year filter option, and pool rows displayed raw
+  (possibly BE-typed) `startMonth`/`endMonth`, disagreeing with Budget Settings/BvA/Export.
+- **Fix**: `allPools` is now built via `loadBudgetPools().map(createBudgetPoolRecord)` before the
+  year filter (`yearSet`) and pool options (`buildPoolOptions()`) are derived from it — the same
+  canonicalization pattern used everywhere else this phase. `saveBudgetTag()`'s own cross-year/
+  cross-project guard was already canonical (Phase 7A-3) and is unchanged.
+- **Scope check**: the Manual Actual Spend modal's Budget Pool `<select>` (`views/budget.js`,
+  `openManualExpenseModal()`) was reviewed and left as-is — its option labels only show
+  `project`/`name`, never `year`/`startMonth`/`endMonth`, so it cannot display a corrupted year; its
+  save-time validation already canonicalizes (`saveManualExpenseFromModal()`, prior phase). No
+  Assignment Workspace or Manual Override redesign performed.
+- **Tests**: structural test on `openBudgetTagModal()`'s source (same convention as the existing
+  `saveBudgetTag()` structural tests, since no execution harness exists for `views/history.js`)
+  confirms `allPools` is canonicalized via `createBudgetPoolRecord()` before the year filter and
+  pool-option filtering read from it (`tests/financial-models.test.js`). Manually verified in-browser:
+  seeded a pool with raw `year: "3112"` — the Tag Budget modal's year filter shows only `2569`/`2568`
+  (never `3112`), and the pool's displayed period reads the normalized `2026-01 → 2026-12`. Full
+  suite (195 tests) re-run and passes unchanged.
+
 ---
 
 ### Phase 7A-8 - Budget vs Actual UX Consistency & Polish (pending review — not committed)

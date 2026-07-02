@@ -970,7 +970,13 @@ function openBudgetTagModal(memoNo) {
   if (!modal) return;
 
   // ── Load pools ──
-  const allPools   = typeof loadBudgetPools === 'function' ? loadBudgetPools() : [];
+  // Phase 7A-9A Step 7: this selector's own year filter/options must use canonical Budget Pool
+  // records (createBudgetPoolRecord() derives year from normalized startMonth) — not the raw
+  // loadBudgetPools() result — or a legacy corrupted pool (e.g. year:"3112") would be selectable
+  // here, and the year filter/pool period display would disagree with Budget Settings/BvA/Export.
+  const allPools   = typeof loadBudgetPools === 'function'
+    ? loadBudgetPools().map(pool => typeof createBudgetPoolRecord === 'function' ? createBudgetPoolRecord(pool) : pool)
+    : [];
   const allMemos   = typeof loadMemos === 'function' ? loadMemos().filter(m => m.status === 'completed') : [];
 
   // Current year (BE) for default filter

@@ -93,6 +93,9 @@ modal, Budget vs Actual, CSV export fallback, memo/manual-expense matching) goes
 existing mismatched or BE-typed-legacy record now self-heals at read time everywhere, not only in
 the Edit modal. `savePoolAsync()` (the single write path for manual save and bulk import) also
 canonicalizes before persisting, so a fresh save can no longer introduce a new mismatch.
+`openBudgetTagModal()` (the Assign Budget Pool selector, `views/history.js`) is now included in this
+canonical-read list — its year filter and pool option list can no longer surface a raw corrupted
+year (e.g. `3112`) or an un-normalized `startMonth`/`endMonth`.
 
 Still OPEN: Budget Pool import still writes its own `year` column at the UI layer without deriving
 it from Start Month before the duplicate-check step (`_confirmPoolImport()`'s inline dedupe still
