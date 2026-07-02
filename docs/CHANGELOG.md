@@ -22,6 +22,41 @@
 
 ## Current Baseline
 
+### Phase 7A-10 PR1 - Assignment Workspace Polish
+
+Scope: Budget vs Actual Assignment Workspace and Budget Settings polish items identified in the
+Phase 7A-10 Budget vs Actual design review. Report-only/UX fixes; no data contract, mapping, bulk
+upload, or export logic changed.
+
+#### Fixed
+- `assignBudgetPoolFromWorkspace()` (views/budget.js): the Approved Memo branch now wraps the Tag
+  Budget modal's save button the same way the Manual Expense branch already did, refreshing the
+  Assignment Workspace once `saveBudgetTag()` reports a successful save (modal hidden). Previously
+  a resolved Memo record could remain visible in Unbudgeted / Needs PMO Review until the user
+  manually navigated back to Budget vs Actual.
+
+#### Changed
+- Budget Assignment Workspace status column now renders via the existing
+  `actualSpendBudgetStatusBadgeClass()` badge helper instead of plain text, matching status badge
+  styling used elsewhere in Budget & Spend. No new status values introduced.
+- Budget vs Actual search input (`bva-search`) is now debounced (250ms) instead of triggering a full
+  `reconcileActualSpendSources()` remap on every keystroke. Final rendered result for a given search
+  value is unchanged.
+
+#### Added
+- Budget Settings pool list gained a simple search box (`bset-search`) filtering by Project or Pool
+  Name, case-insensitively. `visibleBudgetSettingsPools()` — the single source both
+  `renderBudgetSettings()` and `downloadBudgetPoolTemplate()` already read from — now applies this
+  filter, so the downloaded template automatically matches the filtered visible list with no
+  separate wiring needed.
+
+#### Remaining Work
+- Overview/SL+Infra legacy budget source reconciliation (TD-7A-03) — explicitly out of scope for
+  this PR.
+- Bulk Assign in the Assignment Workspace — deferred, higher-risk item from the same design review.
+
+---
+
 ### Phase 7A-9C - Budget Pool Bulk Upload Validation Redesign & TD-7A-02 Closure
 
 Scope approved after a design review (see "Phase 7A-9C — Budget Pool Management Design Review"):

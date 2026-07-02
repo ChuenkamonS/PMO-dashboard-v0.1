@@ -1631,7 +1631,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <option value="infra">Infrastructure</option>
               <option value="other">Other</option>
             </select>
-            <input id="bva-search" class="ri" type="search" placeholder="Search reference or description..." oninput="_renderBvaWith(loadBudgetPools())" style="max-width:220px">
+            <input id="bva-search" class="ri" type="search" placeholder="Search reference or description..." oninput="bvaSearchDebounced()" style="max-width:220px">
             <span id="bva-untagged-alert" style="display:none;font-size:11px;color:var(--amber);margin-left:8px"></span>
             <button class="btn-export" onclick="exportBudgetVsActualCSV()">⬇ Export BvA</button>
             <button class="btn-export" onclick="exportBudgetPoolsCSV()">⬇ Export Pools</button>
@@ -1656,6 +1656,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
                     <!-- Options populated dynamically by populateBudgetYearSelect('bset-year')
                          (views/budget.js) from getCurrentBuddhistYear() (Phase 7A-9A). -->
                     <select id="bset-year" onchange="renderBudgetSettings()" style="font-size:11px;padding:3px 8px"></select>
+                    <input id="bset-search" class="ri" type="search" placeholder="Search project or pool name..." oninput="renderBudgetSettings()" style="font-size:11px;padding:3px 8px;max-width:180px">
                     <button class="btn-sm" style="font-size:11px;padding:4px 10px" onclick="downloadBudgetPoolTemplate()">⬇ Template</button>
                     <label class="btn-sm" style="font-size:11px;padding:4px 10px;cursor:pointer">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>

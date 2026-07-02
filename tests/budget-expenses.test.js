@@ -130,7 +130,7 @@ function createBudgetPoolModalContext() {
     if (!elements.has(id)) elements.set(id, { id, value:'', innerHTML:'', style:{}, options:[] });
     return elements.get(id);
   };
-  ['bpool-year', 'bpool-start-month', 'bpool-end-month', 'bset-year', 'bset-budget-body'].forEach(element);
+  ['bpool-year', 'bpool-start-month', 'bpool-end-month', 'bset-year', 'bset-search', 'bset-budget-body'].forEach(element);
   const dynamicPanels = new Map();
   context.document.getElementById = id => elements.get(id) || dynamicPanels.get(id) || null;
   context.document.createElement = () => ({
@@ -1739,6 +1739,142 @@ test('Phase 7A-7 follow-up Part 4: BvA manual assignment opens the exact same Ma
   assert.match(fromWorkspace, /Edit Manual Actual Spend/);
 });
 
+// ══════════════════════════════════════════════════════════════════
+// Phase 7A-10 PR1 — Assignment Workspace Polish
+// ══════════════════════════════════════════════════════════════════
+
+test('Phase 7A-10 PR1: assigning a Memo from the workspace refreshes the workspace once the Tag Budget modal reports a successful save', () => {
+  const context = createBvaContext();
+  context.storeActualSpendRecords([
+    context.createActualSpendRecord({ id:'refresh-memo-1', source:'Approved Memo', referenceNo:'REFRESH-MEMO-1', memoId:'REFRESH-MEMO-1', project:'AOA-MP', spendType:'Software', amount:4000, startDate:'2026-04', endDate:'2026-04' }),
+  ]);
+
+  // Simulate openBudgetTagModal() (views/history.js): it wires btm-save-btn.onclick to saveBudgetTag(),
+  // which on a successful save hides (not removes) the modal. A validation failure would return
+  // early and leave the modal open — modelled by the second half of this test.
+  const tagModal = { style: { display: 'flex' } };
+  const saveBtn = { onclick: null };
+  context.document.getElementById = id => {
+    if (id === 'budget-tag-modal') return tagModal;
+    if (id === 'btm-save-btn') return saveBtn;
+    return context.__elements.get(id) || context.__dynamicPanels.get(id) || null;
+  };
+  context.openBudgetTagModal = () => { saveBtn.onclick = () => { tagModal.style.display = 'none'; }; };
+
+  let refreshCalls = 0;
+  context.renderBudgetVsActual = () => { refreshCalls++; };
+
+  context.assignBudgetPoolFromWorkspace('refresh-memo-1');
+  assert.ok(typeof saveBtn.onclick === 'function', 'assignBudgetPoolFromWorkspace must wrap the Tag Budget save button');
+
+  saveBtn.onclick(); // simulate the user clicking Save, and saveBudgetTag() succeeding
+  assert.equal(refreshCalls, 1, 'a successful save must refresh the workspace exactly once');
+  assert.equal(tagModal.style.display, 'none', 'sanity: the original save behavior (closing the modal) must still run');
+});
+
+test('Phase 7A-10 PR1: a failed Tag Budget save (modal stays open) does not refresh the workspace', () => {
+  const context = createBvaContext();
+  context.storeActualSpendRecords([
+    context.createActualSpendRecord({ id:'refresh-memo-2', source:'Approved Memo', referenceNo:'REFRESH-MEMO-2', memoId:'REFRESH-MEMO-2', project:'AOA-MP', spendType:'Software', amount:4000, startDate:'2026-04', endDate:'2026-04' }),
+  ]);
+
+  const tagModal = { style: { display: 'flex' } };
+  const saveBtn = { onclick: null };
+  context.document.getElementById = id => {
+    if (id === 'budget-tag-modal') return tagModal;
+    if (id === 'btm-save-btn') return saveBtn;
+    return context.__elements.get(id) || context.__dynamicPanels.get(id) || null;
+  };
+  // Simulates saveBudgetTag()'s validation failure path (e.g. cross-year block): it alerts and
+  // returns without closing the modal, per saveBudgetTag()'s own early-return guards.
+  context.openBudgetTagModal = () => { saveBtn.onclick = () => {}; };
+
+  let refreshCalls = 0;
+  context.renderBudgetVsActual = () => { refreshCalls++; };
+
+  context.assignBudgetPoolFromWorkspace('refresh-memo-2');
+  saveBtn.onclick();
+
+  assert.equal(refreshCalls, 0, 'a modal left open (failed/cancelled save) must not trigger a refresh');
+});
+
+test('Phase 7A-10 PR1 regression: assigning a Manual Actual Spend from the workspace still refreshes after a successful save', () => {
+  const context = createBvaContext();
+  context.storeActualSpendRecords([
+    context.createActualSpendRecord({ id:'actual-spend-manual-refresh-man-1', source:'Manual / Historical Expense', referenceNo:'REFRESH-MAN-1', project:'AOA-MP', spendType:'Hardware', amount:1000, startDate:'2026-04', endDate:'2026-04' }),
+  ]);
+  context.openManualExpenseModal = () => {};
+  const saveBtn = { onclick: null };
+  context.document.querySelector = () => saveBtn;
+  context.document.getElementById = id => (id === 'manual-expense-modal' ? null : (context.__elements.get(id) || context.__dynamicPanels.get(id) || null));
+  context.saveManualExpenseFromModal = async () => {};
+
+  let refreshCalls = 0;
+  context.renderBudgetVsActual = () => { refreshCalls++; };
+
+  context.assignBudgetPoolFromWorkspace('actual-spend-manual-refresh-man-1');
+  return saveBtn.onclick().then(() => {
+    assert.equal(refreshCalls, 1, 'the pre-existing Manual Expense refresh behavior must be unaffected by the Memo-branch fix');
+  });
+});
+
+test('Phase 7A-10 PR1: Budget Assignment Workspace renders budgetStatus with the existing actualSpendBudgetStatusBadgeClass() badge, not plain text', async () => {
+  const context = createBvaContext();
+  await seedAssignmentWorkspaceScenario(context);
+  await context.showBudgetAssignmentWorkspace();
+  const html = context.__elements.get('bva-content').innerHTML;
+
+  assert.match(html, new RegExp(`class="badge ${context.actualSpendBudgetStatusBadgeClass('Unbudgeted')}">Unbudgeted<`),
+    'Unbudgeted must render via the shared badge helper/class, not a bare <div>');
+  assert.match(html, new RegExp(`class="badge ${context.actualSpendBudgetStatusBadgeClass('Needs PMO Review')}">Needs PMO Review<`),
+    'Needs PMO Review must render via the shared badge helper/class, not a bare <div>');
+  // No new status semantics: every status shown must resolve through the existing helper's own
+  // known branches (Mapped/Manual Override/Needs PMO Review/default gray) — not a hand-picked class.
+  assert.doesNotMatch(html, /<div style="font-weight:500">(Unbudgeted|Needs PMO Review)<\/div>/,
+    'the old plain-text status rendering must be gone');
+});
+
+test('Phase 7A-10 PR1: BvA search debounce coalesces rapid input into a single re-render and leaves the final result unchanged', async () => {
+  const context = createBvaContext();
+  context.storeActualSpendRecords([
+    context.createActualSpendRecord({ id:'debounce-1', source:'Approved Memo', referenceNo:'DEBOUNCE-MATCH', memoId:'DEBOUNCE-MATCH', project:'AOA-MP', spendType:'Software', amount:1000, startDate:'2026-04', endDate:'2026-04' }),
+  ]);
+  context.__elements.get('bva-year').value = '2569';
+  context.__elements.get('bva-project').value = 'all';
+
+  let calls = 0;
+  const originalRender = context._renderBvaWith;
+  context._renderBvaWith = (...args) => { calls++; return originalRender.apply(context, args); };
+
+  context.__elements.get('bva-search').value = 'DEB';
+  context.bvaSearchDebounced();
+  context.__elements.get('bva-search').value = 'DEBO';
+  context.bvaSearchDebounced();
+  context.__elements.get('bva-search').value = 'DEBOUNCE';
+  context.bvaSearchDebounced();
+
+  assert.equal(calls, 0, 'no render may happen before the debounce window elapses');
+  await new Promise(resolve => context.setTimeout(resolve, 300));
+  assert.equal(calls, 1, 'rapid input must coalesce into exactly one render');
+
+  context._renderBvaWith = originalRender;
+  const debouncedHtml = context.__elements.get('bva-content').innerHTML;
+  // The BvA summary view intentionally never inlines individual reference numbers (only the
+  // Assignment Workspace sub-view does) — so "did the settled search value take effect" is proven
+  // by the Unbudgeted bucket's presence/count, not by matching a reference string in this HTML.
+  assert.match(debouncedHtml, /Unbudgeted Actual Spend \(1 items\)/, 'sanity: the settled search value ("DEBOUNCE", a substring of the record\'s reference) must still match the record');
+
+  context._renderBvaWith(context.loadBudgetPools());
+  const directHtml = context.__elements.get('bva-content').innerHTML;
+  assert.equal(debouncedHtml, directHtml, 'the debounced render must match a direct call with the same (settled) search value');
+
+  // Prove the search value genuinely drives filtering (not just always-show-everything) by
+  // re-rendering directly with a non-matching search and confirming the record disappears.
+  context.__elements.get('bva-search').value = 'no-such-reference';
+  context._renderBvaWith(context.loadBudgetPools());
+  assert.doesNotMatch(context.__elements.get('bva-content').innerHTML, /Unbudgeted Actual Spend/, 'a non-matching search must filter the record out');
+});
+
 test('Phase 7A-5: Actual Spend source badges are distinct per source type', () => {
   const context = createActualSpendContext();
   assert.equal(context.actualSpendSourceBadgeClass('Approved Memo'), 'badge-blue');
@@ -2629,6 +2765,58 @@ test('Phase 7A-9D: downloadBudgetPoolTemplate only includes pools visible under 
   const [, ...dataRows] = getWritten().wb.Sheets['Budget Pools'].__aoa;
   assert.equal(dataRows.length, 1);
   assert.equal(dataRows[0][0], 'pool-dl-2569');
+});
+
+test('Phase 7A-10 PR1: visibleBudgetSettingsPools() filters by the bset-search box against Project or Pool Name, case-insensitively', async () => {
+  const context = createBudgetPoolModalContext();
+  await context.savePoolAsync({ id: 'pool-find-1', project: 'AOA-MP', name: 'SL 2026', budget: 1000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'] });
+  await context.savePoolAsync({ id: 'pool-find-2', project: 'Orora', name: 'HW 2026', budget: 1000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['hw'] });
+  await context.savePoolAsync({ id: 'pool-find-3', project: 'Orora', name: 'Special Infra Pool', budget: 1000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['infra'] });
+  context.__elements.get('bset-year').value = '2569';
+
+  context.__elements.get('bset-search').value = '';
+  assert.equal(context.visibleBudgetSettingsPools().length, 3, 'an empty search must not filter anything out');
+
+  context.__elements.get('bset-search').value = 'aoa-mp';
+  assert.deepEqual(Array.from(context.visibleBudgetSettingsPools(), p => p.id), ['pool-find-1'], 'must match Project case-insensitively');
+
+  context.__elements.get('bset-search').value = 'Special';
+  assert.deepEqual(Array.from(context.visibleBudgetSettingsPools(), p => p.id), ['pool-find-3'], 'must also match Pool Name');
+
+  context.__elements.get('bset-search').value = 'Orora';
+  assert.deepEqual(Array.from(context.visibleBudgetSettingsPools(), p => p.id).sort(), ['pool-find-2', 'pool-find-3'], 'must match every pool under a project, not just the first');
+
+  context.__elements.get('bset-search').value = 'no-such-project';
+  assert.equal(context.visibleBudgetSettingsPools().length, 0);
+});
+
+test('Phase 7A-10 PR1: renderBudgetSettings() only shows pools that pass the search filter', async () => {
+  const context = createBudgetPoolModalContext();
+  await context.savePoolAsync({ id: 'pool-render-1', project: 'AOA-MP', name: 'SL 2026', budget: 1000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'] });
+  await context.savePoolAsync({ id: 'pool-render-2', project: 'Orora', name: 'HW 2026', budget: 1000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['hw'] });
+  context.__elements.get('bset-year').value = '2569';
+  context.__elements.get('bset-search').value = 'AOA-MP';
+
+  context.renderBudgetSettings();
+  const html = context.__elements.get('bset-budget-body').innerHTML;
+
+  assert.match(html, /AOA-MP/);
+  assert.doesNotMatch(html, /Orora/, 'a filtered-out project must not appear in the rendered list');
+});
+
+test('Phase 7A-10 PR1: downloadBudgetPoolTemplate() honors the bset-search filter, the same list renderBudgetSettings() shows', async () => {
+  const context = createBudgetPoolModalContext();
+  await context.savePoolAsync({ id: 'pool-tmpl-filt-1', project: 'AOA-MP', name: 'SL 2026', budget: 1000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'] });
+  await context.savePoolAsync({ id: 'pool-tmpl-filt-2', project: 'Orora', name: 'HW 2026', budget: 1000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['hw'] });
+  context.__elements.get('bset-year').value = '2569';
+  context.__elements.get('bset-search').value = 'AOA-MP';
+  const getWritten = stubXLSXWrite(context);
+
+  context.downloadBudgetPoolTemplate();
+
+  const [, ...dataRows] = getWritten().wb.Sheets['Budget Pools'].__aoa;
+  assert.equal(dataRows.length, 1, 'the workbook must contain only the filtered pool, matching what renderBudgetSettings() shows');
+  assert.equal(dataRows[0][0], 'pool-tmpl-filt-1');
 });
 
 test('Phase 7A-9D: Download Template -> Upload unmodified is a true round-trip -- every row classifies as No Changes, with no errors', async () => {

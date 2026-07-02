@@ -2452,6 +2452,17 @@ function populateMonthSelect(id, selectedMonth) {
   el.innerHTML = MONTHS_TH.map((name, i) => `<option value="${i + 1}" ${i + 1 === selectedMonth ? 'selected' : ''}>${esc(name)}</option>`).join('');
 }
 
+// BvA search (`bva-search`) previously called _renderBvaWith() directly on every keystroke, which
+// re-runs reconcileActualSpendSources()'s full remap (O(records × pools)) on every character typed.
+// Debounce so a full re-render only fires once typing pauses; the year/project/type dropdowns are
+// discrete onchange events (not per-keystroke) so they don't need this. Final rendered result is
+// unaffected — only the timing of when it happens changes.
+let _bvaSearchDebounceTimer = null;
+function bvaSearchDebounced() {
+  clearTimeout(_bvaSearchDebounceTimer);
+  _bvaSearchDebounceTimer = setTimeout(() => _renderBvaWith(loadBudgetPools()), 250);
+}
+
 function _renderBvaWith(pools) {
   populateBudgetYearSelect('bva-year');
   const yearVal   = document.getElementById('bva-year')?.value || getCurrentBuddhistYear();
@@ -2689,6 +2700,20 @@ function assignBudgetPoolFromWorkspace(recordId) {
     // openBudgetTagModal()/saveBudgetTag() (views/history.js) is the existing Tag Budget path,
     // already used from All Memo — reuse it as-is instead of a new pool-picker.
     if (typeof openBudgetTagModal === 'function') openBudgetTagModal(record.memoId);
+    // saveBudgetTag()'s own onclick (wired by openBudgetTagModal() above) already persists via the
+    // canonical override path; add a workspace refresh on top of it, mirroring the Manual Expense
+    // branch below. closeBudgetTagModal() hides (not removes) the modal only on a successful save —
+    // a validation failure (e.g. cross-project/cross-year block) returns early and leaves it open —
+    // so checking for display:'none' afterward reliably means the save went through.
+    const tagSaveBtn = document.getElementById('btm-save-btn');
+    if (tagSaveBtn) {
+      const originalOnclick = tagSaveBtn.onclick;
+      tagSaveBtn.onclick = () => {
+        if (typeof originalOnclick === 'function') originalOnclick();
+        const tagModal = document.getElementById('budget-tag-modal');
+        if (tagModal && tagModal.style.display === 'none') renderBudgetVsActual();
+      };
+    }
     return;
   }
   if (record.source === ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE) {
@@ -2747,8 +2772,8 @@ function budgetAssignmentRowsTable(records) {
       <td class="hist-amt" style="font-weight:600">${money(Number(record.amount)||0)}</td>
       <td title="${esc(record.startDate || '—')} → ${esc(record.endDate || '—')}">${esc(record.startDate || '—')} → ${esc(record.endDate || '—')}</td>
       <td>
-        <div style="font-weight:500">${esc(record.budgetStatus || '—')}</div>
-        <div style="font-size:10px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis" title="${esc(actualSpendAssignmentReason(record))}">${esc(actualSpendAssignmentReason(record))}</div>
+        <span class="badge ${actualSpendBudgetStatusBadgeClass(record.budgetStatus)}">${esc(record.budgetStatus || '—')}</span>
+        <div style="font-size:10px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;margin-top:3px" title="${esc(actualSpendAssignmentReason(record))}">${esc(actualSpendAssignmentReason(record))}</div>
       </td>
       <td style="overflow:visible">${actionCell(record)}</td>
     </tr>`).join('')}</tbody>
@@ -3131,7 +3156,10 @@ async function _confirmPoolImport() {
 // from normalized Start Month) for any legacy/mismatched pool.
 function visibleBudgetSettingsPools() {
   const year = document.getElementById('bset-year')?.value || getCurrentBuddhistYear();
-  return loadBudgetPools().map(createBudgetPoolRecord).filter(p => p.year === year);
+  const search = (document.getElementById('bset-search')?.value || '').trim().toLowerCase();
+  return loadBudgetPools().map(createBudgetPoolRecord)
+    .filter(p => p.year === year)
+    .filter(p => !search || (p.project || '').toLowerCase().includes(search) || (p.name || '').toLowerCase().includes(search));
 }
 
 function renderBudgetSettings() {
