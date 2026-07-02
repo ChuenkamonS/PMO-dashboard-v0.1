@@ -606,16 +606,29 @@ function actualSpendOverlapsYear(record = {}, year) {
   return (!start || start <= target) && (!end || end >= target);
 }
 
+// Free-text search shared by the Budget vs Actual filter bar — same substring-over-lowercased-
+// fields convention as Manual Entries' search (renderManualEntries(), views/budget.js), so search
+// behavior stays identical across the app instead of a second implementation.
+function bvaRecordMatchesSearch(record = {}, search = '') {
+  if (!search) return true;
+  const haystack = [record.referenceNo, record.description, record.project, record.spendType]
+    .filter(Boolean).join(' ').toLowerCase();
+  return haystack.includes(search);
+}
+
 function calculateBudgetVsActualDataset(pools = [], records = [], filters = {}) {
   const selectedPools = pools.filter(pool =>
     (!filters.year || String(pool.year || '') === String(filters.year)) &&
     (!filters.project || pool.project === filters.project)
   );
   const selectedPoolIds = new Set(selectedPools.map(pool => pool.id));
-  const scopedRecords = records.filter(record =>
-    (!filters.project || record.project === filters.project) &&
-    actualSpendOverlapsYear(record, filters.year)
-  );
+  const search = String(filters.search || '').trim().toLowerCase();
+  // Reuses the shared queryActualSpend() project/spendType predicates instead of re-implementing
+  // them here, so a Spend Type filter added to the Budget vs Actual UI cannot silently diverge from
+  // the identical filter already used by Actual Spend (filteredActualSpendRecords()). Passing no
+  // spendType/search (existing callers) is a no-op, so prior behavior/totals are unchanged.
+  const scopedRecords = queryActualSpend({ project: filters.project, spendType: filters.spendType }, records)
+    .filter(record => actualSpendOverlapsYear(record, filters.year) && bvaRecordMatchesSearch(record, search));
   const rows = selectedPools.map(pool => ({
     pool,
     records: scopedRecords.filter(record =>

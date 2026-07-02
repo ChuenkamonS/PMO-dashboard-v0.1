@@ -652,8 +652,12 @@ function exportBudgetVsActualCSV() {
 }
 
 function exportBudgetPoolsCSV() {
-  const pools = loadBudgetPools();
-  if (!pools.length) { alert('ไม่มี Budget Pool'); return; }
+  // Export exactly the pools currently visible on the Budget vs Actual tab (same Year/Project/
+  // Spend Type/Search filters as `_bvaDataset`), not every pool in storage — so "Export Pools" and
+  // "Export BvA" agree with each other and with the on-screen tables for the same filter state
+  // (Part 5). Falls back to the unfiltered list only if the tab hasn't rendered a dataset yet.
+  const pools = _bvaDataset ? _bvaDataset.rows.map(row => row.pool) : loadBudgetPools();
+  if (!pools.length) { alert('ไม่มี Budget Pool ตามเงื่อนไขที่เลือก'); return; }
   const headers = ['Pool ID','โครงการ','ชื่อ Pool','งบประมาณ','ปี',
     'เริ่ม (YYYY-MM)','สิ้นสุด (YYYY-MM)','ประเภท Memo'];
   const rows = pools.map(p => [
@@ -2446,6 +2450,14 @@ let _bvaDataset = null;
 let _bvaCurrentView = 'summary';
 
 function renderBudgetVsActual() {
+  // Only show a loading placeholder on first mount (empty container), never on a filter-driven
+  // re-render — the pool cache usually resolves fast enough that re-showing it on every keystroke/
+  // dropdown change would just flicker. Reuses the same "card" empty-state look already used below
+  // instead of introducing a new spinner pattern.
+  const container = document.getElementById('bva-content');
+  if (container && !container.innerHTML.trim()) {
+    container.innerHTML = `<div class="card" style="padding:32px;text-align:center;color:var(--text-3);font-size:12px">Loading…</div>`;
+  }
   return loadBudgetPoolsAsync().then(_renderBvaWith).catch(() => _renderBvaWith(loadBudgetPools()));
 }
 
@@ -2460,8 +2472,10 @@ function closeBudgetAssignmentWorkspace() {
 }
 
 function _renderBvaWith(pools) {
-  const yearVal = document.getElementById('bva-year')?.value || '2569';
-  const projVal = document.getElementById('bva-project')?.value || 'all';
+  const yearVal   = document.getElementById('bva-year')?.value || '2569';
+  const projVal   = document.getElementById('bva-project')?.value || 'all';
+  const typeVal   = document.getElementById('bva-type')?.value || 'all';
+  const searchVal = document.getElementById('bva-search')?.value || '';
   const container = document.getElementById('bva-content');
   if (!container) return;
 
@@ -2478,9 +2492,15 @@ function _renderBvaWith(pools) {
     projs.forEach(p => { const o = document.createElement('option'); o.value = o.textContent = p; projSel.appendChild(o); });
   }
 
+  // Spend Type filter reuses the same short-code options (sl/hw/int/ent/dep/infra/other) and the
+  // same spendTypeFromMemoType() conversion as the Actual Spend tab's `as-type` filter
+  // (filteredActualSpendRecords()) — one filtering rule, not a second one, per the identical-
+  // filtering-rules requirement for this phase.
   _bvaDataset = calculateBudgetVsActualDataset(canonicalPools, canonical, {
     year: yearVal,
     project: projVal === 'all' ? '' : projVal,
+    spendType: typeVal === 'all' ? '' : spendTypeFromMemoType(typeVal),
+    search: searchVal,
   });
   const { rows, unbudgetedRecords, needsReviewRecords, totals } = _bvaDataset;
   const alertEl = document.getElementById('bva-untagged-alert');
@@ -2500,8 +2520,18 @@ function _renderBvaWith(pools) {
     return;
   }
 
-  if (!rows.length && !unbudgetedRecords.length) {
-    container.innerHTML = `
+  // needsReviewRecords must be checked too — a filter combination can leave zero pool rows and
+  // zero Unbudgeted records while still having Needs PMO Review items, which must never be masked
+  // by the "no Budget Pool" empty state (Part 3: totals/sections must reflect the same dataset).
+  if (!rows.length && !unbudgetedRecords.length && !needsReviewRecords.length) {
+    const hasPoolsForYear = canonicalPools.some(p => String(p.year || '') === String(yearVal));
+    const filtersActive = projVal !== 'all' || typeVal !== 'all' || !!searchVal.trim();
+    container.innerHTML = (hasPoolsForYear && filtersActive) ? `
+      <div class="card" style="padding:32px;text-align:center">
+        <div style="font-size:32px;margin-bottom:12px">🔍</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:8px">ไม่พบข้อมูลตามเงื่อนไขที่เลือก</div>
+        <div style="font-size:12px;color:var(--text-3)">ลองล้างตัวกรอง Project / ประเภท / คำค้นหาด้านบน</div>
+      </div>` : `
       <div class="card" style="padding:32px;text-align:center">
         <div style="font-size:32px;margin-bottom:12px">📋</div>
         <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:8px">ยังไม่มี Budget Pool สำหรับปี ${yearVal}</div>
@@ -2511,7 +2541,6 @@ function _renderBvaWith(pools) {
     return;
   }
 
-  const tdS = 'padding:9px 14px;border-bottom:1px solid var(--border);font-size:12px';
   const pct = totals.utilizationPercent;
   const totalColor = pct > 100 ? 'var(--red)' : pct >= 90 ? 'var(--amber)' : 'var(--green)';
   const byProj = new Map();
@@ -2560,13 +2589,13 @@ function _renderBvaWith(pools) {
         <div style="padding:10px 14px;background:var(--bg);font-size:13px;font-weight:600;border-bottom:1px solid var(--border)">${esc(proj)}</div>
         <table class="hist-table">
           <thead><tr>
-            <th style="${tdS};text-align:left">Pool</th>
-            <th style="${tdS};text-align:left">Memo Types</th>
-            <th style="${tdS};text-align:left">ช่วงเวลา</th>
-            <th style="${tdS};text-align:right">Budget (฿)</th>
-            <th style="${tdS};text-align:right">Actual (฿)</th>
-            <th style="${tdS};text-align:right">Remaining</th>
-            <th style="${tdS}">Utilization</th>
+            <th>Pool</th>
+            <th>Memo Types</th>
+            <th>ช่วงเวลา</th>
+            <th class="hist-amt">Budget (฿)</th>
+            <th class="hist-amt">Actual (฿)</th>
+            <th class="hist-amt">Remaining</th>
+            <th>Utilization</th>
           </tr></thead>
           <tbody>
             ${projectRows.map(row => {
@@ -2575,18 +2604,18 @@ function _renderBvaWith(pools) {
               const color = rowPct > 100 ? 'var(--red)' : rowPct >= 90 ? 'var(--amber)' : 'var(--green)';
               const typeLabels = (pool.memoTypes || []).map(t => BGT_TYPE_LABELS[t] || t).join(', ') || 'ทุกประเภท';
               return `<tr style="cursor:${row.records.length ? 'pointer' : 'default'}" onclick="${row.records.length ? `showBvaActualSpend('${pool.id}')` : ''}">
-                <td style="${tdS};font-weight:500">${esc(pool.name)}</td>
-                <td style="${tdS};font-size:11px;color:var(--blue)">${esc(typeLabels)}</td>
-                <td style="${tdS};color:var(--text-3);font-size:11px">${pool.startMonth || '—'} → ${pool.endMonth || '—'}</td>
-                <td style="${tdS};text-align:right">${money(pool.budget || 0)}</td>
-                <td style="${tdS};text-align:right;color:var(--blue);font-weight:500">
+                <td style="font-weight:500">${esc(pool.name)}</td>
+                <td style="font-size:11px;color:var(--blue)">${esc(typeLabels)}</td>
+                <td style="color:var(--text-3);font-size:11px">${pool.startMonth || '—'} → ${pool.endMonth || '—'}</td>
+                <td class="hist-amt">${money(pool.budget || 0)}</td>
+                <td class="hist-amt" style="color:var(--blue);font-weight:500">
                   ${money(Math.round(row.actual))}
                   ${row.records.length ? `<span style="font-size:10px;color:var(--text-3);margin-left:4px">(${row.records.length} items)</span>` : ''}
                 </td>
-                <td style="${tdS};text-align:right;color:${row.remaining >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:500">
+                <td class="hist-amt" style="color:${row.remaining >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:500">
                   ${row.remaining >= 0 ? '' : '-'}${money(Math.abs(Math.round(row.remaining)))}
                 </td>
-                <td style="${tdS}">
+                <td>
                   <div style="display:flex;align-items:center;gap:8px">
                     <div style="flex:1;background:var(--border);border-radius:4px;height:6px;overflow:hidden">
                       <div style="width:${Math.min(rowPct,100)}%;height:100%;background:${color};border-radius:4px"></div>
@@ -2619,8 +2648,6 @@ function showBvaRecordDetail(recordId) {
 // Reference/Project value is (the full value is still available via the `title` tooltip).
 function actualSpendRowsTable(records) {
   if (!records.length) return `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:12px">ยังไม่มี Actual Spend</div>`;
-  const thS = 'padding:9px 12px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text-3);text-align:left;font-weight:600;text-transform:uppercase;white-space:nowrap';
-  const tdS = 'padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
   const referenceCell = record => {
     const ref = esc(record.referenceNo || '—');
     if (record.source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO && record.referenceNo) {
@@ -2629,18 +2656,22 @@ function actualSpendRowsTable(records) {
     return `<span style="font-weight:600">${ref}</span>`;
   };
   const rows = [...records].sort((a,b) => String(b.startDate||'').localeCompare(String(a.startDate||'')));
-  return `<table style="width:100%;table-layout:fixed;border-collapse:collapse">
+  // Reuses the same shared `.hist-table` class as the Budget Pool table and every other list table
+  // in the app (padding, header style, row hover), plus the `.hist-table--ellipsis` modifier for
+  // this table's single-line-per-record requirement, instead of re-declaring the same padding/
+  // border/hover styling inline a third time.
+  return `<table class="hist-table hist-table--ellipsis">
     <colgroup><col style="width:30%"><col style="width:14%"><col style="width:20%"><col style="width:18%"><col style="width:18%"></colgroup>
     <thead><tr>
-      <th style="${thS}">Reference</th><th style="${thS}">Source</th><th style="${thS}">Project</th>
-      <th style="${thS}">Spend Type</th><th style="${thS};text-align:right">Amount</th>
+      <th>Reference</th><th>Source</th><th>Project</th>
+      <th>Spend Type</th><th class="hist-amt">Amount</th>
     </tr></thead>
     <tbody>${rows.map(record => `<tr>
-      <td style="${tdS}" title="${esc(record.referenceNo || '—')}">${referenceCell(record)}</td>
-      <td style="${tdS}"><span class="badge ${actualSpendSourceBadgeClass(record.source)}">${actualSpendSourceShortLabel(record.source)}</span></td>
-      <td style="${tdS}" title="${esc(record.project || '')}">${esc(record.project || '—')}</td>
-      <td style="${tdS}" title="${esc(record.spendType || '')}">${esc(record.spendType || '—')}</td>
-      <td style="${tdS};text-align:right;font-weight:600">${money(Number(record.amount)||0)}</td>
+      <td title="${esc(record.referenceNo || '—')}">${referenceCell(record)}</td>
+      <td><span class="badge ${actualSpendSourceBadgeClass(record.source)}">${actualSpendSourceShortLabel(record.source)}</span></td>
+      <td title="${esc(record.project || '')}">${esc(record.project || '—')}</td>
+      <td title="${esc(record.spendType || '')}">${esc(record.spendType || '—')}</td>
+      <td class="hist-amt" style="font-weight:600">${money(Number(record.amount)||0)}</td>
     </tr>`).join('')}</tbody>
   </table>`;
 }
@@ -2698,8 +2729,6 @@ function assignBudgetPoolFromWorkspace(recordId) {
 
 function budgetAssignmentRowsTable(records) {
   if (!records.length) return `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:12px">ไม่มีรายการที่ต้อง assign</div>`;
-  const thS = 'padding:7px 10px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text-3);text-align:left;font-weight:600;text-transform:uppercase;white-space:nowrap';
-  const tdS = 'padding:7px 10px;border-bottom:1px solid var(--border);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
   const referenceCell = record => {
     const ref = esc(record.referenceNo || '—');
     if (record.source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO && record.referenceNo) {
@@ -2714,29 +2743,32 @@ function budgetAssignmentRowsTable(records) {
     return `<span style="font-size:11px;color:var(--text-3)" title="Infra Cost Budget Pool assignment is not yet supported">View only</span>`;
   };
   const rows = [...records].sort((a,b) => String(b.startDate||'').localeCompare(String(a.startDate||'')));
-  return `<table style="width:100%;table-layout:fixed;border-collapse:collapse">
+  // Same shared `.hist-table`/`.hist-table--ellipsis` classes as the Budget Pool table and the
+  // read-only drill-down table (actualSpendRowsTable()) — same padding, header style, and row
+  // hover, so the Assignment Workspace no longer reads as a visually separate table (Part 7).
+  return `<table class="hist-table hist-table--ellipsis">
     <colgroup>
       <col style="width:13%"><col style="width:9%"><col style="width:8%"><col style="width:8%">
       <col style="width:15%"><col style="width:8%"><col style="width:11%"><col style="width:13%"><col style="width:15%">
     </colgroup>
     <thead><tr>
-      <th style="${thS}">Reference / Memo No</th><th style="${thS}">Project</th><th style="${thS}">Source</th>
-      <th style="${thS}">Spend Type</th><th style="${thS}">Description</th><th style="${thS};text-align:right">Amount</th>
-      <th style="${thS}">Coverage</th><th style="${thS}">Status</th><th style="${thS}">Action</th>
+      <th>Reference / Memo No</th><th>Project</th><th>Source</th>
+      <th>Spend Type</th><th>Description</th><th class="hist-amt">Amount</th>
+      <th>Coverage</th><th>Status</th><th>Action</th>
     </tr></thead>
     <tbody>${rows.map(record => `<tr>
-      <td style="${tdS}" title="${esc(record.referenceNo || '—')}">${referenceCell(record)}</td>
-      <td style="${tdS}" title="${esc(record.project || '')}">${esc(record.project || '—')}</td>
-      <td style="${tdS}"><span class="badge ${actualSpendSourceBadgeClass(record.source)}">${actualSpendSourceShortLabel(record.source)}</span></td>
-      <td style="${tdS}" title="${esc(record.spendType || '')}">${esc(record.spendType || '—')}</td>
-      <td style="${tdS}" title="${esc(record.description || '')}">${esc(record.description || '—')}</td>
-      <td style="${tdS};text-align:right;font-weight:600">${money(Number(record.amount)||0)}</td>
-      <td style="${tdS}" title="${esc(record.startDate || '—')} → ${esc(record.endDate || '—')}">${esc(record.startDate || '—')} → ${esc(record.endDate || '—')}</td>
-      <td style="${tdS}">
+      <td title="${esc(record.referenceNo || '—')}">${referenceCell(record)}</td>
+      <td title="${esc(record.project || '')}">${esc(record.project || '—')}</td>
+      <td><span class="badge ${actualSpendSourceBadgeClass(record.source)}">${actualSpendSourceShortLabel(record.source)}</span></td>
+      <td title="${esc(record.spendType || '')}">${esc(record.spendType || '—')}</td>
+      <td title="${esc(record.description || '')}">${esc(record.description || '—')}</td>
+      <td class="hist-amt" style="font-weight:600">${money(Number(record.amount)||0)}</td>
+      <td title="${esc(record.startDate || '—')} → ${esc(record.endDate || '—')}">${esc(record.startDate || '—')} → ${esc(record.endDate || '—')}</td>
+      <td>
         <div style="font-weight:500">${esc(record.budgetStatus || '—')}</div>
         <div style="font-size:10px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis" title="${esc(actualSpendAssignmentReason(record))}">${esc(actualSpendAssignmentReason(record))}</div>
       </td>
-      <td style="${tdS};overflow:visible">${actionCell(record)}</td>
+      <td style="overflow:visible">${actionCell(record)}</td>
     </tr>`).join('')}</tbody>
   </table>`;
 }

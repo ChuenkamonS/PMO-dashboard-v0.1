@@ -954,3 +954,52 @@ test('Phase 7A-4: Forecast remains unaffected by the new Needs PMO Review bucket
   assert.equal(forecast.rows.length, 1, 'Forecast eligibility (spendType + coverageStatus) must remain unaffected by budgetStatus, including the new Needs PMO Review bucket');
   assert.equal(forecast.rows[0].total, 12000);
 });
+
+test('Phase 7A-8: calculateBudgetVsActualDataset Spend Type filter narrows Actual/records/export but leaves pool Budget untouched', () => {
+  const ctx = context();
+  const pool = ctx.createBudgetPoolRecord({ id:'pool-78-mixed', project:'AOA-MP', name:'Mixed Pool', budget:20000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software','Hardware'] });
+  const softwareRecord = ctx.mapBudgetPool(ctx.createActualSpendRecord({ ...base, id:'as-78-sw', referenceNo:'SW-78', amount:3000 }), [pool]);
+  const hardwareRecord = ctx.mapBudgetPool(ctx.createActualSpendRecord({ ...base, id:'as-78-hw', referenceNo:'HW-78', spendType:'Hardware', amount:1500 }), [pool]);
+  assert.equal(softwareRecord.budgetStatus, 'Mapped');
+  assert.equal(hardwareRecord.budgetStatus, 'Mapped');
+
+  const unfiltered = ctx.calculateBudgetVsActualDataset([pool], [softwareRecord, hardwareRecord], { year:'2569', project:'AOA-MP' });
+  assert.equal(unfiltered.totals.actual, 4500);
+  assert.equal(unfiltered.rows[0].records.length, 2);
+
+  const filtered = ctx.calculateBudgetVsActualDataset([pool], [softwareRecord, hardwareRecord], { year:'2569', project:'AOA-MP', spendType:'Software' });
+  assert.deepEqual(filtered.rows[0].records.map(r => r.id), ['as-78-sw'], 'only the Software record must remain once filtered');
+  assert.equal(filtered.totals.actual, 3000, 'Actual must reflect only the filtered spend type');
+  assert.equal(filtered.rows[0].budget, 20000, 'Budget Pool budget is independent of the Spend Type filter');
+  assert.equal(filtered.totals.budget, unfiltered.totals.budget, 'the pool budget total must not shrink because of a content filter');
+
+  const exported = ctx.budgetVsActualExportDataset(filtered);
+  assert.equal(exported.totals.actual, filtered.totals.actual, 'export must reconcile with the filtered dataset, not the unfiltered one');
+});
+
+test('Phase 7A-8: calculateBudgetVsActualDataset search filter matches reference/description case-insensitively, same convention as Manual Entries search', () => {
+  const ctx = context();
+  const pool = ctx.createBudgetPoolRecord({ id:'pool-78-search', project:'AOA-MP', name:'Search Pool', budget:10000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const adobe = ctx.mapBudgetPool(ctx.createActualSpendRecord({ ...base, id:'as-78-adobe', referenceNo:'ADB-1', description:'Adobe Creative Cloud renewal', amount:2000 }), [pool]);
+  const slack = ctx.mapBudgetPool(ctx.createActualSpendRecord({ ...base, id:'as-78-slack', referenceNo:'SLK-1', description:'Slack seats', amount:500 }), [pool]);
+
+  const dataset = ctx.calculateBudgetVsActualDataset([pool], [adobe, slack], { year:'2569', project:'AOA-MP', search:'ADOBE' });
+  assert.deepEqual(dataset.rows[0].records.map(r => r.id), ['as-78-adobe'], 'search must be case-insensitive and match the description field');
+  assert.equal(dataset.totals.actual, 2000);
+
+  const noMatch = ctx.calculateBudgetVsActualDataset([pool], [adobe, slack], { year:'2569', project:'AOA-MP', search:'zzz-not-found' });
+  assert.equal(noMatch.rows[0].records.length, 0);
+  assert.equal(noMatch.totals.actual, 0);
+
+  const emptySearch = ctx.calculateBudgetVsActualDataset([pool], [adobe, slack], { year:'2569', project:'AOA-MP', search:'' });
+  assert.equal(emptySearch.rows[0].records.length, 2, 'an empty search string must behave exactly like no filter at all');
+});
+
+test('Phase 7A-8: calculateBudgetVsActualDataset is unchanged when spendType/search are omitted (backward compatibility)', () => {
+  const ctx = context();
+  const pool = ctx.createBudgetPoolRecord({ id:'pool-78-compat', project:'AOA-MP', name:'Compat Pool', budget:10000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const record = ctx.mapBudgetPool(ctx.createActualSpendRecord({ ...base, id:'as-78-compat', amount:4000 }), [pool]);
+  const dataset = ctx.calculateBudgetVsActualDataset([pool], [record], { year:'2569', project:'AOA-MP' });
+  assert.equal(dataset.totals.actual, 4000);
+  assert.equal(dataset.rows[0].records.length, 1);
+});

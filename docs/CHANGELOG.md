@@ -22,6 +22,104 @@
 
 ## Current Baseline
 
+### Phase 7A-8 - Budget vs Actual UX Consistency & Polish (pending review — not committed)
+#### Added
+- BvA filter row (`index.html`, `#bgt-tab-bva`) gains a Spend Type filter (`#bva-type`) and a free-
+  text search input (`#bva-search`), matching the Actual Spend tab's `as-type` options/order/labels
+  and the Manual Entries search convention exactly, instead of inventing new filter semantics.
+  `_renderBvaWith()` converts the selected short code via the existing `spendTypeFromMemoType()` and
+  passes `spendType`/`search` into `calculateBudgetVsActualDataset()` as two new, purely additive
+  filter keys (`app.js`) — omitting them (all existing callers) reproduces the exact prior output,
+  confirmed by the full existing test suite passing unchanged plus a new explicit backward-
+  compatibility test.
+- `.hist-table--ellipsis` modifier (`style.css`) factors out the one-line-per-row/ellipsis rule that
+  three different BvA tables previously each redeclared inline with three different padding values
+  (9px 14px / 9px 12px / 7px 10px). The Budget Pool table, the shared drill-down table
+  (`actualSpendRowsTable()`), and the Assignment Workspace table (`budgetAssignmentRowsTable()`) all
+  now use the same `.hist-table`/`.hist-table--ellipsis`/`.hist-amt` classes already used elsewhere
+  in the app, so padding, header style, numeric right-alignment, and row hover are identical across
+  all three instead of three near-duplicate implementations.
+- A lightweight "Loading…" placeholder appears in `#bva-content` only on first mount (empty
+  container), before `loadBudgetPoolsAsync()` resolves — reuses the existing empty-state "card"
+  look rather than introducing a new spinner pattern. Filter-driven re-renders are unaffected (no
+  flicker) since the container is no longer empty after the first render.
+
+#### Fixed
+- `_renderBvaWith()`'s empty-state check omitted `needsReviewRecords`, so a filter combination that
+  left zero pool rows and zero Unbudgeted records but a non-empty Needs PMO Review bucket incorrectly
+  fell back to the "no Budget Pool for this year" Settings CTA, hiding a real, already-computed
+  Needs PMO Review item. Fixed by including `needsReviewRecords.length` in the same check (mirrors
+  the Phase 7A-4 fix that added the bucket to `totals.actual`).
+- The "no Budget Pool" empty state no longer conflates two different situations: truly no Budget
+  Pool exists for the selected year (still shows the original Settings CTA), versus pools exist for
+  the year but the active Project/Spend Type/Search filter combination matches nothing (now shows a
+  distinct "ไม่พบข้อมูลตามเงื่อนไขที่เลือก" message suggesting the user clear a filter, instead of
+  incorrectly telling them to go create a Budget Pool that already exists).
+- `exportBudgetPoolsCSV()` previously exported every stored Budget Pool regardless of the BvA tab's
+  active Year/Project filters, while the adjacent "Export BvA" button (same toolbar) already
+  exported only the filtered dataset — the two buttons could disagree for the same filter state. It
+  now exports `_bvaDataset.rows.map(row => row.pool)` (the exact pools currently visible on screen),
+  falling back to the unfiltered list only if the tab hasn't rendered yet.
+
+#### Changed
+- `calculateBudgetVsActualDataset()`'s `scopedRecords` computation (`app.js`) now delegates its
+  project/spendType predicates to the existing shared `queryActualSpend()` helper instead of
+  re-implementing a project-only filter inline, so a Spend Type filter added to the Budget vs Actual
+  UI cannot silently diverge from the identical filter already used by Actual Spend
+  (`filteredActualSpendRecords()`). Output is byte-for-byte identical to before for any call that
+  does not set `filters.spendType`/`filters.search`.
+
+#### Unchanged
+- No change to `mapBudgetPool()`, `findMatchingBudgetPools()`, `calculateBudgetUtilization()`,
+  `calculateForecast()`, the Assignment Workspace's assignment routing
+  (`assignBudgetPoolFromWorkspace()`), Manual Override precedence, Unbudgeted/Needs PMO Review
+  classification, or the Supabase schema. Budget Pool CRUD/Settings, Bulk Upload, and Infra Cost
+  Budget Pool assignment are untouched and out of scope (deferred to Phase 7A-9 per the brief).
+
+#### Tests
+- Added to `tests/financial-models.test.js`: `calculateBudgetVsActualDataset()`'s new Spend Type
+  filter narrows `rows[].records`/`totals.actual`/export totals while leaving `rows[].budget`/
+  `totals.budget` unchanged; the new search filter matches reference/description case-insensitively
+  and an empty search is a no-op; omitting both filters reproduces prior behavior exactly.
+- Added to `tests/budget-expenses.test.js`: the new `#bva-type`/`#bva-search` controls exist in
+  `index.html` with the same options as `as-type` and reuse the shared `.ri` input style; the Spend
+  Type filter narrows the Budget Pool table and hides non-matching Unbudgeted/Needs Review sections;
+  the search filter narrows visible records and clearing it restores the combined total; the new
+  filter-specific empty state renders (and the Settings CTA does not) when pools exist but none
+  match the active filters; the original Settings CTA still renders when truly no pool exists for
+  the year; a regression test reproducing a cross-year Needs-Review-only scenario proving the fixed
+  empty-state check no longer hides it; `exportBudgetPoolsCSV()` exports only the currently filtered
+  pools; the Budget Pool table, drill-down table, and Assignment Workspace table all render the same
+  shared table classes with no leftover ad-hoc per-table padding. All 171 existing + new tests across
+  `tests/budget-expenses.test.js`, `tests/financial-models.test.js`, and `tests/workflow.test.js`
+  pass unchanged.
+
+#### Remaining Work / Deferred
+- Not committed — pending review per instruction.
+- Budget Pool CRUD, Budget Pool Settings, and Bulk Upload consistency/validation unification
+  (`docs/BvA_REQUIREMENT.md` §7/§8, already documented as a known issue) remain explicitly deferred
+  to Phase 7A-9, per this phase's guardrails.
+- Overview's embedded KPI/BvA widgets (`_ovUpdateKPIs()`, `_ovRenderBvA()`) still read the separate
+  legacy `loadSLBudgets()` store instead of the canonical Budget Pool/Actual Spend pipeline that the
+  dedicated Budget vs Actual tab now uses consistently — a pre-existing, already-documented issue
+  (`docs/BvA_REQUIREMENT.md` §11, tracked as `TD-7A-03`). Not fixed here: it is a data-source/
+  business-logic change explicitly out of this UX-only phase's guardrails, and multiple prior phase
+  docs already reserve it for a dedicated Overview parity phase.
+- The Budget vs Actual tab has no chart/donut of its own (only KPI cards, a linear progress bar, and
+  tables) — Part 4 ("Chart Polish") therefore had no in-scope chart to polish. Overview's bar/donut
+  charts are a separate tab, were substantively reworked in Phase 7A-6, and were left untouched here
+  to avoid re-opening a recently-stabilized, out-of-file-scope area for a BvA-focused UX pass.
+- `exportBudgetPoolsCSV()`'s column header "ประเภท Memo" still refers to the legacy Memo Type
+  concept rather than the canonical "Spend Type" term used everywhere else (including the sibling
+  "Spend Types" column in `exportBudgetVsActualCSV()`'s headers). Left unchanged in this pass because
+  a single-column rename would mix Thai/English terminology awkwardly within one export; recommend a
+  full export-header terminology pass across all Budget & Spend exports together in a later phase.
+- The Budget Pool row's whole-row click-to-drill-down (Budget Pool table) and the Unbudgeted/Needs
+  PMO Review banner's explicit "View items →" button use two different interaction granularities
+  (drill into a modal vs. navigate to a full workspace view). This is treated as an intentional,
+  reasonable distinction given the different navigation depth of each action, not an inconsistency
+  to fix — documented here for visibility rather than silently left unmentioned.
+
 ### Phase 7A-7 Follow-up - BvA Assignment Workspace UI Consistency Fix (pending review — not committed)
 #### Fixed
 - **Part 1 (stacked modals):** clicking a memo reference from the Budget Pool drill-down modal

@@ -467,6 +467,10 @@ body {
 .hist-table tr:last-child td { border-bottom: none; }
 .hist-table tbody tr { transition: background .1s; cursor: default; }
 .hist-table tbody tr:hover td { background: var(--bg); }
+/* One-line-per-row modifier shared by every Budget vs Actual drill-down/assignment table, so a long
+   Reference/Description value truncates instead of forcing horizontal scroll (full value still
+   available via the cell's `title` attribute). */
+.hist-table--ellipsis td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ── HISTORY WORKSPACE ── */
 .hist-toolbar {

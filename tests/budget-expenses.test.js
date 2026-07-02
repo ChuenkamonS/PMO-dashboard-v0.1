@@ -91,7 +91,7 @@ function createBvaContext() {
     });
     return elements.get(id);
   };
-  ['bva-year','bva-project','bva-content','bva-untagged-alert'].forEach(element);
+  ['bva-year','bva-project','bva-type','bva-search','bva-content','bva-untagged-alert'].forEach(element);
   // Dynamically created modal panels (e.g. bva-memo-panel, actual-spend-record-detail) are tracked
   // by id as they're appended/removed, so getElementById(id)?.remove() calls used to prevent
   // stacked modals (Phase 7A-7 follow-up, Part 1) are actually exercised, not silent no-ops.
@@ -1411,8 +1411,10 @@ test('Phase 7A-7: Budget Assignment Workspace lists Unbudgeted and Needs PMO Rev
   assert.match(html, /onclick="showBvaRecordDetail\('ws-memo-unbudgeted'\)"/);
   assert.doesNotMatch(html, /openMemoReadOnly/, 'the Budget Assignment Workspace must not open the All Memo detail path');
 
-  // Rendered directly in the page (table, no horizontal scroll), not a popup.
-  assert.match(html, /table-layout:fixed/);
+  // Rendered directly in the page (table, no horizontal scroll), not a popup — the shared
+  // hist-table/hist-table--ellipsis classes (Phase 7A-8) guarantee table-layout:fixed + per-cell
+  // ellipsis instead of an inline style declaring it.
+  assert.match(html, /class="hist-table hist-table--ellipsis"/);
   assert.doesNotMatch(html, /id="bva-memo-panel"/);
 
   // A clear way back to the BvA summary.
@@ -1610,7 +1612,7 @@ test('Phase 7A-5v2: BvA "all" drill-down includes Mapped, Unbudgeted, and Needs 
 
   context.showBvaActualSpend('all');
   const html = context.__lastPanel.innerHTML;
-  assert.match(html, /table-layout:fixed/, 'records render one per row in a single-line table, not a card');
+  assert.match(html, /class="hist-table hist-table--ellipsis"/, 'records render one per row in a single-line table, not a card');
   ['MEMO-UI-1','MAN-UI-1','INFRA-UI-1'].forEach(ref => assert.match(html, new RegExp(ref)));
   assert.equal((html.match(/class="badge /g) || []).length, 3, 'each record renders as exactly one row, never duplicated');
   assert.ok(html.includes(expectedTotal), 'drill-down total must equal the KPI Actual total');
@@ -1631,7 +1633,7 @@ test('Phase 7A-5v2: Budget Pool row drill-down shows one row per item, single li
   context.showBvaActualSpend('bva-ui-pool');
   const html = context.__lastPanel.innerHTML;
   assert.match(html, /MEMO-UI-1/);
-  assert.match(html, /table-layout:fixed/);
+  assert.match(html, /class="hist-table hist-table--ellipsis"/);
   assert.match(html, /overflow-x:hidden/);
   assert.doesNotMatch(html, /MAN-UI-1|INFRA-UI-1/, 'a pool drill-down must only show that pool\'s own records');
 });
@@ -1749,4 +1751,128 @@ test('Phase 7A-5: Actual Spend detail renders every canonical field under the ne
   assert.match(html, /badge-blue/, 'Approved Memo source should render as a distinct badge');
   assert.match(html, /badge-green/, 'Mapped budget status should render as a distinct badge');
   assert.doesNotMatch(html, /<table/);
+});
+
+// ══════════════════════════════════════════
+// Phase 7A-8 — Budget vs Actual UX Consistency & Polish
+// ══════════════════════════════════════════
+
+test('Phase 7A-8: index.html BvA filter row has a Spend Type filter matching Actual Spend\'s as-type options, and a search input', () => {
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const bvaFilterRow = html.slice(html.indexOf('id="bgt-tab-bva"'), html.indexOf('id="bva-content"'));
+  assert.match(bvaFilterRow, /id="bva-type"/);
+  ['sl','hw','int','ent','dep','infra','other'].forEach(code =>
+    assert.match(bvaFilterRow, new RegExp(`<option value="${code}">`)));
+  assert.match(bvaFilterRow, /id="bva-search"/);
+  assert.match(bvaFilterRow, /class="ri"/, 'the search input should reuse the shared .ri input style, not a new one');
+});
+
+test('Phase 7A-8: BvA Spend Type filter narrows the Budget Pool table, hides non-matching Unbudgeted/Needs Review sections, and keeps the total consistent', () => {
+  const context = createBvaContext();
+  const pools = seedBvaScenario(context);
+
+  context.__elements.get('bva-type').value = 'sl'; // Software License → canonical "Software"
+  context._renderBvaWith(pools);
+  const html = context.__elements.get('bva-content').innerHTML;
+
+  assert.doesNotMatch(html, /id="bva-unbudgeted-section"/, 'the Hardware Unbudgeted record must be excluded once filtered to Software');
+  assert.doesNotMatch(html, /id="bva-needs-review-section"/, 'the Infra Needs PMO Review record must be excluded once filtered to Software');
+  assert.ok(html.includes(context.money(5000)), 'the remaining Software actual amount must still be visible in the Budget Pool table');
+});
+
+test('Phase 7A-8: BvA search filter narrows records by reference/description, same case-insensitive substring convention as Manual Entries search', () => {
+  const context = createBvaContext();
+  const pool = context.createBudgetPoolRecord({ id:'search-pool', project:'AOA-MP', name:'Search Pool', budget:10000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  context.storeActualSpendRecords([
+    context.createActualSpendRecord({ id:'search-adobe', source:'Approved Memo', referenceNo:'ADB-9', memoId:'ADB-9', project:'AOA-MP', spendType:'Software', description:'Adobe Creative Cloud', amount:2000, startDate:'2026-03', endDate:'2026-03' }),
+    context.createActualSpendRecord({ id:'search-slack', source:'Approved Memo', referenceNo:'SLK-9', memoId:'SLK-9', project:'AOA-MP', spendType:'Software', description:'Slack seats', amount:800, startDate:'2026-03', endDate:'2026-03' }),
+  ]);
+  context.__elements.get('bva-year').value = '2569';
+  context.__elements.get('bva-project').value = 'all';
+  context.__elements.get('bva-search').value = 'adobe';
+  context._renderBvaWith([pool]);
+  const html = context.__elements.get('bva-content').innerHTML;
+
+  assert.ok(html.includes(context.money(2000)), 'the matching Adobe record amount must be visible');
+  assert.doesNotMatch(html, /\(2 items\)/, 'only the matching Adobe record should count toward the pool row, not both records');
+
+  context.__elements.get('bva-search').value = '';
+  context._renderBvaWith([pool]);
+  const clearedHtml = context.__elements.get('bva-content').innerHTML;
+  assert.ok(clearedHtml.includes(context.money(2800)), 'clearing the search must restore the combined total, same as any other filter reset to "all"');
+});
+
+test('Phase 7A-8: BvA shows a filter-specific empty state (not the "set up a pool" Settings CTA) when pools exist for the year but none match the active Project filter', () => {
+  const context = createBvaContext();
+  const pools = seedBvaScenario(context);
+  context.__elements.get('bva-project').value = 'Nonexistent-Project';
+  context._renderBvaWith(pools);
+  const html = context.__elements.get('bva-content').innerHTML;
+  assert.match(html, /ไม่พบข้อมูลตามเงื่อนไขที่เลือก/);
+  assert.doesNotMatch(html, /ยังไม่มี Budget Pool สำหรับปี/, 'must not show the "set up a pool" CTA when pools already exist for this year/project scope');
+});
+
+test('Phase 7A-8: BvA still shows the "set up a pool" Settings CTA when truly no Budget Pool exists for the selected year', () => {
+  const context = createBvaContext();
+  context.__elements.get('bva-year').value = '2569';
+  context.__elements.get('bva-project').value = 'all';
+  context._renderBvaWith([]);
+  const html = context.__elements.get('bva-content').innerHTML;
+  assert.match(html, /ยังไม่มี Budget Pool สำหรับปี 2569/);
+});
+
+test('Phase 7A-8 regression: a Needs PMO Review record must never be hidden behind the "no Budget Pool" empty state, even when its matching pools fall in a different year than the active filter', () => {
+  const context = createBvaContext();
+  const poolA = context.createBudgetPoolRecord({ id:'nr-cross-year-A', project:'AOA-MP', name:'Infra 2568 A', budget:20000, startMonth:'2025-06', endMonth:'2025-12', spendTypes:['Infra'] });
+  const poolB = context.createBudgetPoolRecord({ id:'nr-cross-year-B', project:'AOA-MP', name:'Infra 2568 B', budget:20000, startMonth:'2025-06', endMonth:'2025-12', spendTypes:['Infra'] });
+  assert.equal(poolA.year, '2568', 'sanity: pool year must derive to 2568 from its own 2025 start month');
+
+  context.storeActualSpendRecords([
+    context.createActualSpendRecord({ id:'nr-cross-year-record', source:'Infra Cost', referenceNo:'INFRA-CY-1', project:'AOA-MP', spendType:'Infra', amount:7700, startDate:'2025-11-01', endDate:'2026-02-28' }),
+  ]);
+
+  context.__elements.get('bva-year').value = '2569';
+  context.__elements.get('bva-project').value = 'AOA-MP';
+  context._renderBvaWith([poolA, poolB]);
+
+  const html = context.__elements.get('bva-content').innerHTML;
+  assert.doesNotMatch(html, /ยังไม่มี Budget Pool สำหรับปี/, 'must not fall back to the "no pool" empty state when a Needs PMO Review item exists');
+  assert.match(html, /id="bva-needs-review-section"/);
+  assert.match(html, /Needs PMO Review \(1 items\)/);
+});
+
+test('Phase 7A-8: exportBudgetPoolsCSV exports exactly the pools currently visible for the active BvA filters, not every stored pool', () => {
+  const context = createBvaContext();
+  const pools = [
+    context.createBudgetPoolRecord({ id:'exp-pool-a', project:'AOA-MP', name:'AOA Pool', budget:10000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] }),
+    context.createBudgetPoolRecord({ id:'exp-pool-b', project:'TTB', name:'TTB Pool', budget:5000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Hardware'] }),
+  ];
+  context.storeBudgetPools(pools);
+  context.__elements.get('bva-year').value = '2569';
+  context.__elements.get('bva-project').value = 'AOA-MP';
+  context._renderBvaWith(pools);
+
+  let exported;
+  context._downloadCSV = (filename, headers, rows) => { exported = { filename, headers, rows }; };
+  context.exportBudgetPoolsCSV();
+
+  assert.equal(exported.filename, 'Budget_Pools');
+  assert.equal(exported.rows.length, 1, 'only the pool matching the active Project filter must be exported');
+  assert.equal(exported.rows[0][0], 'exp-pool-a');
+});
+
+test('Phase 7A-8: the Budget Pool table, drill-down table, and Assignment Workspace table share the same table classes (no ad-hoc per-table padding)', async () => {
+  const context = createBvaContext();
+  const pools = seedBvaScenario(context);
+  const summaryHtml = context.__elements.get('bva-content').innerHTML;
+  assert.match(summaryHtml, /<table class="hist-table">/, 'the Budget Pool table must use the shared hist-table class');
+  assert.doesNotMatch(summaryHtml, /padding:9px 14px/, 'the old ad-hoc per-table padding must be gone, in favor of the shared class');
+
+  context.showBvaActualSpend('bva-ui-pool');
+  assert.match(context.__lastPanel.innerHTML, /class="hist-table hist-table--ellipsis"/);
+
+  await context.showBudgetAssignmentWorkspace();
+  const workspaceHtml = context.__elements.get('bva-content').innerHTML;
+  assert.match(workspaceHtml, /class="hist-table hist-table--ellipsis"/, 'the Assignment Workspace table must use the same shared classes as the other two tables');
+  assert.doesNotMatch(workspaceHtml, /padding:7px 10px/, 'the old ad-hoc Assignment Workspace padding must be gone');
 });

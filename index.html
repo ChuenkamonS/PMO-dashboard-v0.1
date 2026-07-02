@@ -1620,6 +1620,20 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <select id="bva-project" onchange="renderBudgetVsActual()">
               <option value="all">ทุกโปรเจค</option>
             </select>
+            <!-- Same short-code options, order, and labels as the Actual Spend tab's `as-type`
+                 filter (index.html, "TAB: ACTUAL SPEND"), so Spend Type filtering behaves and reads
+                 identically on both tabs. -->
+            <select id="bva-type" onchange="renderBudgetVsActual()">
+              <option value="all">ทุกประเภท</option>
+              <option value="sl">Software License</option>
+              <option value="hw">Hardware</option>
+              <option value="int">Team Activity</option>
+              <option value="ent">Client Expense</option>
+              <option value="dep">Deployment</option>
+              <option value="infra">Infrastructure</option>
+              <option value="other">Other</option>
+            </select>
+            <input id="bva-search" class="ri" type="search" placeholder="Search reference or description..." oninput="_renderBvaWith(loadBudgetPools())" style="max-width:220px">
             <span id="bva-untagged-alert" style="display:none;font-size:11px;color:var(--amber);margin-left:8px"></span>
             <button class="btn-export" onclick="exportBudgetVsActualCSV()">⬇ Export BvA</button>
             <button class="btn-export" onclick="exportBudgetPoolsCSV()">⬇ Export Pools</button>
