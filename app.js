@@ -231,8 +231,14 @@ function createBudgetPoolRecord(input = {}) {
   const spendTypes = (hasCanonicalTypes && Array.isArray(input.spendTypes) ? input.spendTypes : legacyTypes)
     .filter(t => SPEND_TYPE_VALUES.includes(t));
   const memoTypes = spendTypes.map(t => SPEND_TYPE_TO_MEMO_TYPE[t]).filter(Boolean);
-  const effectiveStartDate = input.startDate || input.startMonth || null;
-  // Year is derived from the pool's own coverage start whenever date data exists — an
+  // Phase 7A-9A: createBudgetPoolRecord() is THE canonicalizer, so it must itself normalize a
+  // legacy/typed BE value (e.g. "2569-01") to Gregorian before deriving year — otherwise
+  // gregorianYearToBuddhistEra() double-converts into the "3112" bug at the model layer, and only
+  // call sites that separately remembered to normalize first (e.g. the Edit modal) were protected.
+  // Every canonical read (Budget Settings, BvA, exports, mapping) now inherits this for free.
+  const effectiveStartDate = normalizeMonthValueToGregorian(input.startDate || input.startMonth) || null;
+  const effectiveEndDate = normalizeMonthValueToGregorian(input.endDate || input.endMonth) || null;
+  // Year is derived from the pool's own normalized coverage start whenever date data exists — an
   // independently-supplied input.year is never allowed to disagree with the pool's dates
   // (see docs/BvA_REQUIREMENT.md "Phase 7A-1" §2). Only fall back to input.year when there is
   // no date data to derive from at all.
@@ -245,10 +251,10 @@ function createBudgetPoolRecord(input = {}) {
     currency: input.currency || 'THB',
     spendTypes,
     startDate: effectiveStartDate,
-    endDate: input.endDate || input.endMonth || null,
+    endDate: effectiveEndDate,
     year: derivedYear || input.year || null,
-    startMonth: input.startMonth || input.startDate || null,
-    endMonth: input.endMonth || input.endDate || null,
+    startMonth: effectiveStartDate,
+    endMonth: effectiveEndDate,
     memoTypes,
     createdBy: input.createdBy || '',
     createdAt: input.createdAt || new Date().toISOString(),

@@ -85,9 +85,21 @@ read-only `bpool-year` field recomputes live from `bpool-start` via `_updateBpoo
 instead of trusting a possibly-stale stored label or the ambient year filter. The data layer already
 satisfied this criterion since Phase 7A-3.
 
-Still OPEN: Budget Pool import still does not derive year (bulk import untouched this phase),
-existing pools are not audited/migrated, and no regression test yet proves zero mismatched legacy
-pools remain in real data.
+Phase 7A-9A Contract Fix Update
+
+`createBudgetPoolRecord()` now normalizes `startDate`/`startMonth`/`endDate`/`endMonth` to Gregorian
+before deriving `year`, and every canonical read path (Budget Settings list/filter/grouping, Edit
+modal, Budget vs Actual, CSV export fallback, memo/manual-expense matching) goes through it — so an
+existing mismatched or BE-typed-legacy record now self-heals at read time everywhere, not only in
+the Edit modal. `savePoolAsync()` (the single write path for manual save and bulk import) also
+canonicalizes before persisting, so a fresh save can no longer introduce a new mismatch.
+
+Still OPEN: Budget Pool import still writes its own `year` column at the UI layer without deriving
+it from Start Month before the duplicate-check step (`_confirmPoolImport()`'s inline dedupe still
+compares against the caller-supplied `it.yr`, though the value it ultimately persists via
+`savePoolAsync()` is now corrected). Existing pools already in storage are not audited/bulk-migrated
+(by design — only self-heal on read, or on an explicit re-save). No regression test yet proves zero
+mismatched legacy pools remain in real production/Supabase data.
 
 ---
 

@@ -125,6 +125,45 @@
   Manually verified in-browser: typing `2569-01` into Start Month live-updates the year field to
   `2569`, and saving persists Gregorian `2026-01`/`2026-12`.
 
+#### Follow-up (data contract fix) — one canonical Budget Pool read/write contract, same phase
+- **Bug**: Budget Settings' year filter/list/grouping (`renderBudgetSettings()`) filtered by a raw
+  stored `pool.year` read via `loadBudgetPools()` (never canonicalized), while the Edit modal
+  already derived `year` from normalized `startMonth`. A pool whose raw `year` disagreed with its
+  own `startMonth` (e.g. `year: '2569'`, `startMonth: '2025-01'`) would appear under the wrong
+  Budget Settings year filter and show a different year when opened for editing — the exact
+  filter-vs-modal mismatch reported in the field.
+- **Deeper conflict found and fixed**: `createBudgetPoolRecord()` — the canonicalizer every other
+  read path (`renderBudgetSettings`, BvA, exports, mapping) relies on — did not itself call
+  `normalizeMonthValueToGregorian()` before deriving `year`. A legacy record saved with a BE-typed
+  `startMonth` (e.g. `'2569-01'`, from before the "3112" fix above) would still reproduce `year:
+  '3112'` when read through the *canonical* path; only the Edit modal's bespoke normalization was
+  protected. Folded `normalizeMonthValueToGregorian()` into `createBudgetPoolRecord()` itself (now
+  normalizes `startDate`/`startMonth`/`endDate`/`endMonth` before deriving `year`), so every
+  canonical read is Gregorian-safe, not just the modal.
+- **Fix (read path)**: `renderBudgetSettings()`, `openBudgetPoolModal()` (date/year fields only —
+  project/name/budget/memoTypes still read from the raw pool, unchanged), and
+  `exportBudgetPoolsCSV()`'s no-`_bvaDataset`-yet fallback now all read through
+  `createBudgetPoolRecord()` instead of a raw `loadBudgetPools()` result.
+- **Fix (write path)**: `savePoolAsync()` — the single Budget Pool persistence function used by both
+  manual save and bulk import — now canonicalizes its input via `createBudgetPoolRecord()` before
+  writing to localStorage/Supabase, so `year` can never be persisted independently of
+  `startMonth`/`endMonth` regardless of what the caller computed.
+- **Explicitly not done** (out of scope per this sub-phase): no Normalize/repair button, no startup
+  auto-migration, no rewrite of existing Supabase/localStorage records outside of an explicit save,
+  no bulk-import Year-column-vs-Start-Month warning UI, no duplicate/overlap validation changes.
+  TD-7A-01's "existing pools audited or migrated" and "bulk import derives year" exit criteria
+  remain open by design — canonical *reads* now self-heal mismatched records at runtime, but
+  storage itself is only corrected when a pool is explicitly re-saved.
+- **Tests**: `createBudgetPoolRecord()` normalizes a typed-BE `startMonth`/`endMonth` and derives
+  `year` from the normalized value, including the `year: '3112'` legacy-corruption case
+  (`tests/financial-models.test.js`); `renderBudgetSettings()` excludes a raw-`year`-mismatched pool
+  from the wrong filter year and includes it under its normalized year
+  (`tests/budget-expenses.test.js`); `savePoolAsync()` normalizes and re-derives `year` for both a
+  BE-typed and an already-Gregorian raw entry, independent of `saveBudgetPool()`'s own
+  normalization; `exportBudgetPoolsCSV()`'s fallback path exports the canonical, not stale, year;
+  `openBudgetPoolModal()`'s legacy-BE-typed-pool test extended to also assert `bpool-end` displays
+  the normalized value. Full suite (194 tests) re-run and passes unchanged.
+
 ---
 
 ### Phase 7A-8 - Budget vs Actual UX Consistency & Polish (pending review — not committed)

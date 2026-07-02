@@ -655,8 +655,9 @@ function exportBudgetPoolsCSV() {
   // Export exactly the pools currently visible on the Budget vs Actual tab (same Year/Project/
   // Spend Type/Search filters as `_bvaDataset`), not every pool in storage — so "Export Pools" and
   // "Export BvA" agree with each other and with the on-screen tables for the same filter state
-  // (Part 5). Falls back to the unfiltered list only if the tab hasn't rendered a dataset yet.
-  const pools = _bvaDataset ? _bvaDataset.rows.map(row => row.pool) : loadBudgetPools();
+  // (Part 5). Falls back to the unfiltered canonical list only if the tab hasn't rendered a
+  // dataset yet — canonicalized so this fallback can't export a stale raw `year` (Phase 7A-9A).
+  const pools = _bvaDataset ? _bvaDataset.rows.map(row => row.pool) : loadBudgetPools().map(createBudgetPoolRecord);
   if (!pools.length) { alert('ไม่มี Budget Pool ตามเงื่อนไขที่เลือก'); return; }
   const headers = ['Pool ID','โครงการ','ชื่อ Pool','งบประมาณ','ปี',
     'เริ่ม (YYYY-MM)','สิ้นสุด (YYYY-MM)','ประเภท Memo'];
@@ -2321,7 +2322,11 @@ async function loadBudgetPoolsAsync() {
   }
   return loadBudgetPools();
 }
-async function savePoolAsync(pool) {
+async function savePoolAsync(rawPool) {
+  // Phase 7A-9A: savePoolAsync() is the single Budget Pool write path (manual save and bulk
+  // import both call it) — canonicalize here so startMonth/endMonth/year can never be persisted
+  // out of sync with each other, regardless of what the caller computed.
+  const pool = createBudgetPoolRecord(rawPool);
   const all = loadBudgetPools();
   const idx = all.findIndex(p => p.id === pool.id);
   if (idx >= 0) all[idx] = pool; else all.push(pool);
@@ -3028,7 +3033,10 @@ function renderBudgetSettings() {
   if (!body) return;
   populateBudgetYearSelect('bset-year');
   const year  = document.getElementById('bset-year')?.value || getCurrentBuddhistYear();
-  const pools = loadBudgetPools().filter(p => p.year === year);
+  // Phase 7A-9A: filter/group by the canonical derived year, not a possibly-stale raw stored
+  // `year` — otherwise this list can disagree with the Edit modal (which already derives from
+  // normalized Start Month) for any legacy/mismatched pool.
+  const pools = loadBudgetPools().map(createBudgetPoolRecord).filter(p => p.year === year);
 
   if (!pools.length) {
     body.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:12px">ยังไม่มี Budget Pool สำหรับปี ${year} — กด "+ Add Pool" เพื่อเริ่ม</div>`;
@@ -3084,15 +3092,19 @@ function _updateBpoolYearFromStart() {
 function openBudgetPoolModal(editId) {
   const projects = getCanonicalProjectList();
   const pool    = editId ? loadBudgetPools().find(p => p.id === editId) : null;
+  // Phase 7A-9A: createBudgetPoolRecord() is now the single Gregorian-safe canonicalizer, so the
+  // date/year fields are sourced from it rather than re-normalizing ad hoc here. Other fields
+  // (project, name, budget, memoTypes) stay sourced from the raw pool — unrelated to this phase's
+  // date/year contract and unchanged in behavior.
+  const canonicalPool = pool ? createBudgetPoolRecord(pool) : null;
   populateBudgetYearSelect('bset-year');
   const year    = document.getElementById('bset-year')?.value || getCurrentBuddhistYear();
 
   const g = (f, def = '') => pool ? (pool[f] ?? def) : def;
   const projOpts = projects.map(p => `<option value="${esc(p)}" ${g('project') === p ? 'selected' : ''}>${esc(p)}</option>`).join('');
-  // Normalize a legacy/pre-fix BE-typed startMonth (see the "3112" bug fix in saveBudgetPool()
-  // and _updateBpoolYearFromStart() below) before deriving or displaying it.
-  const initialStart = normalizeMonthValueToGregorian(g('startMonth'));
-  const initialYear  = (initialStart ? gregorianYearToBuddhistEra(initialStart) : '') || g('year', year);
+  const initialStart = canonicalPool?.startMonth || '';
+  const initialEnd   = canonicalPool?.endMonth || '';
+  const initialYear  = canonicalPool?.year || g('year', year);
 
   // Create inline modal
   const existing = document.getElementById('bpool-modal');
@@ -3125,7 +3137,7 @@ function openBudgetPoolModal(editId) {
           <input id="bpool-start" class="ri" type="month" required value="${initialStart}" oninput="_updateBpoolYearFromStart()">
         </div>
         <div class="fg"><label>End Month (YYYY-MM)</label>
-          <input id="bpool-end" class="ri" type="month" required value="${g('endMonth')}">
+          <input id="bpool-end" class="ri" type="month" required value="${initialEnd}">
         </div>
       </div>
       <div class="fg" style="margin-top:12px">

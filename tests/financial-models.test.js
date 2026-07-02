@@ -1049,3 +1049,50 @@ test('Phase 7A-9A blocker fix ("3112" bug): normalizeMonthValueToGregorian conve
   assert.equal(ctx.normalizeMonthValueToGregorian(''), '');
   assert.equal(ctx.normalizeMonthValueToGregorian(null), '');
 });
+
+// ══════════════════════════════════════════════════════════════════
+// PHASE 7A-9A (contract fix) — createBudgetPoolRecord() is now the single Gregorian-safe
+// canonicalizer: it normalizes startDate/startMonth/endDate/endMonth to Gregorian YYYY-MM itself
+// before deriving `year`, instead of relying on view-layer call sites to normalize first.
+// ══════════════════════════════════════════════════════════════════
+
+test('Phase 7A-9A contract fix: createBudgetPoolRecord normalizes a typed BE startMonth/endMonth to Gregorian', () => {
+  const ctx = context();
+  const pool = ctx.createBudgetPoolRecord({
+    id: 'pool-be-typed', project: 'AOA-MP', name: 'BE Typed', budget: 1000,
+    startMonth: '2569-01', endMonth: '2569-12', spendTypes: ['Software'],
+  });
+  assert.equal(pool.startMonth, '2026-01', 'a typed BE startMonth must be normalized to Gregorian, not stored as-is');
+  assert.equal(pool.endMonth, '2026-12', 'a typed BE endMonth must be normalized to Gregorian, not stored as-is');
+  assert.equal(pool.startDate, '2026-01');
+  assert.equal(pool.endDate, '2026-12');
+});
+
+test('Phase 7A-9A contract fix: createBudgetPoolRecord derives year from the normalized (not raw) startMonth', () => {
+  const ctx = context();
+  const legacyBeTyped = ctx.createBudgetPoolRecord({
+    id: 'pool-legacy-be', project: 'AOA-MP', name: 'Legacy BE', budget: 1000, year: '3112',
+    startMonth: '2569-01', endMonth: '2569-12', spendTypes: ['Software'],
+  });
+  assert.equal(legacyBeTyped.year, '2569', 'year must be the correct BE year, not the "3112" double-conversion bug');
+  assert.notEqual(legacyBeTyped.year, '3112');
+
+  const ceTyped = ctx.createBudgetPoolRecord({
+    id: 'pool-ce', project: 'AOA-MP', name: 'CE Typed', budget: 1000,
+    startMonth: '2026-01', endMonth: '2026-12', spendTypes: ['Software'],
+  });
+  assert.equal(ceTyped.startMonth, '2026-01', 'an already-Gregorian startMonth must remain unchanged');
+  assert.equal(ceTyped.year, '2569', 'both spellings of the same real month must resolve to the same BE year');
+});
+
+test('Phase 7A-9A contract fix: a legacy pool whose stored year (3112) conflicts with its BE-typed startMonth canonicalizes correctly at the model layer, not just in the Edit modal', () => {
+  const ctx = context();
+  // This is the exact shape a pre-"3112"-fix record could have been persisted with: year computed
+  // by adding 543 to an already-BE startMonth. Any canonical read (Budget Settings, BvA, exports,
+  // mapping) must self-heal this at read time, without requiring the pool to be re-saved first.
+  const corrupted = { id: 'pool-corrupted', project: 'AOA-MP', name: 'Corrupted', budget: 1000, year: '3112', startMonth: '2569-01', endMonth: '2569-12' };
+  const canonical = ctx.createBudgetPoolRecord(corrupted);
+  assert.equal(canonical.year, '2569');
+  assert.equal(canonical.startMonth, '2026-01');
+  assert.equal(canonical.endMonth, '2026-12');
+});

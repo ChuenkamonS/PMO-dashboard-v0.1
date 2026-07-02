@@ -2025,6 +2025,7 @@ test('Phase 7A-9A blocker fix ("3112" bug): openBudgetPoolModal normalizes a leg
   const html = context.__lastPanel.innerHTML;
   assert.match(html, /id="bpool-start"[^>]*value="2026-01"/, 'bpool-start must display the normalized Gregorian value, not the raw stored BE text');
   assert.match(html, /id="bpool-year"[^>]*value="2569"/, 'bpool-year must show the correct BE year, not the stored "3112" bug value');
+  assert.match(html, /id="bpool-end"[^>]*value="2026-12"/, 'bpool-end must also display the normalized Gregorian value (Phase 7A-9A contract fix), not the raw stored BE text');
 });
 
 test('Phase 7A-9A blocker fix ("3112" bug): saveBudgetPool normalizes typed BE Start/End Month to Gregorian before persisting', async () => {
@@ -2049,6 +2050,68 @@ test('Phase 7A-9A blocker fix ("3112" bug): saveBudgetPool normalizes typed BE S
   assert.equal(saved.startMonth, '2026-01', 'startMonth must be normalized to Gregorian, not stored as typed BE');
   assert.equal(saved.endMonth, '2026-12', 'endMonth must be normalized to Gregorian, not stored as typed BE');
   assert.equal(saved.year, '2569', 'derived year must be the correct BE year, not the "3112" bug value');
+});
+
+// ══════════════════════════════════════════════════════════════════
+// PHASE 7A-9A CONTRACT FIX — createBudgetPoolRecord() is now the single Gregorian-safe
+// canonicalizer (normalizes internally, not just at view-layer call sites). These tests cover the
+// read/write paths that must now benefit from it: Budget Settings, savePoolAsync, and CSV export.
+// ══════════════════════════════════════════════════════════════════
+
+test('Phase 7A-9A contract fix: renderBudgetSettings filters/groups by the canonical derived year, not a stale raw stored year', () => {
+  const context = createBudgetPoolModalContext();
+  // Raw stored pool: year label says 2569, but startMonth is really 2025-01 (BE 2568) — the exact
+  // mismatch reported in the field (filter=2569, Edit modal shows 2568).
+  context.loadBudgetPools = () => [
+    { id: 'mismatch-1', project: 'Alpha', name: 'Mismatched Pool', budget: 1000, year: '2569', startMonth: '2025-01', endMonth: '2025-12', memoTypes: [] },
+  ];
+  context.__elements.get('bset-year').value = '2569';
+  context.renderBudgetSettings();
+  let html = context.__elements.get('bset-budget-body').innerHTML;
+  assert.doesNotMatch(html, /Mismatched Pool/, 'must not show under the 2569 filter just because its stale raw year field says 2569');
+
+  context.__elements.get('bset-year').value = '2568';
+  context.renderBudgetSettings();
+  html = context.__elements.get('bset-budget-body').innerHTML;
+  assert.match(html, /Mismatched Pool/, 'must appear under 2568, matching its normalized Start Month, same as the Edit modal would show');
+});
+
+test('Phase 7A-9A contract fix: savePoolAsync canonicalizes a raw entry before persisting, independent of saveBudgetPool() having already normalized', () => {
+  const context = createBudgetPoolModalContext();
+  return context.savePoolAsync({
+    id: 'pool-write-path', project: 'Alpha', name: 'Write Path Pool', budget: 1000,
+    year: '2568', startMonth: '2569-01', endMonth: '2569-12', memoTypes: [],
+  }).then(() => {
+    const saved = context.loadBudgetPools().find(p => p.id === 'pool-write-path');
+    assert.ok(saved, 'the pool must have been persisted');
+    assert.equal(saved.startMonth, '2026-01', 'savePoolAsync must normalize startMonth to Gregorian even if the caller did not (e.g. bulk import)');
+    assert.equal(saved.endMonth, '2026-12', 'savePoolAsync must normalize endMonth to Gregorian even if the caller did not');
+    assert.equal(saved.year, '2569', 'savePoolAsync must re-derive year from the normalized startMonth, ignoring the caller-supplied stale year');
+  });
+});
+
+test('Phase 7A-9A contract fix: savePoolAsync leaves an already-Gregorian CE entry unchanged', () => {
+  const context = createBudgetPoolModalContext();
+  return context.savePoolAsync({
+    id: 'pool-write-path-ce', project: 'Alpha', name: 'Write Path CE Pool', budget: 1000,
+    startMonth: '2026-01', endMonth: '2026-12', memoTypes: [],
+  }).then(() => {
+    const saved = context.loadBudgetPools().find(p => p.id === 'pool-write-path-ce');
+    assert.equal(saved.startMonth, '2026-01');
+    assert.equal(saved.endMonth, '2026-12');
+    assert.equal(saved.year, '2569');
+  });
+});
+
+test('Phase 7A-9A contract fix: exportBudgetPoolsCSV canonicalizes the unfiltered fallback list (BvA tab not yet rendered), not just the filtered path', () => {
+  const context = createBvaContext();
+  context.loadBudgetPools = () => [
+    { id: 'export-mismatch', project: 'Alpha', name: 'Export Mismatch', budget: 1000, year: '2569', startMonth: '2025-01', endMonth: '2025-12', memoTypes: [] },
+  ];
+  let exported;
+  context._downloadCSV = (filename, headers, rows) => { exported = { filename, headers, rows }; };
+  context.exportBudgetPoolsCSV();
+  assert.equal(exported.rows[0][4], '2568', 'the exported "ปี" column must reflect the canonical derived year, not the stale raw year label');
 });
 
 test('Phase 7A-9A: parseThaiDate still parses Thai month-name, dd/mm/yy, and dd/mm/yyyy BE dates after folding onto the shared financialYearToGregorian() helper', () => {
