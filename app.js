@@ -626,28 +626,39 @@ function calculateBudgetVsActualDataset(pools = [], records = [], filters = {}) 
   const unbudgetedRecords = scopedRecords.filter(record =>
     !getFinalBudgetPoolId(record) && record.budgetStatus === BUDGET_STATUSES.UNBUDGETED
   );
+  // Needs PMO Review records (ambiguous multi-pool matches) never carry a finalBudgetPoolId
+  // (see mapBudgetPool()), so without this bucket they fell through every row filter above AND
+  // the Unbudgeted filter (status check excludes them), silently vanishing from totals.actual.
+  // They must be counted, but kept out of unbudgetedRecords so they are not mislabeled.
+  const needsReviewRecords = scopedRecords.filter(record =>
+    !getFinalBudgetPoolId(record) && record.budgetStatus === BUDGET_STATUSES.NEEDS_PMO_REVIEW
+  );
   const mappedActual = rows.reduce((sum, row) => sum + row.actual, 0);
   const unbudgetedActual = calculateActualSpend(unbudgetedRecords);
+  const needsReviewActual = calculateActualSpend(needsReviewRecords);
   const budget = rows.reduce((sum, row) => sum + row.budget, 0);
-  const actual = mappedActual + unbudgetedActual;
+  const actual = mappedActual + unbudgetedActual + needsReviewActual;
   return {
     filters: { ...filters },
     rows,
     unbudgetedRecords,
+    needsReviewRecords,
     totals: {
       budget,
       actual,
       mappedActual,
       unbudgetedActual,
+      needsReviewActual,
       remaining: budget - actual,
       utilizationPercent: budget > 0 ? actual / budget * 100 : 0,
     },
   };
 }
 
-function budgetVsActualExportDataset(dataset = { rows:[], unbudgetedRecords:[], totals:{} }) {
+function budgetVsActualExportDataset(dataset = { rows:[], unbudgetedRecords:[], needsReviewRecords:[], totals:{} }) {
   const rows = dataset.rows || [];
   const unbudgeted = dataset.unbudgetedRecords || [];
+  const needsReview = dataset.needsReviewRecords || [];
   const detailRows = rows.map(row => [
     row.pool.id, row.pool.project, row.pool.name, row.pool.year,
     (row.pool.spendTypes || []).join(' + '), row.budget, row.actual, row.remaining,
@@ -658,6 +669,13 @@ function budgetVsActualExportDataset(dataset = { rows:[], unbudgetedRecords:[], 
       '', dataset.filters?.project || 'All Projects', 'Unbudgeted', dataset.filters?.year || '',
       '', 0, dataset.totals.unbudgetedActual, -dataset.totals.unbudgetedActual,
       0, unbudgeted.length, 'Unbudgeted',
+    ]);
+  }
+  if (needsReview.length) {
+    detailRows.push([
+      '', dataset.filters?.project || 'All Projects', 'Needs PMO Review', dataset.filters?.year || '',
+      '', 0, dataset.totals.needsReviewActual, -dataset.totals.needsReviewActual,
+      0, needsReview.length, 'Needs PMO Review',
     ]);
   }
   return {

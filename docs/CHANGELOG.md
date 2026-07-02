@@ -22,6 +22,50 @@
 
 ## Current Baseline
 
+### Phase 7A-4 - Fix BvA Needs PMO Review Total Drop
+#### Fixed
+- `calculateBudgetVsActualDataset()` (`app.js`) no longer silently drops the amount of Actual Spend
+  records whose `budgetStatus` is `Needs PMO Review` from `totals.actual`. Previously, such records
+  always have `finalBudgetPoolId = null` (see `mapBudgetPool()`) but were only ever tested against
+  the `unbudgetedRecords` filter (`budgetStatus === 'Unbudgeted'`), so they matched neither a pool
+  row nor the Unbudgeted bucket and vanished from the grand total entirely the moment an Actual
+  Spend record matched more than one overlapping Budget Pool — a state the app explicitly supports
+  and warns about at Budget Pool save time.
+
+#### Changed
+- `calculateBudgetVsActualDataset()` now returns an additional `needsReviewRecords` array and
+  `totals.needsReviewActual`, computed the same way as the existing `unbudgetedRecords` /
+  `totals.unbudgetedActual` pair but filtered on `budgetStatus === 'Needs PMO Review'` instead.
+  `totals.actual` is now `mappedActual + unbudgetedActual + needsReviewActual`.
+- `budgetVsActualExportDataset()` now emits an additional "Needs PMO Review" summary row (mirroring
+  the existing "Unbudgeted" summary row) whenever `needsReviewRecords` is non-empty, so the CSV
+  export's row-level Actual Spend column still sums to the dataset's grand total.
+
+#### Unchanged
+- No cross-year / cross-project mapping rule, Manual Entry behavior, Forecast, Overview, Import, Tag
+  Budget, or Supabase migration was modified. `mapBudgetPool()`, `findMatchingBudgetPools()`, and
+  `calculateForecast()` are untouched — Forecast continues to ignore `budgetStatus` entirely.
+- The existing `outOfScopePoolRecords` case (an Actual Spend record whose `finalBudgetPoolId` points
+  to a pool outside the currently filtered `pools`/`selectedPools` scope) is intentionally not
+  addressed here; it is a separate, distinct gap from the Needs PMO Review bucket and out of scope
+  for this focused fix.
+
+#### Tests
+- Added to `tests/financial-models.test.js` (Phase 7A-4 section): a Needs PMO Review record is
+  counted in `totals.actual`; it is excluded from `unbudgetedRecords`/`totals.unbudgetedActual`; it
+  has its own `needsReviewRecords`/`totals.needsReviewActual` bucket; Mapped, Unbudgeted, and Needs
+  PMO Review records are each counted exactly once with no double counting across buckets; BvA
+  export includes a Needs PMO Review summary row and export totals still equal dataset totals; a
+  Phase 7A-3 cross-year/cross-project blocked override still lands in Unbudgeted (not reclassified
+  as Needs PMO Review); Forecast remains unaffected by the new bucket.
+
+#### Remaining Work
+- UI follow-up (not part of this data-layer fix): the Budget vs Actual page rendering and its
+  drill-down UI in `views/budget.js` do not yet have a dedicated visual section for
+  `needsReviewRecords` the way they do for `unbudgetedRecords`; a future UI-focused phase should
+  surface the new bucket distinctly on screen. Data totals are correct now regardless of that UI gap.
+- The `outOfScopePoolRecords` scenario noted above remains a known, separate gap for a future phase.
+
 ### Phase 7A-3 - Same-Year Budget Pool Mapping Contract
 #### Follow-up fixes (cross-project Manual Override guard)
 - Manual Override must now match both project and year, not year alone. Previously

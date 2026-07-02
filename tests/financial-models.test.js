@@ -198,7 +198,7 @@ test('Phase 7 Budget Pool create and edit immediately recalculate BvA totals fro
   const edited = ctx.createBudgetPoolRecord({ ...created, budget:12000 });
   const after = ctx.calculateBudgetVsActualDataset([edited], [spend], { year:'2569' });
   assert.deepEqual(JSON.parse(JSON.stringify(before.totals)), {
-    budget:10000, actual:2500, mappedActual:2500, unbudgetedActual:0, remaining:7500, utilizationPercent:25,
+    budget:10000, actual:2500, mappedActual:2500, unbudgetedActual:0, needsReviewActual:0, remaining:7500, utilizationPercent:25,
   });
   assert.equal(after.totals.remaining, 9500);
   assert.equal(after.totals.utilizationPercent, 2500 / 12000 * 100);
@@ -820,4 +820,137 @@ test('batch mapping re-evaluates unbudgeted records without replacing manual ove
   const mapped = ctx.mapActualSpendRecords(records, [pool]);
   assert.equal(mapped[0].finalBudgetPoolId, 'pool-1');
   assert.equal(mapped[1].finalBudgetPoolId, 'manual-pool');
+});
+
+// ── Phase 7A-4: BvA must not drop Needs PMO Review Actual Spend from totals ──
+// Locked business rule (docs/BvA_REQUIREMENT.md "Financial Invariants" / "Equality Rules"): every
+// in-scope Actual Spend record must be counted exactly once in Budget vs Actual totals.actual,
+// regardless of its budgetStatus bucket. Before this fix, calculateBudgetVsActualDataset()'s
+// unbudgetedRecords filter checked `budgetStatus === 'Unbudgeted'` specifically, and mappedActual
+// only summed rows scoped to a pool the record's finalBudgetPoolId pointed to — so a record whose
+// budgetStatus was 'Needs PMO Review' (finalBudgetPoolId always null, see mapBudgetPool()) matched
+// neither bucket and silently vanished from totals.actual entirely.
+
+test('Phase 7A-4: a Needs PMO Review record is counted in dataset.totals.actual', () => {
+  const ctx = context();
+  const poolA = ctx.createBudgetPoolRecord({ id:'pool-nr-A', project:'AOA-MP', name:'Pool A', budget:50000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const poolB = ctx.createBudgetPoolRecord({ id:'pool-nr-B', project:'AOA-MP', name:'Pool B', budget:50000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const record = ctx.createActualSpendRecord({ ...base, id:'as-nr-1', referenceNo:'NR-1', amount:1500 });
+  const mapped = ctx.mapBudgetPool(record, [poolA, poolB]);
+  assert.equal(mapped.budgetStatus, 'Needs PMO Review', 'sanity: two overlapping matching pools produce Needs PMO Review');
+  const dataset = ctx.calculateBudgetVsActualDataset([poolA, poolB], [mapped], { year:'2569', project:'AOA-MP' });
+  assert.equal(dataset.totals.actual, 1500, 'a Needs PMO Review amount must never disappear from totals.actual');
+});
+
+test('Phase 7A-4: Needs PMO Review records are not included in unbudgetedRecords / totals.unbudgetedActual', () => {
+  const ctx = context();
+  const poolA = ctx.createBudgetPoolRecord({ id:'pool-nr2-A', project:'AOA-MP', name:'Pool A', budget:50000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const poolB = ctx.createBudgetPoolRecord({ id:'pool-nr2-B', project:'AOA-MP', name:'Pool B', budget:50000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const record = ctx.createActualSpendRecord({ ...base, id:'as-nr-2', referenceNo:'NR-2', amount:1200 });
+  const mapped = ctx.mapBudgetPool(record, [poolA, poolB]);
+  const dataset = ctx.calculateBudgetVsActualDataset([poolA, poolB], [mapped], { year:'2569', project:'AOA-MP' });
+  assert.equal(dataset.unbudgetedRecords.length, 0, 'a Needs PMO Review record must not be mislabeled as Unbudgeted');
+  assert.equal(dataset.totals.unbudgetedActual, 0);
+});
+
+test('Phase 7A-4: Needs PMO Review has its own dataset bucket and total', () => {
+  const ctx = context();
+  const poolA = ctx.createBudgetPoolRecord({ id:'pool-nr3-A', project:'AOA-MP', name:'Pool A', budget:50000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const poolB = ctx.createBudgetPoolRecord({ id:'pool-nr3-B', project:'AOA-MP', name:'Pool B', budget:50000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const record = ctx.createActualSpendRecord({ ...base, id:'as-nr-3', referenceNo:'NR-3', amount:900 });
+  const mapped = ctx.mapBudgetPool(record, [poolA, poolB]);
+  const dataset = ctx.calculateBudgetVsActualDataset([poolA, poolB], [mapped], { year:'2569', project:'AOA-MP' });
+  assert.deepEqual(Array.from(dataset.needsReviewRecords, r => r.id), ['as-nr-3']);
+  assert.equal(dataset.totals.needsReviewActual, 900);
+});
+
+test('Phase 7A-4: Mapped, Unbudgeted, and Needs PMO Review records are each counted exactly once, with no double counting', () => {
+  const ctx = context();
+  const pool = ctx.createBudgetPoolRecord({ id:'pool-nr4-single', project:'AOA-MP', name:'Single Match', budget:100000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const poolOverlapA = ctx.createBudgetPoolRecord({ id:'pool-nr4-A', project:'AOA-MP', name:'Overlap A', budget:50000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Hardware'] });
+  const poolOverlapB = ctx.createBudgetPoolRecord({ id:'pool-nr4-B', project:'AOA-MP', name:'Overlap B', budget:50000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Hardware'] });
+  const allPools = [pool, poolOverlapA, poolOverlapB];
+
+  const mappedRecord = ctx.mapBudgetPool(ctx.createActualSpendRecord({ ...base, id:'as-mapped', referenceNo:'M-1', amount:1000 }), allPools);
+  const unbudgetedRecord = ctx.mapBudgetPool(ctx.createActualSpendRecord({ ...base, id:'as-unbudgeted', referenceNo:'U-1', amount:2000, project:'NO-POOL-PRJ' }), allPools);
+  const needsReviewRecord = ctx.mapBudgetPool(ctx.createActualSpendRecord({ ...base, id:'as-review', referenceNo:'R-1', amount:3000, spendType:'Hardware' }), allPools);
+
+  assert.equal(mappedRecord.budgetStatus, 'Mapped');
+  assert.equal(unbudgetedRecord.budgetStatus, 'Unbudgeted');
+  assert.equal(needsReviewRecord.budgetStatus, 'Needs PMO Review');
+
+  const dataset = ctx.calculateBudgetVsActualDataset(allPools, [mappedRecord, unbudgetedRecord, needsReviewRecord], { year:'2569' });
+
+  assert.equal(dataset.totals.mappedActual, 1000);
+  assert.equal(dataset.totals.unbudgetedActual, 2000);
+  assert.equal(dataset.totals.needsReviewActual, 3000);
+  assert.equal(dataset.totals.actual, 6000, 'total must equal the sum of every bucket exactly once');
+
+  const allBucketedRecords = [
+    ...dataset.rows.flatMap(row => row.records),
+    ...dataset.unbudgetedRecords,
+    ...dataset.needsReviewRecords,
+  ];
+  assert.equal(allBucketedRecords.length, 3, 'each of the three records must appear in exactly one bucket, none duplicated, none missing');
+  assert.deepEqual(allBucketedRecords.map(r => r.id).sort(), ['as-mapped', 'as-review', 'as-unbudgeted']);
+});
+
+test('Phase 7A-4: BvA export includes a Needs PMO Review summary row and export totals still equal dataset totals', () => {
+  const ctx = context();
+  const pool = ctx.createBudgetPoolRecord({ id:'pool-nr5', project:'AOA-MP', name:'Pool', budget:10000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const poolDupA = ctx.createBudgetPoolRecord({ id:'pool-nr5-A', project:'AOA-MP', name:'Dup A', budget:5000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Infra'] });
+  const poolDupB = ctx.createBudgetPoolRecord({ id:'pool-nr5-B', project:'AOA-MP', name:'Dup B', budget:5000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Infra'] });
+  const allPools = [pool, poolDupA, poolDupB];
+
+  const mappedRecord = ctx.mapBudgetPool(ctx.createActualSpendRecord({ ...base, id:'as-exp-mapped', referenceNo:'EXP-M', amount:2500 }), allPools);
+  const unbudgetedRecord = ctx.mapBudgetPool(ctx.createActualSpendRecord({ ...base, id:'as-exp-unbudgeted', referenceNo:'EXP-U', amount:600, project:'NO-POOL-PRJ' }), allPools);
+  const needsReviewRecord = ctx.mapBudgetPool(ctx.createActualSpendRecord({ ...base, id:'as-exp-review', referenceNo:'EXP-R', amount:1800, spendType:'Infra' }), allPools);
+
+  const dataset = ctx.calculateBudgetVsActualDataset(allPools, [mappedRecord, unbudgetedRecord, needsReviewRecord], { year:'2569' });
+  const exported = ctx.budgetVsActualExportDataset(dataset);
+
+  assert.equal(exported.totals.actual, dataset.totals.actual);
+  assert.equal(exported.totals.actual, 4900);
+  assert.equal(
+    exported.rows.reduce((sum, row) => sum + Number(row[6]), 0), dataset.totals.actual,
+    'export row-level Actual Spend column must still sum to the dataset grand total, including Needs PMO Review',
+  );
+  const reviewRow = exported.rows.find(row => row[10] === 'Needs PMO Review');
+  assert.ok(reviewRow, 'export must include a Needs PMO Review summary row so its amount is not silently missing from the download');
+  assert.equal(reviewRow[6], 1800);
+  assert.equal(reviewRow[9], 1, 'Items count for the Needs PMO Review summary row');
+});
+
+test('Phase 7A-4 regression: Phase 7A-3 cross-year/cross-project Manual Override blocking still lands in Unbudgeted, not Needs PMO Review', () => {
+  const ctx = context();
+  const poolAOA = ctx.createBudgetPoolRecord({ id:'pool-reg-aoa', project:'AOA-MP', name:'Pool AOA', budget:100000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const poolOther = ctx.createBudgetPoolRecord({ id:'pool-reg-other', project:'OTHER-PRJ', name:'Pool Other', budget:100000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const record = ctx.createActualSpendRecord({
+    id:'as-reg-cross-project', source:'Manual / Historical Expense', referenceNo:'REG-1', project:'AOA-MP',
+    spendType:'Software', amount:4400, startDate:'2026-03-15', endDate:'2026-03-15',
+    manualBudgetPoolId:'pool-reg-other',
+  });
+  const mapped = ctx.mapBudgetPool(record, [poolAOA, poolOther]);
+  assert.equal(mapped.budgetStatus, 'Unbudgeted');
+  assert.equal(mapped.mappingWarning, 'blocked-cross-project-override');
+  const dataset = ctx.calculateBudgetVsActualDataset([poolAOA, poolOther], [mapped], { year:'2569', project:'AOA-MP' });
+  assert.equal(dataset.unbudgetedRecords.length, 1);
+  assert.equal(dataset.needsReviewRecords.length, 0, 'a blocked override must remain Unbudgeted, never reclassified as Needs PMO Review');
+  assert.equal(dataset.totals.unbudgetedActual, 4400);
+  assert.equal(dataset.totals.needsReviewActual, 0);
+  assert.equal(dataset.totals.actual, 4400);
+});
+
+test('Phase 7A-4: Forecast remains unaffected by the new Needs PMO Review bucket', () => {
+  const ctx = context();
+  const poolA = ctx.createBudgetPoolRecord({ id:'pool-fc-nr-A', project:'AOA-MP', name:'Pool A', budget:100000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const poolB = ctx.createBudgetPoolRecord({ id:'pool-fc-nr-B', project:'AOA-MP', name:'Pool B', budget:100000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const record = ctx.createActualSpendRecord({
+    ...base, id:'as-fc-nr-1', referenceNo:'FC-NR-1', amount:12000, startDate:'2026-01', endDate:'2026-12', vendorProgram:'Suite',
+  });
+  const mapped = ctx.mapBudgetPool(record, [poolA, poolB]);
+  assert.equal(mapped.budgetStatus, 'Needs PMO Review', 'sanity: two identical overlapping pools produce Needs PMO Review');
+  const forecast = ctx.calculateForecast([mapped], new Date(2026, 6, 15));
+  assert.equal(forecast.rows.length, 1, 'Forecast eligibility (spendType + coverageStatus) must remain unaffected by budgetStatus, including the new Needs PMO Review bucket');
+  assert.equal(forecast.rows[0].total, 12000);
 });
