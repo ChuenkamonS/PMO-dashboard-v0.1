@@ -2327,7 +2327,7 @@ async function loadBudgetPoolsAsync() {
   }
   return loadBudgetPools();
 }
-async function savePoolAsync(rawPool) {
+async function savePoolAsync(rawPool, opts = {}) {
   // Phase 7A-9A: savePoolAsync() is the single Budget Pool write path (manual save and bulk
   // import both call it) — canonicalize here so startMonth/endMonth/year can never be persisted
   // out of sync with each other, regardless of what the caller computed.
@@ -2348,7 +2348,10 @@ async function savePoolAsync(rawPool) {
       }, '?on_conflict=id');
     } catch(e) { console.warn('Pool save failed', e.message); }
   }
-  remapActualSpendForBudgetPools();
+  // Phase 7A-9C: bulk import saves many pools in a row and remaps once itself afterward — skip the
+  // per-row remap here so an N-pool import doesn't trigger N full Actual Spend remaps. Manual
+  // add/edit (saveBudgetTag / saveBudgetPool) never pass this, so their behavior is unchanged.
+  if (!opts.skipRemap) remapActualSpendForBudgetPools();
 }
 async function deletePoolAsync(id) {
   storeBudgetPools(loadBudgetPools().filter(p => p.id !== id));
@@ -2365,92 +2368,13 @@ function remapActualSpendForBudgetPools() {
   if (records.length) storeActualSpendRecords(mapActualSpendRecords(records, pools));
 }
 
-// ── Auto-match memo → pool ──
-// Priority: 1) direct budgetPoolId  2) budgetSource project  3) memo.project
-function matchMemoToPool(memo, pools) {
-  if (!pools || !pools.length) return null;
-
-  // Priority 1: PMO set a direct pool ID — use it if pool still exists
-  if (memo.budgetPoolId) {
-    const direct = pools.find(p => p.id === memo.budgetPoolId);
-    if (direct) return direct;
-    // Pool was deleted — fall through to auto-match
-  }
-
-  // Priority 2 & 3: auto-match by project + type + date
-  const d = parseThaiDate(memo.date) || new Date(memo.updatedAt || memo.createdAt);
-  const memoKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-  const proj = memo.budgetSource || memo.project || '(ไม่ระบุ)';
-  const type = memo.type;
-
-  const matches = pools.filter(p => {
-    if (p.project !== proj) return false;
-    const types = Array.isArray(p.memoTypes) ? p.memoTypes : [];
-    if (types.length > 0 && !types.includes(type)) return false;
-    if (p.startMonth && memoKey < p.startMonth) return false;
-    if (p.endMonth   && memoKey > p.endMonth)   return false;
-    return true;
-  });
-  if (!matches.length) return null;
-  return matches.sort((a, b) => {
-    const aLen = a.startMonth && a.endMonth
-      ? (new Date(a.endMonth+'-01') - new Date(a.startMonth+'-01')) : Infinity;
-    const bLen = b.startMonth && b.endMonth
-      ? (new Date(b.endMonth+'-01') - new Date(b.startMonth+'-01')) : Infinity;
-    return aLen - bLen;
-  })[0];
-}
-
-// ── Auto-tag a completed memo to the best matching pool ──
-// Called from app.js updateMemoStatusAsync when status becomes completed
-// Only runs if memo.budgetPoolId is not already set (respect PMO manual tag)
-// Returns updated memo if pool found, null otherwise
-function autoTagBudgetPool(memo) {
-  const pools = loadBudgetPools();
-  if (!pools.length) return null;
-  const matched = matchMemoToPool(memo, pools);
-  if (!matched) return null;
-  const memos = loadMemos();
-  const idx   = memos.findIndex(m => m.memoNo === memo.memoNo);
-  if (idx < 0) return null;
-  const updated = {
-    ...memos[idx],
-    budgetPoolId: matched.id,
-    budgetSource: matched.project,
-    updatedAt: new Date().toISOString(),
-  };
-  memos[idx] = updated;
-  storeMemos(memos);
-  return updated;
-}
-
-// Get memos that belong to this pool
-// Pass allPools so narrower pool wins over wider — memo goes to the narrowest match
-function getPoolMemos(pool, approvedMemos, allPools) {
-  if (!pool || !approvedMemos) return [];
-  const pools = (Array.isArray(allPools) && allPools.length) ? allPools : [pool];
-  return approvedMemos.filter(m => {
-    const best = matchMemoToPool(m, pools);
-    return best && best.id === pool.id;
-  });
-}
-
-// Get actual spend for a pool
-function getPoolActual(pool, approvedMemos, allPools) {
-  const memoActual = getPoolMemos(pool, approvedMemos, allPools)
-    .reduce((s, m) => s + (Number(m.total) || 0), 0);
-  const manualActual = activeManualExpenses()
-    .filter(e => {
-      if (e.budgetPoolId) return e.budgetPoolId === pool.id;
-      if (e.project !== pool.project) return false;
-      const types = Array.isArray(pool.memoTypes) ? pool.memoTypes : [];
-      return !types.length || types.includes(e.expenseType);
-    })
-    .reduce((sum, e) => sum + manualExpenseOccurrences(e)
-      .filter(o => (!pool.startMonth || o.month >= pool.startMonth) && (!pool.endMonth || o.month <= pool.endMonth))
-      .reduce((s, o) => s + o.amount, 0), 0);
-  return memoActual + manualActual;
-}
+// Phase 7A-9C (TD-7A-02): matchMemoToPool(), autoTagBudgetPool(), getPoolMemos(), and
+// getPoolActual() were a second, parallel memo→pool matching implementation (narrowest-pool-wins
+// tie-break, no pool.year check) that disagreed with the canonical findMatchingBudgetPools()/
+// mapBudgetPool() (app.js) on ambiguous multi-match handling. Removed after confirming zero
+// remaining callers: autoTagBudgetPool() and getPoolMemos()/getPoolActual() had none at all; Tag
+// Budget (views/history.js openBudgetTagModal()) now reads the canonical Actual Spend record's
+// autoBudgetPoolId/finalBudgetPoolId via getFinalBudgetPoolId() instead of recomputing a match.
 
 // ══════════════════════════════════════════
 // TAB: BUDGET VS ACTUAL
@@ -2923,6 +2847,10 @@ function downloadBudgetPoolTemplate() {
 // ══════════════════════════════════════════════════════════════════
 // BUDGET POOL — EXCEL BULK UPLOAD
 // ══════════════════════════════════════════════════════════════════
+// Phase 7A-9C: parsing only — every field-level, duplicate, and overlap check is delegated to the
+// shared validateBudgetPoolImportBatch() (app.js), the same canonical validator manual add/edit
+// uses. Import is strict all-or-nothing: if any row fails, nothing is imported (see
+// _showPoolImportErrors below) — there is no partial-success path.
 async function handlePoolBulkUpload(input) {
   const file = input.files[0];
   if (!file) return;
@@ -2941,10 +2869,8 @@ async function handlePoolBulkUpload(input) {
 
   if (!rows.length) { alert('ไม่พบข้อมูลในไฟล์'); return; }
 
-  const year = document.getElementById('bset-year')?.value || '2569';
-  const valid = [], errors = [];
-
-  rows.forEach((row, i) => {
+  const defaultYear = document.getElementById('bset-year')?.value || '2569';
+  const parsed = rows.map(row => {
     const keys = Object.keys(row);
     const get  = prefix => {
       const key = keys.find(k => k.toLowerCase().replace(/[\s(]/g,'').startsWith(prefix.toLowerCase().replace(/[\s(]/g,'')));
@@ -2952,34 +2878,73 @@ async function handlePoolBulkUpload(input) {
     };
     const proj   = get('project');
     const name   = get('poolname') || get('pool');
-    const budget = parseFloat(String(get('budget')).replace(/[^0-9.]/g,'')) || 0;
-    const yr     = get('year') || year;
+    // Preserve the sign — a mistyped negative budget must be REJECTED by validation, not silently
+    // flipped positive by stripping the minus sign (Phase 7A-9C bug fix).
+    const budget = parseFloat(String(get('budget')).replace(/[^0-9.\-]/g,'')) || 0;
+    const yr     = get('year') || defaultYear;
     const start  = get('startmonth') || get('start') || null;
     const end    = get('endmonth')   || get('end')   || null;
     const typesRaw = get('memotypes') || get('memo') || '';
     const memoTypes = typesRaw
       ? typesRaw.split(/[,;|\s]+/).map(t => t.trim().toLowerCase()).filter(t => ['sl','hw','int','ent','dep'].includes(t))
       : [];
-
-    if (!proj)   { errors.push('Row ' + (i+2) + ': Missing Project');   return; }
-    if (!name)   { errors.push('Row ' + (i+2) + ': Missing Pool Name'); return; }
-    if (!budget) { errors.push('Row ' + (i+2) + ': Missing Budget');    return; }
-
-    valid.push({ proj, name, budget, yr, start: start||null, end: end||null, memoTypes });
+    return { proj, name, budget, yr, start, end, memoTypes };
   });
 
-  if (errors.length) {
-    alert('พบข้อผิดพลาด ' + errors.length + ' รายการ:\n' + errors.slice(0,5).join('\n') + (errors.length > 5 ? '\n...' : ''));
-    if (!valid.length) return;
-    if (!confirm('มีข้อมูลที่ถูกต้อง ' + valid.length + ' รายการ — ต้องการ import ต่อไหม?')) return;
-  } else {
-    if (!confirm('พบข้อมูล ' + valid.length + ' pool — ยืนยัน import?')) return;
+  const result = validateBudgetPoolImportBatch(parsed, loadBudgetPools());
+  if (!result.valid) {
+    _showPoolImportErrors(result.rowResults);
+    return;
   }
-
-  _showPoolImportPreview(valid, year);
+  _showPoolImportPreview(result.rowResults);
 }
 
-function _showPoolImportPreview(items, year) {
+function _showPoolImportErrors(rowResults) {
+  document.getElementById('pool-import-preview')?.remove();
+  document.getElementById('pool-import-errors')?.remove();
+
+  const modal = document.createElement('div');
+  modal.id    = 'pool-import-errors';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:400;display:flex;align-items:center;justify-content:center';
+
+  const tdS = 'padding:7px 12px;border-bottom:1px solid var(--border);font-size:11px';
+  const errorRows = rowResults.filter(r => !r.ok);
+  const rows = errorRows.map(r =>
+    '<tr>' +
+      '<td style="' + tdS + '">' + r.row + '</td>' +
+      '<td style="' + tdS + '">' + esc(r.input?.proj || '') + '</td>' +
+      '<td style="' + tdS + '">' + esc(r.input?.name || '') + '</td>' +
+      '<td style="' + tdS + ';color:var(--red)">' + r.errors.map(esc).join('<br>') + '</td>' +
+    '</tr>'
+  ).join('');
+
+  modal.innerHTML =
+    '<div class="card" style="width:760px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;padding:0;overflow:hidden">' +
+      '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">' +
+        '<span style="font-size:15px;font-weight:700;color:var(--red)">พบข้อผิดพลาด ' + errorRows.length + ' รายการ — ไม่มีการ import</span>' +
+        '<button class="btn-sm" onclick="document.getElementById(\'pool-import-errors\').remove()" style="padding:4px 10px">✕</button>' +
+      '</div>' +
+      '<div style="padding:12px 20px;font-size:12px;color:var(--text-3)">Budget Pool import เป็นแบบ all-or-nothing — หากมีแถวที่ผิดพลาดแม้เพียงรายการเดียว ระบบจะไม่ import รายการใดเลย กรุณาแก้ไขไฟล์แล้วอัปโหลดใหม่</div>' +
+      '<div style="overflow:auto;flex:1">' +
+        '<table class="hist-table" style="min-width:680px">' +
+          '<thead><tr>' +
+            '<th style="' + tdS + '">Row</th>' +
+            '<th style="' + tdS + '">Project</th>' +
+            '<th style="' + tdS + '">Pool Name</th>' +
+            '<th style="' + tdS + '">ปัญหา</th>' +
+          '</tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table>' +
+      '</div>' +
+      '<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px">' +
+        '<button class="btn-primary" onclick="document.getElementById(\'pool-import-errors\').remove()">ปิด</button>' +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(modal);
+}
+
+function _showPoolImportPreview(rowResults) {
   document.getElementById('pool-import-preview')?.remove();
 
   const modal = document.createElement('div');
@@ -2987,25 +2952,29 @@ function _showPoolImportPreview(items, year) {
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:400;display:flex;align-items:center;justify-content:center';
 
   const tdS  = 'padding:7px 12px;border-bottom:1px solid var(--border);font-size:11px';
-  const rows = items.map(it =>
-    '<tr>' +
-      '<td style="' + tdS + '">' + esc(it.proj) + '</td>' +
-      '<td style="' + tdS + '">' + esc(it.name) + '</td>' +
-      '<td style="' + tdS + ';text-align:right">' + money(it.budget) + '</td>' +
-      '<td style="' + tdS + '">' + esc(it.yr) + '</td>' +
-      '<td style="' + tdS + '">' + esc(it.start || '—') + ' → ' + esc(it.end || '—') + '</td>' +
-      '<td style="' + tdS + '">' + (it.memoTypes.length ? it.memoTypes.map(t => t.toUpperCase()).join(', ') : 'ทุกประเภท') + '</td>' +
-    '</tr>'
-  ).join('');
+  const rows = rowResults.map(r => {
+    const p = r.record;
+    const actionLabel = r.action === 'update' ? 'อัปเดต' : 'สร้างใหม่';
+    const actionColor = r.action === 'update' ? 'var(--amber-800)' : 'var(--green-800)';
+    return '<tr>' +
+      '<td style="' + tdS + '">' + esc(p.project) + '</td>' +
+      '<td style="' + tdS + '">' + esc(p.name) + '</td>' +
+      '<td style="' + tdS + ';text-align:right">' + money(p.budget) + '</td>' +
+      '<td style="' + tdS + '">' + esc(p.year) + '</td>' +
+      '<td style="' + tdS + '">' + esc(formatMonthBE(p.startMonth) || '—') + ' → ' + esc(formatMonthBE(p.endMonth) || '—') + '</td>' +
+      '<td style="' + tdS + '">' + (p.memoTypes.length ? p.memoTypes.map(t => t.toUpperCase()).join(', ') : 'ทุกประเภท') + '</td>' +
+      '<td style="' + tdS + ';color:' + actionColor + ';font-weight:600">' + actionLabel + '</td>' +
+    '</tr>';
+  }).join('');
 
   modal.innerHTML =
-    '<div class="card" style="width:700px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;padding:0;overflow:hidden">' +
+    '<div class="card" style="width:760px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;padding:0;overflow:hidden">' +
       '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">' +
-        '<span style="font-size:15px;font-weight:700">Preview — Budget Pool Import (' + items.length + ' รายการ)</span>' +
+        '<span style="font-size:15px;font-weight:700">Preview — Budget Pool Import (' + rowResults.length + ' รายการ ผ่านการตรวจสอบทั้งหมด)</span>' +
         '<button class="btn-sm" onclick="document.getElementById(\'pool-import-preview\').remove()" style="padding:4px 10px">✕</button>' +
       '</div>' +
       '<div style="overflow:auto;flex:1">' +
-        '<table class="hist-table" style="min-width:600px">' +
+        '<table class="hist-table" style="min-width:680px">' +
           '<thead><tr>' +
             '<th style="' + tdS + '">Project</th>' +
             '<th style="' + tdS + '">Pool Name</th>' +
@@ -3013,6 +2982,7 @@ function _showPoolImportPreview(items, year) {
             '<th style="' + tdS + '">ปี</th>' +
             '<th style="' + tdS + '">ช่วงเวลา</th>' +
             '<th style="' + tdS + '">Memo Types</th>' +
+            '<th style="' + tdS + '">การดำเนินการ</th>' +
           '</tr></thead>' +
           '<tbody>' + rows + '</tbody>' +
         '</table>' +
@@ -3024,23 +2994,21 @@ function _showPoolImportPreview(items, year) {
     '</div>';
 
   document.body.appendChild(modal);
-  window._poolImportPending = { items, year };
+  window._poolImportPending = rowResults;
 }
 
 async function _confirmPoolImport() {
-  const { items, year } = window._poolImportPending || {};
-  if (!items) return;
+  const rowResults = window._poolImportPending;
+  if (!rowResults) return;
 
-  const existing = loadBudgetPools();
   let created = 0, updated = 0;
-
-  for (const it of items) {
-    const match = existing.find(p => p.project === it.proj && p.name === it.name && p.year === it.yr);
-    const id    = match?.id || ('pool-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2,5).toUpperCase());
-    const entry = { id, project: it.proj, name: it.name, budget: it.budget, year: it.yr, startMonth: it.start, endMonth: it.end, memoTypes: it.memoTypes };
-    await savePoolAsync(entry);
-    if (match) updated++; else created++;
+  // Phase 7A-9C: save every row with remap suppressed, then remap once at the end — the previous
+  // per-row savePoolAsync() triggered a full Actual Spend remap on every single imported pool.
+  for (const r of rowResults) {
+    await savePoolAsync(r.record, { skipRemap: true });
+    if (r.action === 'update') updated++; else created++;
   }
+  remapActualSpendForBudgetPools();
 
   document.getElementById('pool-import-preview')?.remove();
   window._poolImportPending = null;

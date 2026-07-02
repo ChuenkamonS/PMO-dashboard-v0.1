@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "pmo-dashboard",
+      "runtimeExecutable": "/opt/homebrew/bin/node",
+      "runtimeArgs": ["/private/tmp/claude-501/-Users-chuenklommon-Documents-GitHub-PMO-dashboard-v0-1/67bbe219-257b-40ed-bddd-1a4060e03812/scratchpad/static-server.js", "/Users/chuenklommon/Documents/GitHub/PMO-dashboard-v0.1", "8743"],
+      "port": 8743
+    }
+  ]
+}

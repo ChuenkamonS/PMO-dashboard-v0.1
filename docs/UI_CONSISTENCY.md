@@ -371,16 +371,42 @@ Explicitly deferred out of 7A-9B (approved decisions):
   `budgetPoolId` reference gap
 - Export format/terminology → reviewed later
 
-## 7A-9C
+## 7A-9C (completed, scope as approved)
 
-Bulk upload and management.
+Budget Pool Bulk Upload validation redesign and TD-7A-02 closure.
 
-Expected scope:
+Delivered:
 
-- import preview
-- validation report
-- duplicate detection
-- BE/CE normalization in template/import
+- Import preview (New/Update tagged) shown only when the entire batch validates.
+- Validation report (error report modal, per-row reasons) shown when any row fails.
+- Duplicate detection — within the same file (including two rows both matching the same existing
+  pool) and against existing pools, using the canonical derived year rather than the raw imported
+  year cell.
+- Overlap/shared-Spend-Type conflict detection, escalated to a hard failure for import (stricter
+  than the manual single-save confirm-through warning).
+- Negative-budget sign-stripping bug fixed (rejected via shared validation, not coerced positive).
+- Batch remap runs once per import, not once per pool.
+- TD-7A-02 closed: Tag Budget reads the canonical Actual Spend assignment result instead of running
+  its own separate matching implementation.
+
+Explicitly deferred out of 7A-9C (approved decisions, see the Phase 7A-9C design review):
+
+- Budget Pool Lifecycle (Active/Archived) and Archive-as-delete-alternative — found to require a
+  Supabase `status` column to persist reliably across users/devices (Supabase is live;
+  `loadBudgetPoolsAsync()` overwrites the local pool cache from Supabase on every refresh with no
+  status field), and no Supabase migration was approved this phase. Moves to a future phase gated on
+  TD-7A-06 (baseline migration + schema audit).
+- Inactive status (not part of the approved 2-state Active/Archived design either, when it ships).
+- Delete-to-Unbudgeted cascade — remains explicitly out of scope; hard block is unchanged.
+- The `budget_manual_expenses` FK `on delete set null` vs. app hard-block mismatch — documented as
+  TD-7A-08, not fixed.
+- Health Dashboard, orphan-assignment detection → 7A-9D.
+- Full Project Dropdown migration (TD-7A-07), Overview legacy budget cleanup (TD-7A-03) — unrelated
+  subsystems, untouched.
+- BE/CE normalization in the template/import: already covered — `validateBudgetPoolImportBatch()`
+  derives identity from the canonical (Gregorian-normalized) year via `createBudgetPoolRecord()`
+  regardless of the raw imported year cell's era, so a mismatched cell cannot bypass duplicate
+  detection.
 
 ## 7A-9D
 

@@ -979,6 +979,21 @@ function openBudgetTagModal(memoNo) {
     : [];
   const allMemos   = typeof loadMemos === 'function' ? loadMemos().filter(m => m.status === 'completed') : [];
 
+  // Phase 7A-9C (TD-7A-02): read the canonical Actual Spend mapping result for each memo instead
+  // of recomputing a match — the removed legacy pool-matching helper had its own narrowest-pool
+  // tie-break that disagreed with the canonical findMatchingBudgetPools()/mapBudgetPool() (app.js)
+  // on ambiguous multi-match handling. Ambiguous matches now correctly show as no auto-match here
+  // too (Needs PMO Review), the same as everywhere else in the app, instead of silently guessing.
+  const actualSpendByMemo = new Map(
+    (typeof loadActualSpendRecords === 'function' ? loadActualSpendRecords() : [])
+      .filter(record => record.memoId)
+      .map(record => [record.memoId, record])
+  );
+  function effectivePoolId(m) {
+    const record = actualSpendByMemo.get(m.memoNo);
+    return record && typeof getFinalBudgetPoolId === 'function' ? getFinalBudgetPoolId(record) : null;
+  }
+
   // Current year (BE) for default filter
   const currentYear = getCurrentBuddhistYear();
   const yearKey     = 'btm-year-filter-' + memoNo;
@@ -994,23 +1009,11 @@ function openBudgetTagModal(memoNo) {
     // Compute budget used per pool
     function poolUsed(pool) {
       return allMemos
-        .filter(m => {
-          if (m.budgetPoolId === pool.id) return true;
-          // Also count auto-matched memos that don't have a direct pool ID
-          if (!m.budgetPoolId && typeof matchMemoToPool === 'function') {
-            const match = matchMemoToPool(m, allPools);
-            return match && match.id === pool.id;
-          }
-          return false;
-        })
+        .filter(m => effectivePoolId(m) === pool.id)
         .reduce((s, m) => s + (Number(m.total) || 0), 0);
     }
 
-    const currentPoolId = memo.budgetPoolId || (
-      typeof matchMemoToPool === 'function'
-        ? (matchMemoToPool(memo, allPools) || {}).id
-        : null
-    );
+    const currentPoolId = memo.budgetPoolId || effectivePoolId(memo);
 
     const optContainer = document.getElementById('btm-options');
     if (!optContainer) return;
@@ -1073,8 +1076,8 @@ function openBudgetTagModal(memoNo) {
   }
 
   // ── Build modal header ──
-  const autoMatch = typeof matchMemoToPool === 'function'
-    ? matchMemoToPool(memo, allPools) : null;
+  const autoMatchPoolId = (actualSpendByMemo.get(memo.memoNo) || {}).autoBudgetPoolId || null;
+  const autoMatch = autoMatchPoolId ? allPools.find(p => p.id === autoMatchPoolId) : null;
   const { source: curSource, isAuto } = getEffectiveBudgetSource(memo);
 
   document.getElementById('btm-memo-no').textContent = memo.memoNo;

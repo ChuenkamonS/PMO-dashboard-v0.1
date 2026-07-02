@@ -313,6 +313,78 @@ function validateBudgetPoolChange(input, existingPools = [], editId = null) {
   return { valid: errors.length === 0, errors, conflicts, record };
 }
 
+// Phase 7A-9C: Budget Pool bulk import validation. Reuses validateBudgetPoolChange() row-by-row —
+// no separate validation/duplicate engine — against a context that grows with every row already
+// accepted earlier in the SAME batch, so two identical rows in one file are caught by the exact
+// same duplicate check that already protects manual add/edit, not just rows vs. pre-existing pools.
+// Import is strict all-or-nothing (docs/BvA_REQUIREMENT.md "Phase 7A-1" §7/§8, TD-7A-04): a
+// row-level overlap conflict — merely a confirmable warning in the manual single-save flow — is
+// escalated to a hard failure here, since Budget Pool is master data and there is no per-row
+// "confirm through it" UI in a batch import.
+function validateBudgetPoolImportBatch(rows, existingPools = []) {
+  const canonicalExisting = existingPools.map(createBudgetPoolRecord);
+  const accepted = [];
+  const claimedIds = new Set();
+  const rowResults = [];
+  let valid = true;
+
+  (rows || []).forEach((row, index) => {
+    const rowNumber = index + 2; // header is row 1, matching the template's own row numbering
+    const candidate = createBudgetPoolRecord({
+      project: row.proj,
+      name: row.name,
+      budget: row.budget,
+      year: row.yr,
+      startMonth: row.start,
+      endMonth: row.end,
+      memoTypes: row.memoTypes,
+    });
+    // Identity match is against REAL existing pools only (never against another batch row's own
+    // freshly-generated id) — this decides New vs. Update classification.
+    const existingMatch = canonicalExisting.find(pool =>
+      pool.project === candidate.project &&
+      pool.name.trim().toLowerCase() === candidate.name.trim().toLowerCase() &&
+      String(pool.year || '') === String(candidate.year || '')
+    );
+    // Two rows in the same file both resolving to the SAME existing pool (both would classify as
+    // "update" against it) is exactly as much a duplicate as two rows both creating the same new
+    // identity — without this check, validateBudgetPoolChange's own comparison would exclude this
+    // pool's id from "others" for BOTH rows (each treats it as "the pool I'm updating") and neither
+    // row would ever see the other as a duplicate.
+    if (existingMatch && claimedIds.has(existingMatch.id)) {
+      valid = false;
+      rowResults.push({
+        row: rowNumber, ok: false,
+        errors: ['Duplicate Budget Pool for Project, Pool Name, and Year (already targeted by an earlier row in this file)'],
+        input: row,
+      });
+      return;
+    }
+    const id = existingMatch
+      ? existingMatch.id
+      : `pool-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}-${index}`;
+    const context = canonicalExisting.concat(accepted);
+    const result = validateBudgetPoolChange({ ...candidate, id }, context, existingMatch ? existingMatch.id : null);
+    const errors = [...result.errors];
+    if (result.conflicts.length) {
+      errors.push(
+        'Overlaps existing Budget Pool(s) sharing a Spend Type: ' +
+        result.conflicts.map(pool => `${pool.project} / ${pool.name}`).join(', ')
+      );
+    }
+    if (errors.length) {
+      valid = false;
+      rowResults.push({ row: rowNumber, ok: false, errors, input: row });
+      return;
+    }
+    claimedIds.add(id);
+    accepted.push(result.record);
+    rowResults.push({ row: rowNumber, ok: true, record: result.record, action: existingMatch ? 'update' : 'create' });
+  });
+
+  return { valid, rowResults, records: valid ? accepted : [] };
+}
+
 function budgetPoolDeletionBlockers(poolId, records = [], manualExpenses = [], memos = []) {
   // A cross-year Manual Override being blocked (Phase 7A-3) clears the CANONICAL Actual Spend
   // record's manualBudgetPoolId/finalBudgetPoolId — but it never touches the underlying manual

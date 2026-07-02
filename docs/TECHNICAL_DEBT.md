@@ -114,7 +114,7 @@ Duplicate Budget Pool Matching Logic
 
 Status
 
-OPEN
+CLOSED (Phase 7A-9C)
 
 Priority
 
@@ -124,9 +124,9 @@ Owner Phase
 
 Tag Budget Canonicalization
 
-Current Situation
+Original Situation
 
-Budget matching exists in two implementations.
+Budget matching existed in two implementations.
 
 Canonical
 
@@ -145,11 +145,24 @@ Risk
 
 UI preview may disagree with canonical mapping.
 
-Exit Criteria
+Resolution (Phase 7A-9C)
 
-- Tag Budget modal uses canonical mapping only.
-- matchMemoToPool() removed.
-- Regression tests pass.
+Tag Budget (`openBudgetTagModal()`, `views/history.js`) no longer recomputes a match at all. It
+reads the memo's own canonical Actual Spend record (`loadActualSpendRecords().find(r => r.memoId
+=== memo.memoNo)`) and derives the effective/auto-match pool via the existing `getFinalBudgetPoolId()`
+(app.js) and the record's `autoBudgetPoolId`. `matchMemoToPool()`, and the already-dead
+`autoTagBudgetPool()` / `getPoolMemos()` / `getPoolActual()` (confirmed zero remaining callers by
+repo-wide search before removal), were deleted from `views/budget.js`.
+
+This also closes the narrowest-pool-wins vs. `Needs PMO Review` disagreement: Tag Budget now
+follows the canonical ambiguous-multi-match result (no auto-match shown) instead of silently
+guessing a pool.
+
+Exit Criteria (met)
+
+- [x] Tag Budget modal uses canonical mapping only (reads canonical Actual Spend, never recomputes).
+- [x] matchMemoToPool() removed.
+- [x] Regression tests pass (`tests/financial-models.test.js`, `tests/budget-expenses.test.js`).
 
 ---
 
@@ -200,7 +213,7 @@ Budget Pool Bulk Import Validation
 
 Status
 
-OPEN
+CLOSED (Phase 7A-9C)
 
 Priority
 
@@ -210,11 +223,11 @@ Owner Phase
 
 Budget Pool Validation
 
-Current Situation
+Original Situation
 
-Bulk import bypasses
-
-validateBudgetPoolChange()
+Bulk import bypassed `validateBudgetPoolChange()`, used a case-sensitive, single-row-only duplicate
+check, had no overlap-conflict detection, allowed partial-success imports, and silently coerced a
+negative budget positive by stripping the minus sign during parsing.
 
 Risk
 
@@ -222,9 +235,27 @@ Duplicate pools
 Invalid pools
 Inconsistent validation
 
-Exit Criteria
+Resolution (Phase 7A-9C)
 
-Bulk import uses the same validation as manual create/edit.
+New `validateBudgetPoolImportBatch()` (app.js) reuses `validateBudgetPoolChange()` row-by-row
+against a context that grows with every row already accepted earlier in the same batch — so
+duplicates are caught both against existing pools AND within the same file (including two rows
+both resolving to the same existing pool). Overlap/shared-Spend-Type conflicts, which are only a
+confirmable warning in the manual single-save flow, are escalated to a hard failure for bulk
+import. Import is strict all-or-nothing: `handlePoolBulkUpload()` shows an error report and imports
+nothing if any row fails; the preview (with New/Update tags) only appears once the entire batch is
+valid. The budget parser now preserves a negative sign so the shared `budget > 0` check rejects it,
+instead of stripping the sign and silently coercing it positive. `_confirmPoolImport()` now remaps
+Actual Spend exactly once after the whole batch commits, not once per imported pool.
+
+Exit Criteria (met)
+
+- [x] Bulk import uses the same validation as manual create/edit.
+- [x] Intra-file and vs-existing duplicate detection (case-insensitive, canonical-year-based).
+- [x] Overlap/conflict detection.
+- [x] Negative budget rejected, not sign-stripped.
+- [x] All-or-nothing commit; batch remap runs once.
+- [x] Regression tests pass (`tests/financial-models.test.js`, `tests/budget-expenses.test.js`).
 
 ---
 
@@ -362,6 +393,67 @@ Regression Tests
 
 - Per-dropdown source assertions once each is migrated.
 - `refreshProjectDropdowns()` coverage test against the full canonical dropdown id list.
+
+---
+
+# TD-7A-08
+
+Title
+
+Budget Pool Delete Semantics Mismatch Between App and Supabase FK
+
+Status
+
+OPEN (documented, not fixed — accepted for Phase 7A-9C)
+
+Priority
+
+Low
+
+Introduced
+
+Phase 7A-9C design review
+
+Owner Phase
+
+Budget Pool Lifecycle / Delete Strategy (future phase)
+
+Reason
+
+The application enforces a hard block on deleting a Budget Pool that has any reference
+(`budgetPoolDeletionBlockers()`, app.js) — canonical Actual Spend, manual expense, or memo. The
+committed Supabase migration for `budget_manual_expenses`
+(`supabase/migrations/20260629161656_historical_budget_expenses.sql`) declares
+`budget_pool_id references public.budget_pools(id) on delete set null` — i.e. the database layer is
+wired for a cascade/unassign semantic at that one table, while the application layer enforces a
+hard block. There is no committed baseline migration for `budget_pools` itself (TD-7A-06), so this
+mismatch cannot be resolved without first doing the schema audit TD-7A-06 already calls for.
+
+Current Situation
+
+Unreachable in normal use — the app always blocks deletion before Supabase is ever asked to delete
+a referenced pool. Only reachable if a pool is deleted directly via Supabase (bypassing the app),
+in which case `budget_manual_expenses.budget_pool_id` would silently go `null` with no
+application-level reconciliation triggered.
+
+Risk
+
+A direct/out-of-band Supabase deletion could silently orphan manual expense records with no audit
+trail, while the app's own UI never allows the equivalent action.
+
+Explicitly deferred (per approved Phase 7A-9C decision)
+
+No Supabase migration or FK change is made in Phase 7A-9C. Do not change the FK direction (e.g. to
+`on delete restrict`) or the app's hard-block behavior without going through TD-7A-06's schema audit
+first, and without a separate reviewed decision on Budget Pool Lifecycle/Archive and Delete
+Strategy (Active/Archived was also explicitly deferred out of 7A-9C for the same reason — it cannot
+durably persist without touching the same `budget_pools` schema).
+
+Exit Criteria
+
+- TD-7A-06 (baseline migration + live schema audit) resolved first.
+- Explicit decision made on whether the FK should be tightened to `on delete restrict` (matching the
+  app) or the mismatch is a deliberately accepted safety net — either way, documented here.
 
 ---
 

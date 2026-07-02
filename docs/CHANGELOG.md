@@ -22,6 +22,92 @@
 
 ## Current Baseline
 
+### Phase 7A-9C - Budget Pool Bulk Upload Validation Redesign & TD-7A-02 Closure
+
+Scope approved after a design review (see "Phase 7A-9C — Budget Pool Management Design Review"):
+Bulk Upload validation redesign (strict all-or-nothing, shared canonical validation, intra-file and
+vs-existing duplicate detection, overlap/conflict detection, negative-budget sign-stripping bug fix,
+preview/error report, single batch remap) and closing TD-7A-02 (Tag Budget's separate matching
+implementation). Budget Pool Lifecycle (Active/Archived) was explicitly reviewed and deferred out of
+this phase after discovering it cannot durably persist across users/devices without a Supabase
+`status` column (Supabase is live and `loadBudgetPoolsAsync()` overwrites the local pool cache from
+Supabase on every refresh) — no Supabase migration was approved for 7A-9C. Delete strategy,
+Inactive status, delete-to-Unbudgeted cascade, Health Dashboard, orphan-assignment reporting, full
+Project Dropdown migration, and Overview legacy budget cleanup were all explicitly out of scope.
+
+#### Added
+- `validateBudgetPoolImportBatch(rows, existingPools)` (`app.js`) — the single Bulk Upload
+  validator. Reuses `validateBudgetPoolChange()` row-by-row against a context that accumulates every
+  row already accepted earlier in the same batch (plus a `claimedIds` guard so two rows both
+  resolving to the same *existing* pool are also caught, not just two rows creating the same *new*
+  identity) — no separate validation/duplicate engine. Escalates an overlap/shared-Spend-Type
+  conflict from the manual flow's confirmable warning to a hard failure, since Bulk Upload has no
+  per-row "confirm through it" UI. Returns per-row `ok`/`errors`/`action` (`create`/`update`) so the
+  caller can render either an error report or a preview, never both.
+- `_showPoolImportErrors(rowResults)` (`views/budget.js`) — new error-report modal shown when any
+  row fails validation; lists every failing row, its Project/Pool Name, and its specific reasons.
+  No confirm action — the batch cannot be partially imported.
+
+#### Changed
+- **`handlePoolBulkUpload()`** (`views/budget.js`) no longer does its own field-level validation
+  (project/name/budget presence) or its own numeric coercion of "valid" rows — every row is parsed
+  into a plain object and handed to `validateBudgetPoolImportBatch()`. Branches to
+  `_showPoolImportErrors()` if any row fails, or `_showPoolImportPreview()` only when the entire
+  batch passes — there is no more partial-success path or native `confirm()` gate.
+- The budget-cell parser now preserves a leading minus sign
+  (`replace(/[^0-9.\-]/g,'')` instead of `replace(/[^0-9.]/g,'')`), so a negative value is rejected
+  by the shared `budget > 0` check instead of silently becoming positive.
+- **`_showPoolImportPreview(rowResults)`** now renders the already-validated canonical records (not
+  raw parsed fields) and adds an explicit New/Update column per row, sourced from the validator's
+  `action` field.
+- **`_confirmPoolImport()`** now saves every row via `savePoolAsync(record, { skipRemap: true })`
+  and calls `remapActualSpendForBudgetPools()` exactly once after the loop, instead of once per
+  imported pool.
+- **`savePoolAsync(rawPool, opts = {})`** gained an optional `opts.skipRemap` (default `false`,
+  so manual add/edit behavior via `saveBudgetPool()` is unchanged); Bulk Upload is the only caller
+  that passes it.
+- **Tag Budget (`openBudgetTagModal()`, `views/history.js`)** no longer recomputes a memo→pool
+  match. It reads the memo's own canonical Actual Spend record
+  (`loadActualSpendRecords().find(r => r.memoId === memo.memoNo)`) and derives the effective/
+  auto-match pool via the existing `getFinalBudgetPoolId()` (app.js) and the record's
+  `autoBudgetPoolId` — closing TD-7A-02. An ambiguous multi-match memo now correctly shows no
+  auto-match (`Needs PMO Review`, matching the canonical rule everywhere else in the app) instead of
+  the old narrowest-pool-wins guess.
+
+#### Fixed
+- Bulk Upload no longer silently creates duplicate pools when a file contains two rows with the
+  same Project/Pool Name/Year identity (case-insensitive) — the previous per-row-only duplicate
+  check compared against a stale pre-import snapshot that was never refreshed as rows committed.
+- A negative budget value typed in an imported spreadsheet cell is now rejected, not silently
+  coerced positive by the previous sign-stripping regex.
+
+#### Removed
+- `matchMemoToPool()`, `autoTagBudgetPool()`, `getPoolMemos()`, `getPoolActual()` (`views/budget.js`)
+  — the parallel memo→pool matching implementation behind TD-7A-02. Confirmed zero remaining callers
+  (including tests) by repo-wide search before removal.
+
+#### Tests
+- `tests/financial-models.test.js`: 6 new unit tests for `validateBudgetPoolImportBatch()` (valid
+  batch New/Update classification, all-or-nothing on one invalid row, intra-file duplicate,
+  vs-existing duplicate using the canonical derived year, same-existing-pool-twice duplicate,
+  overlap escalation, negative budget rejection) plus 4 tests (1 structural, 3 behavioral via a new
+  `historyContext()` harness) proving Tag Budget reads the canonical Actual Spend result and no
+  longer applies its own tie-break.
+- `tests/budget-expenses.test.js`: 5 new tests covering the removed-functions check, the
+  sign-preserving fix, intra-file and overlap rejection through `handlePoolBulkUpload()` end-to-end,
+  and a full valid-batch import proving New/Update tagging, in-place update (no duplication), and
+  exactly one remap call for a multi-row batch.
+- Full regression suite: 221/221 passing (up from 205 before this phase).
+
+#### Remaining Work
+- Budget Pool Lifecycle (Active/Archived), Archive-as-delete-alternative, and the DB FK
+  mismatch (`budget_manual_expenses.budget_pool_id ... on delete set null` vs. the app's hard block)
+  are deferred to a future phase gated on TD-7A-06 (Supabase baseline migration + schema audit).
+  See `docs/TECHNICAL_DEBT.md` TD-7A-06 and the new TD-7A-08.
+- Delete strategy is otherwise unchanged in this phase (still a hard block for any referenced pool).
+- Health Dashboard, orphan-assignment reporting, full Project Dropdown migration (TD-7A-07), and
+  Overview legacy budget cleanup (TD-7A-03) remain open and out of scope, per the design review.
+
 ### Phase 7A-9B - Budget Pool UX & Workflow (Year selector, Month picker, BE display, warnings)
 
 Scope approved: shared BE display helper; Budget Year selectable with Start/End auto-populate;

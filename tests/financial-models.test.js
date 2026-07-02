@@ -1141,3 +1141,211 @@ test('Phase 7A-9B: formatMonthBE returns an empty string for missing/invalid inp
   assert.equal(ctx.formatMonthBE('not-a-date'), '');
   assert.equal(ctx.formatMonthBE('2026-01-15'), '01/2569', 'a full date value should format by its month, ignoring the day');
 });
+
+// ══════════════════════════════════════════════════════════════════
+// Phase 7A-9C — Budget Pool Bulk Upload validation redesign (TD-7A-04)
+// ══════════════════════════════════════════════════════════════════
+
+test('Phase 7A-9C: validateBudgetPoolImportBatch accepts a fully valid batch and classifies new vs. update rows', () => {
+  const ctx = context();
+  const existingPools = [
+    ctx.createBudgetPoolRecord({ id: 'pool-imp-existing', project: 'Alpha', name: 'SL 2026', budget: 5000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'] }),
+  ];
+  const rows = [
+    { proj: 'Alpha', name: 'SL 2026', budget: 9000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
+    { proj: 'Alpha', name: 'HW 2026', budget: 4000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['hw'] },
+  ];
+  const result = ctx.validateBudgetPoolImportBatch(rows, existingPools);
+  assert.equal(result.valid, true);
+  assert.equal(result.records.length, 2);
+  assert.equal(result.rowResults.find(r => r.record.name === 'SL 2026').action, 'update');
+  assert.equal(result.rowResults.find(r => r.record.name === 'HW 2026').action, 'create');
+});
+
+test('Phase 7A-9C: validateBudgetPoolImportBatch is strict all-or-nothing -- one invalid row blocks the entire batch', () => {
+  const ctx = context();
+  const rows = [
+    { proj: 'Alpha', name: 'Good Pool', budget: 1000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: [] },
+    { proj: '', name: 'Missing Project', budget: 1000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: [] },
+  ];
+  const result = ctx.validateBudgetPoolImportBatch(rows, []);
+  assert.equal(result.valid, false);
+  assert.equal(result.records.length, 0, 'zero records are returned when any row is invalid -- nothing partially imports');
+  assert.equal(result.rowResults[0].ok, true);
+  assert.equal(result.rowResults[1].ok, false);
+  assert.match(result.rowResults[1].errors.join(' '), /Project is required/);
+});
+
+test('Phase 7A-9C: validateBudgetPoolImportBatch rejects two rows in the same file sharing the same Project/Name/Year identity (case-insensitive), even with no pre-existing pools', () => {
+  const ctx = context();
+  const rows = [
+    { proj: 'Alpha', name: 'SL 2026', budget: 1000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
+    { proj: 'Alpha', name: 'sl 2026', budget: 2000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
+  ];
+  const result = ctx.validateBudgetPoolImportBatch(rows, []);
+  assert.equal(result.valid, false, 'a within-file duplicate must block the whole batch, not silently create two pools with the same identity');
+  assert.equal(result.rowResults[0].ok, true, 'the first occurrence is fine on its own');
+  assert.equal(result.rowResults[1].ok, false);
+  assert.match(result.rowResults[1].errors.join(' '), /Duplicate Budget Pool/);
+});
+
+test('Phase 7A-9C: validateBudgetPoolImportBatch recognizes a row as updating an existing pool using the canonical derived year, not the raw imported year cell', () => {
+  const ctx = context();
+  const existingPools = [
+    ctx.createBudgetPoolRecord({ id: 'pool-imp-existing-2', project: 'Alpha', name: 'SL 2026', budget: 5000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'] }),
+  ];
+  // Raw imported year cell says "2026" (wrong era) but Start/End Month agree with the existing
+  // pool -- createBudgetPoolRecord() derives the true year from the month range regardless, so
+  // this must still be recognized as the SAME pool (an update) rather than missing the match on a
+  // mismatched year cell and treating it as an unrelated new pool.
+  const rows = [
+    { proj: 'Alpha', name: 'SL 2026', budget: 9000, yr: '2026', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
+  ];
+  const result = ctx.validateBudgetPoolImportBatch(rows, existingPools);
+  assert.equal(result.valid, true);
+  assert.equal(result.rowResults[0].action, 'update');
+  assert.equal(result.records[0].id, 'pool-imp-existing-2', 'must resolve to the SAME existing pool id, not generate a new one');
+});
+
+test('Phase 7A-9C: validateBudgetPoolImportBatch rejects the batch when two rows both resolve to updating the SAME existing pool', () => {
+  const ctx = context();
+  const existingPools = [
+    ctx.createBudgetPoolRecord({ id: 'pool-imp-existing-3', project: 'Alpha', name: 'SL 2026', budget: 5000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: ['sl'] }),
+  ];
+  const rows = [
+    { proj: 'Alpha', name: 'SL 2026', budget: 9000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
+    { proj: 'Alpha', name: 'sl 2026', budget: 7000, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: ['sl'] },
+  ];
+  // Without an explicit claimed-id check, each row independently resolves to the same existingMatch
+  // and validateBudgetPoolChange excludes that pool's id from "others" for BOTH rows (each thinks
+  // it alone is "updating" it), so neither would ever see the other as a duplicate.
+  const result = ctx.validateBudgetPoolImportBatch(rows, existingPools);
+  assert.equal(result.valid, false, 'two rows updating the same existing pool must be rejected as an ambiguous duplicate, not silently apply the last one');
+  assert.equal(result.rowResults[0].ok, true);
+  assert.equal(result.rowResults[1].ok, false);
+  assert.match(result.rowResults[1].errors.join(' '), /Duplicate Budget Pool/);
+});
+
+test('Phase 7A-9C: validateBudgetPoolImportBatch escalates an overlap/shared-Spend-Type conflict to a hard failure (stricter than the manual single-save confirm-through flow)', () => {
+  const ctx = context();
+  const existingPools = [
+    ctx.createBudgetPoolRecord({ id: 'pool-imp-conflict-A', project: 'Alpha', name: 'Pool A', budget: 5000, startMonth: '2026-01', endMonth: '2026-06', memoTypes: ['sl'] }),
+  ];
+  const rows = [
+    { proj: 'Alpha', name: 'Pool B', budget: 3000, yr: '2569', start: '2026-03', end: '2026-09', memoTypes: ['sl'] },
+  ];
+  const result = ctx.validateBudgetPoolImportBatch(rows, existingPools);
+  assert.equal(result.valid, false, 'an overlapping period with a shared Spend Type must block the whole import, unlike the manual single-save confirm-through warning');
+  assert.match(result.rowResults[0].errors.join(' '), /Overlaps existing Budget Pool/);
+});
+
+test('Phase 7A-9C: validateBudgetPoolImportBatch rejects a negative budget value instead of accepting it', () => {
+  const ctx = context();
+  const rows = [
+    { proj: 'Alpha', name: 'Negative Pool', budget: -100, yr: '2569', start: '2026-01', end: '2026-12', memoTypes: [] },
+  ];
+  const result = ctx.validateBudgetPoolImportBatch(rows, []);
+  assert.equal(result.valid, false);
+  assert.match(result.rowResults[0].errors.join(' '), /Budget must be greater than zero/, 'a negative budget must fail the shared budget > 0 validation, not be silently coerced positive');
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Phase 7A-9C — TD-7A-02: Tag Budget reads canonical Actual Spend, no separate matching
+// ══════════════════════════════════════════════════════════════════
+
+function historyContext() {
+  const ctx = context();
+  ctx.window = ctx; // views/history.js writes window.* like a browser global object
+  ctx.isPMO = () => true;
+  ctx.loadBudgetPools = () => [];
+  ctx.loadMemos = () => [];
+  ctx.document.addEventListener = () => {}; // history.js registers a top-level click listener
+  vm.runInContext(historyCode, ctx, { filename: 'views/history.js' });
+  const elements = new Map();
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, { id, value: '', textContent: '', innerHTML: '', style: {}, onclick: null, onchange: null });
+    return elements.get(id);
+  };
+  ['budget-tag-modal', 'btm-year-filter', 'btm-options', 'btm-memo-no', 'btm-memo-detail', 'btm-auto-note', 'btm-save-btn']
+    .forEach(element);
+  ctx.document.getElementById = id => elements.get(id) || null;
+  ctx.__elements = elements;
+  return ctx;
+}
+
+test('Phase 7A-9C (TD-7A-02): openBudgetTagModal no longer references the removed matchMemoToPool() and reads the canonical Actual Spend fields instead', () => {
+  const openBudgetTagModalSource = (historyCode.match(/function openBudgetTagModal[\s\S]*?\n}/) || [''])[0];
+  assert.ok(openBudgetTagModalSource, 'openBudgetTagModal() must still exist in views/history.js');
+  assert.doesNotMatch(historyCode, /matchMemoToPool\(/, 'no call to the removed duplicate matching implementation may remain anywhere in views/history.js');
+  assert.match(openBudgetTagModalSource, /getFinalBudgetPoolId/, 'must read the canonical priority helper instead of recomputing a match');
+  assert.match(openBudgetTagModalSource, /autoBudgetPoolId/, 'the auto-match note must be sourced from the canonical Actual Spend field');
+});
+
+test('Phase 7A-9C (TD-7A-02): Tag Budget shows no auto-match for an ambiguous (Needs PMO Review) memo instead of guessing a pool', () => {
+  const ctx = historyContext();
+  const pools = ['pool-amb-1', 'pool-amb-2'].map(id => ctx.createBudgetPoolRecord({
+    id, project: 'AOA-MP', name: id, budget: 10000, spendTypes: ['Software'], startMonth: '2026-01', endMonth: '2026-12',
+  }));
+  ctx.loadBudgetPools = () => pools;
+  const memo = { memoNo: 'ORB-AMB-1', status: 'completed', project: 'AOA-MP', type: 'sl', total: 5000, date: '10/01/2569' };
+  ctx.loadMemos = () => [memo];
+
+  const raw = ctx.createActualSpendRecord({
+    id: 'as-amb-1', source: 'Approved Memo', referenceNo: memo.memoNo, memoId: memo.memoNo,
+    project: 'AOA-MP', spendType: 'Software', amount: 5000, startDate: '2026-01-10', endDate: '2026-01-10',
+  });
+  const mapped = ctx.mapBudgetPool(raw, pools);
+  assert.equal(mapped.budgetStatus, 'Needs PMO Review', 'sanity: this scenario is genuinely ambiguous at the canonical mapping layer');
+  ctx.storeActualSpendRecords([mapped]);
+
+  ctx.openBudgetTagModal(memo.memoNo);
+
+  const note = ctx.__elements.get('btm-auto-note');
+  assert.match(note.textContent, /ยังไม่มี Pool ที่ match/, 'an ambiguous match must show the no-auto-match note -- the old matchMemoToPool() would have silently picked pool-amb-1 or pool-amb-2 by narrowest date range');
+});
+
+test('Phase 7A-9C (TD-7A-02) control: Tag Budget still shows the correct pool name as the auto-match note for a normal single-match memo', () => {
+  const ctx = historyContext();
+  const pool = ctx.createBudgetPoolRecord({
+    id: 'pool-single-1', project: 'AOA-MP', name: 'SL Pool 2026', budget: 10000, spendTypes: ['Software'], startMonth: '2026-01', endMonth: '2026-12',
+  });
+  ctx.loadBudgetPools = () => [pool];
+  const memo = { memoNo: 'ORB-SGL-1', status: 'completed', project: 'AOA-MP', type: 'sl', total: 3000, date: '10/01/2569' };
+  ctx.loadMemos = () => [memo];
+
+  const raw = ctx.createActualSpendRecord({
+    id: 'as-sgl-1', source: 'Approved Memo', referenceNo: memo.memoNo, memoId: memo.memoNo,
+    project: 'AOA-MP', spendType: 'Software', amount: 3000, startDate: '2026-01-10', endDate: '2026-01-10',
+  });
+  const mapped = ctx.mapBudgetPool(raw, [pool]);
+  assert.equal(mapped.budgetStatus, 'Mapped');
+  assert.equal(mapped.autoBudgetPoolId, 'pool-single-1');
+  ctx.storeActualSpendRecords([mapped]);
+
+  ctx.openBudgetTagModal(memo.memoNo);
+
+  const note = ctx.__elements.get('btm-auto-note');
+  assert.match(note.textContent, /Auto-match: "AOA-MP \/ SL Pool 2026"/);
+});
+
+test('Phase 7A-9C (TD-7A-02): Tag Budget pool-used totals are computed per-memo from the canonical finalBudgetPoolId, not a re-derived match', () => {
+  const ctx = historyContext();
+  const poolA = ctx.createBudgetPoolRecord({ id: 'pool-used-A', project: 'AOA-MP', name: 'Pool A', budget: 100000, spendTypes: ['Software'], startMonth: '2026-01', endMonth: '2026-06' });
+  const poolB = ctx.createBudgetPoolRecord({ id: 'pool-used-B', project: 'AOA-MP', name: 'Pool B', budget: 100000, spendTypes: ['Software'], startMonth: '2026-07', endMonth: '2026-12' });
+  ctx.loadBudgetPools = () => [poolA, poolB];
+  const memo1 = { memoNo: 'ORB-U-1', status: 'completed', project: 'AOA-MP', type: 'sl', total: 1000, date: '10/02/2569' };
+  const memo2 = { memoNo: 'ORB-U-2', status: 'completed', project: 'AOA-MP', type: 'sl', total: 2000, date: '10/08/2569' };
+  ctx.loadMemos = () => [memo1, memo2];
+
+  const r1 = ctx.mapBudgetPool(ctx.createActualSpendRecord({ id: 'as-u-1', source: 'Approved Memo', referenceNo: memo1.memoNo, memoId: memo1.memoNo, project: 'AOA-MP', spendType: 'Software', amount: 1000, startDate: '2026-02-10', endDate: '2026-02-10' }), [poolA, poolB]);
+  const r2 = ctx.mapBudgetPool(ctx.createActualSpendRecord({ id: 'as-u-2', source: 'Approved Memo', referenceNo: memo2.memoNo, memoId: memo2.memoNo, project: 'AOA-MP', spendType: 'Software', amount: 2000, startDate: '2026-08-10', endDate: '2026-08-10' }), [poolA, poolB]);
+  assert.equal(r1.finalBudgetPoolId, 'pool-used-A');
+  assert.equal(r2.finalBudgetPoolId, 'pool-used-B');
+  ctx.storeActualSpendRecords([r1, r2]);
+
+  ctx.openBudgetTagModal(memo1.memoNo);
+
+  const optionsHtml = ctx.__elements.get('btm-options').innerHTML;
+  assert.match(optionsHtml, /99,000/, 'Pool A must show 1,000 used (100,000 remaining 99,000), matching only memo1');
+  assert.match(optionsHtml, /98,000/, 'Pool B must show 2,000 used (100,000 remaining 98,000), matching only memo2 -- not memo1\'s amount bleeding across pools');
+});
