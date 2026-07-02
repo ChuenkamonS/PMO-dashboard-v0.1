@@ -168,6 +168,12 @@ Title
 
 User-facing Year must eventually be Buddhist Era everywhere.
 
+Status
+
+✅ Addressed for Budget Settings, BvA, Assign Budget Pool modal, and Actual Spend year filter label
+(7A-9B). Export format left as-is per approved decision — reviewed separately, not part of NR-02's
+closure.
+
 Reason
 
 Current UI mixes
@@ -183,10 +189,6 @@ Every visible year/month shown to users should use Buddhist Era.
 
 Internal storage remains Gregorian.
 
-Deferred to
-
-7A-9B
-
 ---
 
 ## NR-03
@@ -199,6 +201,11 @@ Title
 
 Budget Pool Date UX redesign.
 
+Status
+
+✅ Done (7A-9B) — Start/End Month are now Thai-month-name `<select>`s sharing one Budget Year
+select, replacing free-text `type="month"` inputs.
+
 Reason
 
 Current Start Month / End Month relies on typed YYYY-MM values.
@@ -206,10 +213,6 @@ Current Start Month / End Month relies on typed YYYY-MM values.
 Future
 
 Replace with proper Month Picker.
-
-Deferred to
-
-7A-9B
 
 ---
 
@@ -223,6 +226,11 @@ Title
 
 Budget Year selection UX.
 
+Status
+
+✅ Done (7A-9B) — Budget Year is a user-selectable `<select>`; selecting it auto-populates Start
+Month (January) and End Month (December). `year` remains derived-only per the data contract.
+
 Reason
 
 Budget Year is currently readonly.
@@ -232,10 +240,6 @@ Future
 User selects Budget Year.
 
 Start/End months auto-populate.
-
-Deferred to
-
-7A-9B
 
 ---
 
@@ -343,7 +347,9 @@ Actual Spend year filter inconsistent.
 
 Status
 
-🟡 Deferred
+✅ Fixed (7A-9B) — `as-year` option labels now show BE (`ปี 2569`) via `gregorianYearToBuddhistEra()`;
+the `<option value>` intentionally stays Gregorian since filtering logic compares it against
+`record.startDate`'s Gregorian year.
 
 Description
 
@@ -353,7 +359,7 @@ Budget Settings displays BE.
 
 Future
 
-Standardize all user-facing years to Buddhist Era.
+Standardize all user-facing years to Buddhist Era. (Export format is a separate, later decision.)
 
 ---
 

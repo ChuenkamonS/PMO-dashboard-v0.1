@@ -115,12 +115,13 @@ function createBvaContext() {
   return context;
 }
 
-// Phase 7A-9A: mocks the elements touched by the Budget Pool Settings tab and its Add/Edit modal
-// (`bset-year`, `bset-budget-body`, and the dynamically-created `bpool-modal`). The modal's own
-// fields (`bpool-year`, `bpool-start`, ...) are rendered as one HTML string, not separately
-// createElement()'d, so tests inspect them either via `context.__lastPanel.innerHTML` (structural
-// checks) or, for `_updateBpoolYearFromStart()`, via pre-registered elements standing in for the
-// fields a real browser would have parsed out of that HTML and made queryable by id.
+// Phase 7A-9A/7A-9B: mocks the elements touched by the Budget Pool Settings tab and its Add/Edit
+// modal (`bset-year`, `bset-budget-body`, and the dynamically-created `bpool-modal`). Most of the
+// modal's own fields are rendered as one HTML string, not separately createElement()'d, so tests
+// inspect them either via `context.__lastPanel.innerHTML` (structural checks) or, for the Budget
+// Year/Month selects (populated by populateBudgetYearSelect()/populateMonthSelect() after the modal
+// is appended — Phase 7A-9B), via pre-registered elements standing in for the fields a real browser
+// would have parsed out of that HTML and made queryable by id.
 function createBudgetPoolModalContext() {
   const context = createActualSpendContext();
   const elements = new Map();
@@ -128,7 +129,7 @@ function createBudgetPoolModalContext() {
     if (!elements.has(id)) elements.set(id, { id, value:'', innerHTML:'', style:{}, options:[] });
     return elements.get(id);
   };
-  ['bpool-start', 'bpool-year', 'bset-year', 'bset-budget-body'].forEach(element);
+  ['bpool-year', 'bpool-start-month', 'bpool-end-month', 'bset-year', 'bset-budget-body'].forEach(element);
   const dynamicPanels = new Map();
   context.document.getElementById = id => elements.get(id) || dynamicPanels.get(id) || null;
   context.document.createElement = () => ({
@@ -1926,6 +1927,19 @@ test('Phase 7A-9A: populateBudgetYearSelect renders current BE year ± 1 with th
   assert.equal(el.innerHTML, 'unchanged-marker', 'must not re-populate (and must not reset the user\'s selection) once options already exist');
 });
 
+test('Phase 7A-9B: populateBudgetYearSelect includes and pre-selects an explicit extraYear even when it falls outside the current±1 range', () => {
+  const context = createActualSpendContext();
+  const current = Number(context.getCurrentBuddhistYear());
+  const farPastYear = current - 5;
+  const el = { id: 'bpool-year', value: '', innerHTML: '', options: [] };
+  context.document.getElementById = id => (id === 'bpool-year' ? el : null);
+
+  context.populateBudgetYearSelect('bpool-year', farPastYear);
+  assert.match(el.innerHTML, new RegExp(`<option value="${farPastYear}" selected>${farPastYear}</option>`), 'an old Budget Pool\'s own year must always be representable, not silently dropped for being outside current±1');
+  assert.match(el.innerHTML, new RegExp(`<option value="${current}"[^>]*>${current}</option>`), 'the current±1 years must still be present alongside the extra year');
+  assert.doesNotMatch(el.innerHTML, new RegExp(`<option value="${current}" selected>`), 'the extra year, not the current year, must be the one marked selected');
+});
+
 test('Phase 7A-9A: renderBudgetSettings populates bset-year dynamically instead of relying on hardcoded HTML options', () => {
   const context = createBudgetPoolModalContext();
   context.loadBudgetPools = () => [];
@@ -1956,82 +1970,90 @@ test('Phase 7A-9A: openBudgetPoolModal sources Project options from getCanonical
   assert.match(budgetCode, /getCanonicalProjectList\(\)/, 'openBudgetPoolModal must delegate to the canonical project-list helper');
 });
 
-test('Phase 7A-9A: openBudgetPoolModal seeds bpool-year from the pool\'s own Start Month, not its (possibly stale) stored year label', () => {
+// ══════════════════════════════════════════════════════════════════
+// PHASE 7A-9B — Budget Year selectable + Month picker redesign. Replaces the old readonly
+// bpool-year text input + free-text bpool-start/bpool-end type="month" inputs entirely, so the
+// tests below replace (not extend) the equivalent Phase 7A-9A tests for that old mechanism —
+// several of those scenarios (typed BE text into a month field) are now structurally impossible
+// since Start/End Month are always selected from a controlled 1-12 dropdown.
+// ══════════════════════════════════════════════════════════════════
+
+test('Phase 7A-9B: openBudgetPoolModal seeds the Budget Year select from the pool\'s own Start Month, not its (possibly stale) stored year label', () => {
   const context = createBudgetPoolModalContext();
   context.loadSettings = () => ({ projects: ['Alpha'] });
   // TD-7A-01 legacy-mismatch scenario: stored year (2568) disagrees with startMonth's real year (2569).
   context.loadBudgetPools = () => [{ id: 'p1', project: 'Alpha', name: 'SL 2025', year: '2568', startMonth: '2026-01', endMonth: '2026-12' }];
   context.openBudgetPoolModal('p1');
-  const html = context.__lastPanel.innerHTML;
-  assert.match(html, /id="bpool-year"[^>]*value="2569"/, 'bpool-year must reflect the date-derived year, not the stale stored label');
+  const yearHtml = context.__elements.get('bpool-year').innerHTML;
+  assert.match(yearHtml, /<option value="2569" selected>2569<\/option>/, 'Budget Year select must be pre-selected to the date-derived year, not the stale stored label');
+  const startHtml = context.__elements.get('bpool-start-month').innerHTML;
+  const endHtml = context.__elements.get('bpool-end-month').innerHTML;
+  assert.match(startHtml, /<option value="1" selected>มกราคม<\/option>/, 'Start Month select must be pre-selected to January (2026-01)');
+  assert.match(endHtml, /<option value="12" selected>ธันวาคม<\/option>/, 'End Month select must be pre-selected to December (2026-12)');
 });
 
-test('Phase 7A-9A: openBudgetPoolModal defaults bpool-year to the ambient bset-year filter for a brand-new pool with no Start Month yet', () => {
+test('Phase 7A-9B: openBudgetPoolModal defaults the Budget Year select to the ambient bset-year filter, and Start/End Month to Jan-Dec, for a brand-new pool with no dates yet', () => {
   const context = createBudgetPoolModalContext();
   context.loadSettings = () => ({ projects: [] });
   context.loadBudgetPools = () => [];
   context.__elements.get('bset-year').value = '2570';
   context.openBudgetPoolModal();
-  const html = context.__lastPanel.innerHTML;
-  assert.match(html, /id="bpool-year"[^>]*value="2570"/);
+  assert.match(context.__elements.get('bpool-year').innerHTML, /<option value="2570" selected>2570<\/option>/);
+  assert.match(context.__elements.get('bpool-start-month').innerHTML, /<option value="1" selected>มกราคม<\/option>/);
+  assert.match(context.__elements.get('bpool-end-month').innerHTML, /<option value="12" selected>ธันวาคม<\/option>/);
 });
 
-test('Phase 7A-9A: Budget Pool modal wires Start Month to live year re-derivation via _updateBpoolYearFromStart()', () => {
-  assert.match(budgetCode, /id="bpool-start"[^>]*oninput="_updateBpoolYearFromStart\(\)"/);
+test('Phase 7A-9B: Budget Pool modal wires the Budget Year select to auto-populate Start/End Month, and Start Month to keep End Month from preceding it', () => {
+  assert.match(budgetCode, /id="bpool-year"[^>]*onchange="_onBpoolYearChange\(\)"/);
+  assert.match(budgetCode, /id="bpool-start-month"[^>]*onchange="_onBpoolStartMonthChange\(\)"/);
 });
 
-test('Phase 7A-9A: _updateBpoolYearFromStart recomputes bpool-year live via gregorianYearToBuddhistEra, falling back to bset-year then getCurrentBuddhistYear', () => {
+test('Phase 7A-9B: selecting a Budget Year auto-populates Start Month to January and End Month to December (requirement: 2569 -> 2026-01 to 2026-12)', () => {
   const context = createBudgetPoolModalContext();
-  const start = context.__elements.get('bpool-start');
-  const year = context.__elements.get('bpool-year');
-  const bsetYear = context.__elements.get('bset-year');
-
-  start.value = '2026-05';
-  context._updateBpoolYearFromStart();
-  assert.equal(year.value, context.gregorianYearToBuddhistEra('2026-05'));
-  assert.equal(year.value, '2569');
-
-  start.value = '';
-  bsetYear.value = '2570';
-  context._updateBpoolYearFromStart();
-  assert.equal(year.value, '2570', 'must fall back to the ambient bset-year filter when Start Month is cleared');
-
-  bsetYear.value = '';
-  context._updateBpoolYearFromStart();
-  assert.equal(year.value, context.getCurrentBuddhistYear(), 'must fall back to the shared current-year helper as a last resort');
+  // Simulate a mid-edit state (e.g. a Q1-only pool) to prove the reset actually happens, not just
+  // that January/December happen to already be selected.
+  context.populateMonthSelect('bpool-start-month', 3);
+  context.populateMonthSelect('bpool-end-month', 6);
+  context._onBpoolYearChange();
+  assert.match(context.__elements.get('bpool-start-month').innerHTML, /<option value="1" selected>มกราคม<\/option>/);
+  assert.match(context.__elements.get('bpool-end-month').innerHTML, /<option value="12" selected>ธันวาคม<\/option>/);
 });
 
-test('Phase 7A-9A blocker fix ("3112" bug): _updateBpoolYearFromStart normalizes a typed BE Start Month before deriving bpool-year', () => {
+test('Phase 7A-9B: changing Start Month bumps End Month up to match rather than allowing an invalid range', () => {
   const context = createBudgetPoolModalContext();
-  const start = context.__elements.get('bpool-start');
-  const year = context.__elements.get('bpool-year');
+  const startSel = context.__elements.get('bpool-start-month');
+  const endSel = context.__elements.get('bpool-end-month');
+  startSel.value = '6';
+  endSel.value = '3'; // now before Start
+  context._onBpoolStartMonthChange();
+  // populateMonthSelect() rebuilds innerHTML with the new selection (a real <select> would sync its
+  // own .value from the selected <option> automatically; this mock doesn't, so assert on innerHTML
+  // like the other picker tests do).
+  assert.match(endSel.innerHTML, /<option value="6" selected>มิถุนายน<\/option>/, 'End Month must be bumped up to Start Month, not left in an invalid state');
 
-  start.value = '2569-01'; // typed BE, not Gregorian
-  context._updateBpoolYearFromStart();
-  assert.equal(year.value, '2569', 'must resolve to the correct BE year, not 3112 (2569 + 543)');
-  assert.notEqual(year.value, '3112');
-
-  start.value = '2026-01'; // the equivalent Gregorian spelling must resolve identically
-  context._updateBpoolYearFromStart();
-  assert.equal(year.value, '2569');
+  endSel.innerHTML = 'unchanged-marker';
+  startSel.value = '2';
+  endSel.value = '9'; // already after Start — must be left untouched
+  context._onBpoolStartMonthChange();
+  assert.equal(endSel.innerHTML, 'unchanged-marker', 'must not touch an End Month that is already valid');
 });
 
-test('Phase 7A-9A blocker fix ("3112" bug): openBudgetPoolModal normalizes a legacy BE-typed startMonth before seeding bpool-start/bpool-year', () => {
+test('Phase 7A-9B blocker fix ("3112" bug) regression: openBudgetPoolModal normalizes a legacy BE-typed startMonth before seeding the Year/Month selects', () => {
   const context = createBudgetPoolModalContext();
   context.loadSettings = () => ({ projects: ['Alpha'] });
-  // A pool saved before this fix, with startMonth stored as typed BE instead of Gregorian.
+  // A pool saved before the "3112" fix, with startMonth stored as typed BE instead of Gregorian.
   context.loadBudgetPools = () => [{ id: 'legacy-1', project: 'Alpha', name: 'Legacy Pool', year: '3112', startMonth: '2569-01', endMonth: '2569-12' }];
   context.openBudgetPoolModal('legacy-1');
-  const html = context.__lastPanel.innerHTML;
-  assert.match(html, /id="bpool-start"[^>]*value="2026-01"/, 'bpool-start must display the normalized Gregorian value, not the raw stored BE text');
-  assert.match(html, /id="bpool-year"[^>]*value="2569"/, 'bpool-year must show the correct BE year, not the stored "3112" bug value');
-  assert.match(html, /id="bpool-end"[^>]*value="2026-12"/, 'bpool-end must also display the normalized Gregorian value (Phase 7A-9A contract fix), not the raw stored BE text');
+  assert.match(context.__elements.get('bpool-year').innerHTML, /<option value="2569" selected>2569<\/option>/, 'Budget Year must show the correct BE year, not the stored "3112" bug value');
+  assert.doesNotMatch(context.__elements.get('bpool-year').innerHTML, /3112/, '3112 must never appear as a selectable year');
+  assert.match(context.__elements.get('bpool-start-month').innerHTML, /<option value="1" selected>มกราคม<\/option>/);
+  assert.match(context.__elements.get('bpool-end-month').innerHTML, /<option value="12" selected>ธันวาคม<\/option>/);
 });
 
-test('Phase 7A-9A blocker fix ("3112" bug): saveBudgetPool normalizes typed BE Start/End Month to Gregorian before persisting', async () => {
+test('Phase 7A-9B: saveBudgetPool constructs Gregorian startMonth/endMonth/year from the Year(BE) + Month selects (the "3112" bug is now structurally impossible — there is no free-text month input left to mistype)', async () => {
   const context = createBudgetPoolModalContext();
   context.loadSettings = () => ({ projects: ['Alpha'] });
-  ['bpool-project', 'bpool-name', 'bpool-budget', 'bpool-end', 'bpool-edit-id'].forEach(id => {
+  ['bpool-project', 'bpool-name', 'bpool-budget', 'bpool-edit-id'].forEach(id => {
     if (!context.__elements.has(id)) context.__elements.set(id, { id, value: '' });
   });
   const el = id => context.__elements.get(id);
@@ -2039,17 +2061,119 @@ test('Phase 7A-9A blocker fix ("3112" bug): saveBudgetPool normalizes typed BE S
   el('bpool-name').value = 'Alpha Pool';
   el('bpool-budget').value = '1000';
   el('bpool-year').value = '2569';
-  el('bpool-start').value = '2569-01'; // typed BE
-  el('bpool-end').value = '2569-12';   // typed BE
+  el('bpool-start-month').value = '1';
+  el('bpool-end-month').value = '12';
   el('bpool-edit-id').value = '';
 
   await context.saveBudgetPool();
 
   const saved = context.loadBudgetPools().find(p => p.project === 'Alpha' && p.name === 'Alpha Pool');
   assert.ok(saved, 'the pool must have been persisted');
-  assert.equal(saved.startMonth, '2026-01', 'startMonth must be normalized to Gregorian, not stored as typed BE');
-  assert.equal(saved.endMonth, '2026-12', 'endMonth must be normalized to Gregorian, not stored as typed BE');
-  assert.equal(saved.year, '2569', 'derived year must be the correct BE year, not the "3112" bug value');
+  assert.equal(saved.startMonth, '2026-01', 'BE year 2569 + Start Month 1 must construct Gregorian 2026-01');
+  assert.equal(saved.endMonth, '2026-12', 'BE year 2569 + End Month 12 must construct Gregorian 2026-12');
+  assert.equal(saved.year, '2569', 'derived year must be the correct BE year');
+});
+
+test('Phase 7A-9B: renderBudgetSettings displays the pool period in Buddhist Era, not Gregorian', () => {
+  const context = createBudgetPoolModalContext();
+  context.loadBudgetPools = () => [
+    { id: 'be-display-1', project: 'Alpha', name: 'BE Display Pool', budget: 1000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: [] },
+  ];
+  context.__elements.get('bset-year').value = '2569';
+  context.renderBudgetSettings();
+  const html = context.__elements.get('bset-budget-body').innerHTML;
+  assert.match(html, /01\/2569 → 12\/2569/, 'the period column must show BE month/year, not raw Gregorian "2026-01 → 2026-12"');
+  assert.doesNotMatch(html, /2026-01/, 'must not leak the raw Gregorian value into the user-facing table');
+});
+
+test('Phase 7A-9B: BvA pool row displays the period in Buddhist Era, not Gregorian', () => {
+  const context = createBvaContext();
+  const pool = context.createBudgetPoolRecord({ id: 'bva-be-pool', project: 'Alpha', name: 'BvA BE Pool', budget: 10000, startMonth: '2026-01', endMonth: '2026-12', spendTypes: ['Software'] });
+  context.storeBudgetPools([pool]);
+  context.__elements.get('bva-year').value = '2569';
+  context._renderBvaWith([pool]);
+  const html = context.__elements.get('bva-content').innerHTML;
+  assert.match(html, /01\/2569 → 12\/2569/, 'BvA pool row period must show BE, not raw Gregorian');
+  assert.doesNotMatch(html, /2026-01/, 'must not leak the raw Gregorian value into the BvA table');
+});
+
+test('Phase 7A-9B: Actual Spend year filter (as-year) labels options in Buddhist Era while the underlying filter value stays Gregorian', () => {
+  // No execution harness builds renderActualSpend()'s full dependency set here (canonical Actual
+  // Spend refresh, several other filter elements) — same "structural, not behavioral" convention
+  // already used elsewhere in this suite for cases without a full harness. The option `value` is
+  // deliberately left as the raw Gregorian year since actualSpendRecordInYear() compares it against
+  // record.startDate's Gregorian year; only the visible label text becomes BE.
+  assert.ok(
+    budgetCode.includes('`<option value="${year}">ปี ${gregorianYearToBuddhistEra(year)}</option>`'),
+    'as-year option label must show BE via the shared helper while value stays the raw Gregorian year used for filtering'
+  );
+});
+
+test('Phase 7A-9B: deleteBudgetPool explains WHY deletion is blocked, naming the pool and breaking down references by source', () => {
+  const context = createBudgetPoolModalContext();
+  context.storeBudgetPools([
+    context.createBudgetPoolRecord({ id: 'pool-del-1', project: 'Alpha', name: 'Linked Pool', budget: 1000, startMonth: '2026-01', endMonth: '2026-12', spendTypes: ['Software'] }),
+  ]);
+  context.storeActualSpendRecords([
+    context.createActualSpendRecord({
+      id: 'as-1', source: 'Approved Memo', referenceNo: 'M-1', project: 'Alpha', spendType: 'Software',
+      amount: 1000, startDate: '2026-01-01', endDate: '2026-01-01',
+      finalBudgetPoolId: 'pool-del-1', autoBudgetPoolId: 'pool-del-1',
+    }),
+  ]);
+  context.loadManualExpenses = () => [{ id: 'me-1', budgetPoolId: 'pool-del-1' }];
+  context.loadMemos = () => [{ memoNo: 'MEMO-1', budgetPoolId: 'pool-del-1' }];
+  let alertMsg = null;
+  context.alert = msg => { alertMsg = msg; };
+  context.deleteBudgetPool('pool-del-1');
+  assert.ok(alertMsg, 'must alert with a blocking message');
+  assert.match(alertMsg, /Linked Pool/, 'must name the pool being blocked, not just its id');
+  assert.match(alertMsg, /Actual Spend 1 รายการ/, 'must break down the canonical Actual Spend reference count');
+  assert.match(alertMsg, /Manual Expense 1 รายการ/, 'must break down the manual expense reference count');
+  assert.match(alertMsg, /Memo 1 รายการ/, 'must break down the memo reference count');
+});
+
+test('Phase 7A-9B: deleteBudgetPool names the pool in the confirm prompt when there are no linked references (behavior unchanged: still blocked only when references exist)', () => {
+  const context = createBudgetPoolModalContext();
+  context.storeBudgetPools([
+    context.createBudgetPoolRecord({ id: 'pool-del-2', project: 'Alpha', name: 'Unlinked Pool', budget: 1000, startMonth: '2026-01', endMonth: '2026-12', spendTypes: ['Software'] }),
+  ]);
+  context.loadManualExpenses = () => [];
+  context.loadMemos = () => [];
+  let confirmMsg = null;
+  context.confirm = msg => { confirmMsg = msg; return true; };
+  context.deletePoolAsync = async () => {};
+  context.renderBudgetSettings = () => {};
+  context.deleteBudgetPool('pool-del-2');
+  assert.match(confirmMsg, /Unlinked Pool/, 'confirm prompt must name the specific pool being deleted');
+});
+
+test('Phase 7A-9B: saveBudgetPool\'s overlap warning names the specific conflicting pool(s) instead of a bare count', async () => {
+  const context = createBudgetPoolModalContext();
+  context.loadSettings = () => ({ projects: ['Alpha'] });
+  context.storeBudgetPools([
+    context.createBudgetPoolRecord({ id: 'existing-pool', project: 'Alpha', name: 'Existing SL Pool', budget: 5000, startMonth: '2026-01', endMonth: '2026-06', spendTypes: ['Software'] }),
+  ]);
+  ['bpool-project', 'bpool-name', 'bpool-budget', 'bpool-edit-id'].forEach(id => {
+    if (!context.__elements.has(id)) context.__elements.set(id, { id, value: '' });
+  });
+  const el = id => context.__elements.get(id);
+  el('bpool-project').value = 'Alpha';
+  el('bpool-name').value = 'Overlapping SL Pool';
+  el('bpool-budget').value = '2000';
+  el('bpool-year').value = '2569';
+  el('bpool-start-month').value = '3';
+  el('bpool-end-month').value = '9';
+  el('bpool-edit-id').value = '';
+
+  let confirmMsg = null;
+  context.confirm = msg => { confirmMsg = msg; return true; };
+
+  await context.saveBudgetPool();
+
+  assert.ok(confirmMsg, 'must show a confirm before saving an overlapping pool');
+  assert.match(confirmMsg, /Alpha \/ Existing SL Pool/, 'must name the specific conflicting pool, not just a bare count');
+  assert.match(confirmMsg, /01\/2569 → 06\/2569/, 'must show the conflicting pool\'s period in BE display format, reusing the existing validateBudgetPoolChange() conflicts data');
 });
 
 // ══════════════════════════════════════════════════════════════════

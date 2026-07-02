@@ -682,6 +682,12 @@ test('Phase 7A-9A Step 7: openBudgetTagModal (the Tag Budget / Assignment Budget
     'allPools must be canonicalized before pool options are filtered by year');
 });
 
+test('Phase 7A-9B: openBudgetTagModal (Assign Budget Pool) displays the pool period via the shared formatMonthBE() helper, not raw Gregorian', () => {
+  const openBudgetTagModalSource = (historyCode.match(/function openBudgetTagModal[\s\S]*?\n}/) || [''])[0];
+  assert.match(openBudgetTagModalSource, /formatMonthBE\(pool\.startMonth\)/, 'the pool option row must format startMonth for BE display');
+  assert.match(openBudgetTagModalSource, /formatMonthBE\(pool\.endMonth\)/, 'the pool option row must format endMonth for BE display');
+});
+
 test('Phase 7A-3: mappingWarning survives createActualSpendRecord normalization (a store/reload cycle), not just mapBudgetPool\'s immediate return value', () => {
   const ctx = context();
   const poolA = ctx.createBudgetPoolRecord({ id:'pool-mw-A', project:'AOA-MP', name:'Pool A', budget:100000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
@@ -1114,4 +1120,24 @@ test('Phase 7A-9A contract fix: a legacy pool whose stored year (3112) conflicts
   assert.equal(canonical.year, '2569');
   assert.equal(canonical.startMonth, '2026-01');
   assert.equal(canonical.endMonth, '2026-12');
+});
+
+// ══════════════════════════════════════════════════════════════════
+// PHASE 7A-9B — shared user-facing Buddhist Era display helper. Display-only: internal
+// storage/comparison/matching must keep using the raw Gregorian value everywhere else.
+// ══════════════════════════════════════════════════════════════════
+
+test('Phase 7A-9B: formatMonthBE converts a Gregorian "YYYY-MM" value to a BE-labeled "MM/YYYY" display string', () => {
+  const ctx = context();
+  assert.equal(ctx.formatMonthBE('2026-01'), '01/2569');
+  assert.equal(ctx.formatMonthBE('2026-12'), '12/2569');
+  assert.equal(ctx.formatMonthBE('2025-06'), '06/2568', 'must convert correctly across a BE year boundary too');
+});
+
+test('Phase 7A-9B: formatMonthBE returns an empty string for missing/invalid input, and works on a full "YYYY-MM-DD" date', () => {
+  const ctx = context();
+  assert.equal(ctx.formatMonthBE(''), '');
+  assert.equal(ctx.formatMonthBE(null), '');
+  assert.equal(ctx.formatMonthBE('not-a-date'), '');
+  assert.equal(ctx.formatMonthBE('2026-01-15'), '01/2569', 'a full date value should format by its month, ignoring the day');
 });

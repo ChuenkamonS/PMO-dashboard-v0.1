@@ -2100,7 +2100,10 @@ async function renderActualSpend() {
       return Array.from({ length:Math.max(1, Math.min(20, (end || start) - start + 1)) }, (_, i) => String(start + i));
     }))].sort((a,b) => b.localeCompare(a));
     if (!years.length) years.push(String(new Date().getFullYear()));
-    yearSel.innerHTML = years.map(year => `<option value="${year}">ปี ${year}</option>`).join('');
+    // Phase 7A-9B: label displays Buddhist Era; `value` stays Gregorian since
+    // actualSpendRecordInYear()/filteredActualSpendRecords() compare it against record.startDate's
+    // Gregorian year — only the visible text changes, same pattern as populateBudgetYearSelect().
+    yearSel.innerHTML = years.map(year => `<option value="${year}">ปี ${gregorianYearToBuddhistEra(year)}</option>`).join('');
     yearSel.value = years.includes(current) ? current : years[0];
   }
 
@@ -2113,7 +2116,9 @@ async function renderActualSpend() {
     projSel.value = projs.includes(current) ? current : 'all';
   }
 
-  const selectedYear = yearSel?.value || String(new Date().getFullYear());
+  // Display-only (Phase 7A-9B): every use below is a label, never a filter value, so it's safe to
+  // show Buddhist Era here even though the underlying `as-year` <option value> stays Gregorian.
+  const selectedYear = gregorianYearToBuddhistEra(yearSel?.value || String(new Date().getFullYear()));
   const labelEl = document.getElementById('as-period-label');
   if (labelEl) labelEl.textContent = fromVal && toVal ? `ปี ${selectedYear} · ${fromVal} – ${toVal}` : fromVal ? `ปี ${selectedYear} · ตั้งแต่ ${fromVal}` : toVal ? `ปี ${selectedYear} · ถึง ${toVal}` : `แสดงข้อมูลปี ${selectedYear}`;
 
@@ -2483,12 +2488,27 @@ function closeBudgetAssignmentWorkspace() {
 // would have silently run out of "current year" past BE 2570 (Phase 7A-9A, closing
 // docs/BvA_REQUIREMENT.md "Phase 7A-1" §2 Known Issue #2 at the UI layer). Populated once per page
 // load (guarded by an empty `<select>`), not re-derived on every render.
-function populateBudgetYearSelect(id) {
+// `extraYear` (Phase 7A-9B): when provided, guarantees that year is present in the option list and
+// pre-selected, even if it falls outside the current±1 range — needed so the Budget Pool Add/Edit
+// modal's now-selectable Budget Year always shows an existing pool's own (possibly older/newer)
+// year instead of silently defaulting to the nearest option and changing the pool's year on save.
+function populateBudgetYearSelect(id, extraYear) {
   const el = document.getElementById(id);
   if (!el || el.options.length) return;
   const current = Number(getCurrentBuddhistYear());
-  const years = [current - 1, current, current + 1];
-  el.innerHTML = years.map(y => `<option value="${y}" ${y === current ? 'selected' : ''}>${y}</option>`).join('');
+  const selected = extraYear ? Number(extraYear) : current;
+  const years = new Set([current - 1, current, current + 1, selected]);
+  const sorted = [...years].sort((a, b) => a - b);
+  el.innerHTML = sorted.map(y => `<option value="${y}" ${y === selected ? 'selected' : ''}>${y}</option>`).join('');
+}
+
+// Phase 7A-9B: populates a Start/End Month select with the 12 Thai month names (value = 1-12).
+// Always re-renders (unlike populateBudgetYearSelect()'s "populate once" guard) since the Budget
+// Pool modal deliberately resets these when Budget Year changes (see _onBpoolYearChange()).
+function populateMonthSelect(id, selectedMonth) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = MONTHS_TH.map((name, i) => `<option value="${i + 1}" ${i + 1 === selectedMonth ? 'selected' : ''}>${esc(name)}</option>`).join('');
 }
 
 function _renderBvaWith(pools) {
@@ -2627,7 +2647,7 @@ function _renderBvaWith(pools) {
               return `<tr style="cursor:${row.records.length ? 'pointer' : 'default'}" onclick="${row.records.length ? `showBvaActualSpend('${pool.id}')` : ''}">
                 <td style="font-weight:500">${esc(pool.name)}</td>
                 <td style="font-size:11px;color:var(--blue)">${esc(typeLabels)}</td>
-                <td style="color:var(--text-3);font-size:11px">${pool.startMonth || '—'} → ${pool.endMonth || '—'}</td>
+                <td style="color:var(--text-3);font-size:11px">${formatMonthBE(pool.startMonth) || '—'} → ${formatMonthBE(pool.endMonth) || '—'}</td>
                 <td class="hist-amt">${money(pool.budget || 0)}</td>
                 <td class="hist-amt" style="color:var(--blue);font-weight:500">
                   ${money(Math.round(row.actual))}
@@ -3061,7 +3081,7 @@ function renderBudgetSettings() {
         <tbody>
           ${projPools.map(p => `<tr>
             <td style="${tdS};font-weight:500">${esc(p.name)}</td>
-            <td style="${tdS};font-size:11px;color:var(--text-3)">${p.startMonth || '—'} → ${p.endMonth || '—'}</td>
+            <td style="${tdS};font-size:11px;color:var(--text-3)">${formatMonthBE(p.startMonth) || '—'} → ${formatMonthBE(p.endMonth) || '—'}</td>
             <td style="${tdS};text-align:right;font-weight:600">${money(p.budget || 0)}</td>
             <td style="${tdS};text-align:center">
               <button class="btn-sm" style="font-size:11px;padding:2px 7px" onclick="openBudgetPoolModal('${p.id}')">✎</button>
@@ -3073,20 +3093,28 @@ function renderBudgetSettings() {
     </div>`).join('');
 }
 
-// Keeps the read-only BE year field in the Budget Pool modal honest: it must always reflect the
-// Start Month the user picked, via the one shared gregorianYearToBuddhistEra() conversion, rather
-// than the ambient Budget Settings year filter — the backend (createBudgetPoolRecord()) already
-// derives `year` from `startDate`/`startMonth` and ignores a disagreeing input when dates exist, so
-// the field would otherwise show a value the save silently overrides. Phase 7A-9A UI half of
-// docs/TECHNICAL_DEBT.md TD-7A-01's "Budget Pool create/edit derives year" exit criterion.
-function _updateBpoolYearFromStart() {
-  const yearEl = document.getElementById('bpool-year');
-  if (!yearEl) return;
-  // Normalize a typed BE value (e.g. "2569-01") to Gregorian before deriving BE year, or the "3112
-  // bug" reappears: gregorianYearToBuddhistEra() would add 543 a second time (2569 + 543 = 3112).
-  const startVal = normalizeMonthValueToGregorian(document.getElementById('bpool-start')?.value || '');
-  const derived = startVal ? gregorianYearToBuddhistEra(startVal) : '';
-  yearEl.value = derived || document.getElementById('bset-year')?.value || getCurrentBuddhistYear();
+// Phase 7A-9B: Budget Year is now user-selectable — changing it auto-populates Start/End Month to
+// the full year (Jan-Dec) as a sensible default, since a pool can never span multiple years
+// (validateBudgetPoolRecord already rejects that — see docs/BvA_REQUIREMENT.md "Phase 7A-1" §2).
+// The user can still narrow the range afterward via the Start/End Month selects. This only fires on
+// a user-driven change (wired via onchange on `bpool-year`), never during openBudgetPoolModal()'s
+// initial population of an existing pool's own months. Year itself is never persisted independently
+// — createBudgetPoolRecord() still re-derives `year` from whatever Start Month this produces, so the
+// data contract (year is derived, never an independent source of truth) is unchanged.
+function _onBpoolYearChange() {
+  populateMonthSelect('bpool-start-month', 1);
+  populateMonthSelect('bpool-end-month', 12);
+}
+
+// Structurally keeps End Month from preceding Start Month — bumps End up to match Start rather than
+// silently allowing an invalid range the user would otherwise only discover as a save-time error.
+function _onBpoolStartMonthChange() {
+  const startSel = document.getElementById('bpool-start-month');
+  const endSel = document.getElementById('bpool-end-month');
+  if (!startSel || !endSel) return;
+  if (Number(endSel.value) < Number(startSel.value)) {
+    populateMonthSelect('bpool-end-month', Number(startSel.value));
+  }
 }
 
 function openBudgetPoolModal(editId) {
@@ -3105,6 +3133,11 @@ function openBudgetPoolModal(editId) {
   const initialStart = canonicalPool?.startMonth || '';
   const initialEnd   = canonicalPool?.endMonth || '';
   const initialYear  = canonicalPool?.year || g('year', year);
+  // Start/End are now Month-only selects (1-12) sharing the one Budget Year select above — a pool
+  // can never span multiple years, so there is exactly one year to pick, not one per field. Default
+  // to January/December for a brand-new pool with no dates yet.
+  const initialStartMonthNum = initialStart ? Number(initialStart.slice(5, 7)) : 1;
+  const initialEndMonthNum   = initialEnd ? Number(initialEnd.slice(5, 7)) : 12;
 
   // Create inline modal
   const existing = document.getElementById('bpool-modal');
@@ -3130,14 +3163,14 @@ function openBudgetPoolModal(editId) {
         <div class="fg"><label>Budget (฿) *</label>
           <input id="bpool-budget" class="ri" type="number" min="0.01" step="0.01" required value="${g('budget')}">
         </div>
-        <div class="fg"><label>ปี (Thai Buddhist Era)</label>
-          <input id="bpool-year" class="ri" value="${initialYear}" readonly style="background:var(--bg)">
+        <div class="fg"><label>Budget Year (พ.ศ.) *</label>
+          <select id="bpool-year" class="ri" required onchange="_onBpoolYearChange()"></select>
         </div>
-        <div class="fg"><label>Start Month (YYYY-MM)</label>
-          <input id="bpool-start" class="ri" type="month" required value="${initialStart}" oninput="_updateBpoolYearFromStart()">
+        <div class="fg"><label>Start Month *</label>
+          <select id="bpool-start-month" class="ri" required onchange="_onBpoolStartMonthChange()"></select>
         </div>
-        <div class="fg"><label>End Month (YYYY-MM)</label>
-          <input id="bpool-end" class="ri" type="month" required value="${initialEnd}">
+        <div class="fg"><label>End Month *</label>
+          <select id="bpool-end-month" class="ri" required></select>
         </div>
       </div>
       <div class="fg" style="margin-top:12px">
@@ -3156,6 +3189,12 @@ function openBudgetPoolModal(editId) {
       </div>
     </div>`;
   document.body.appendChild(modal);
+  // Populated after the modal is in the DOM (selects start empty in the template above), matching
+  // the pattern already used for bset-year/bva-year — not baked into the HTML string, so an
+  // existing pool's own (possibly outside current±1) year is always representable.
+  populateBudgetYearSelect('bpool-year', initialYear);
+  populateMonthSelect('bpool-start-month', initialStartMonthNum);
+  populateMonthSelect('bpool-end-month', initialEndMonthNum);
 }
 
 async function saveBudgetPool() {
@@ -3163,22 +3202,34 @@ async function saveBudgetPool() {
   const project = g('bpool-project');
   const name    = g('bpool-name');
   const budget  = parseFloat(g('bpool-budget')) || 0;
-  const year    = g('bpool-year');
-  // Normalize a typed BE value (e.g. "2569-01") to Gregorian before saving — storage must stay
-  // Gregorian-safe per docs/BvA_REQUIREMENT.md "Phase 7A-1" §2, and createBudgetPoolRecord() derives
-  // `year` from this exact value, so an un-normalized BE value here reproduces the "3112" bug in
-  // the persisted record even if the modal's own bpool-year field displayed correctly.
-  const start   = normalizeMonthValueToGregorian(g('bpool-start')) || null;
-  const end     = normalizeMonthValueToGregorian(g('bpool-end'))   || null;
+  const yearBE  = g('bpool-year');
+  const startMonthNum = g('bpool-start-month');
+  const endMonthNum   = g('bpool-end-month');
+  // Phase 7A-9B: Start/End are now Year(BE)-select + Month-select, so there is no free-text BE/CE
+  // ambiguity left to normalize here — the "3112" bug's root cause (a typed BE string treated as
+  // Gregorian) is structurally impossible once the value always comes from a controlled dropdown.
+  // createBudgetPoolRecord() still re-derives `year` from the constructed startMonth below, so the
+  // derived-year contract is enforced the same way regardless of how the UI collected the input.
+  const yearCE  = financialYearToGregorian(yearBE);
+  const start   = (yearCE && startMonthNum) ? `${yearCE}-${String(startMonthNum).padStart(2, '0')}` : null;
+  const end     = (yearCE && endMonthNum)   ? `${yearCE}-${String(endMonthNum).padStart(2, '0')}`   : null;
   const editId  = g('bpool-edit-id');
 
   const memoTypes = Object.keys(BGT_TYPE_LABELS).filter(k => document.getElementById('bpool-type-' + k)?.checked);
 
   const id    = editId || `pool-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
-  const entry = { id, project, name, budget, year, startMonth: start, endMonth: end, memoTypes };
+  const entry = { id, project, name, budget, year: yearBE, startMonth: start, endMonth: end, memoTypes };
   const validation = validateBudgetPoolChange(entry, loadBudgetPools(), editId || null);
   if (!validation.valid) { alert(validation.errors.join('\n')); return; }
-  if (validation.conflicts.length && !confirm(`พบ Budget Pool ที่ช่วงเวลาและ Spend Type ซ้อนกัน ${validation.conflicts.length} รายการ\nActual Spend ที่ match หลาย pool จะเป็น Needs PMO Review\nต้องการบันทึกต่อหรือไม่?`)) return;
+  if (validation.conflicts.length) {
+    // Phase 7A-9B: name the specific conflicting pool(s) instead of a bare count, so PMO can make
+    // an informed decision — still using validateBudgetPoolChange()'s existing conflicts data, no
+    // new validation engine (this is a presentation-only change).
+    const details = validation.conflicts
+      .map(p => `- ${p.project} / ${p.name} (${formatMonthBE(p.startMonth)} → ${formatMonthBE(p.endMonth)})`)
+      .join('\n');
+    if (!confirm(`พบ Budget Pool ที่ช่วงเวลาและ Spend Type ซ้อนกัน ${validation.conflicts.length} รายการ:\n${details}\n\nActual Spend ที่ match ได้มากกว่า 1 pool จะถูกทำเครื่องหมายเป็น Needs PMO Review ให้ PMO ตรวจสอบภายหลัง\nต้องการบันทึกต่อหรือไม่?`)) return;
+  }
   try {
     await savePoolAsync(entry);
     document.getElementById('bpool-modal')?.remove();
@@ -3189,9 +3240,25 @@ async function saveBudgetPool() {
 function deleteBudgetPool(id) {
   const manualExpenses = typeof loadManualExpenses === 'function' ? loadManualExpenses() : [];
   const memos = typeof loadMemos === 'function' ? loadMemos() : [];
-  const blockers = budgetPoolDeletionBlockers(id, loadActualSpendRecords(), manualExpenses, memos);
-  if (blockers.length) { alert(`ไม่สามารถลบ Pool ที่มี Actual Spend อ้างอิงอยู่ ${blockers.length} รายการ`); return; }
-  if (!confirm('ลบ pool นี้?')) return;
+  const records = loadActualSpendRecords();
+  const pool = loadBudgetPools().map(createBudgetPoolRecord).find(p => p.id === id);
+  const poolLabel = pool ? `${pool.project} / ${pool.name}` : id;
+  const blockers = budgetPoolDeletionBlockers(id, records, manualExpenses, memos);
+  if (blockers.length) {
+    // Phase 7A-9B: explain WHY deletion is blocked and WHAT still references the pool, by source,
+    // instead of a bare count — behavior is unchanged (still a hard block; delete-to-Unbudgeted
+    // cascade is a separate, later reviewed phase per docs/BvA_REQUIREMENT.md "Phase 7A-1" §9).
+    const canonicalCount = records.filter(r => getFinalBudgetPoolId(r) === id).length;
+    const manualCount = manualExpenses.filter(e => e && e.budgetPoolId === id).length;
+    const memoCount = memos.filter(m => m && m.budgetPoolId === id).length;
+    const parts = [];
+    if (canonicalCount) parts.push(`Actual Spend ${canonicalCount} รายการ`);
+    if (manualCount) parts.push(`Manual Expense ${manualCount} รายการ`);
+    if (memoCount) parts.push(`Memo ${memoCount} รายการ`);
+    alert(`ไม่สามารถลบ Pool "${poolLabel}" ได้ เนื่องจากยังมีรายการอ้างอิงอยู่:\n${parts.join('\n')}\n\nกรุณาย้ายหรือยกเลิกการอ้างอิงเหล่านี้ก่อน หรือแก้ไข Pool แทนการลบ`);
+    return;
+  }
+  if (!confirm(`ลบ Budget Pool "${poolLabel}" นี้?`)) return;
   deletePoolAsync(id)
     .then(() => renderBudgetSettings())
     .catch(e => console.warn('Pool delete error:', e));

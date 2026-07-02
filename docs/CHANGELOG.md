@@ -22,6 +22,87 @@
 
 ## Current Baseline
 
+### Phase 7A-9B - Budget Pool UX & Workflow (Year selector, Month picker, BE display, warnings)
+
+Scope approved: shared BE display helper; Budget Year selectable with Start/End auto-populate;
+Month picker/select redesign; Actual Spend year filter BE label; in-app Budget Pool date/month/year
+display standardized to BE; duplicate/overlap warning UX improved (existing validation only); delete
+messaging improved (behavior still hard-blocked). Explicitly NOT in scope: Export format change,
+Archive/Active/Inactive, delete-to-Unbudgeted cascade, Supabase/persistence-model/Forecast changes —
+per approved decisions.
+
+#### Added
+- `formatMonthBE()` (`app.js`) — shared display-only helper converting a Gregorian `"YYYY-MM"` (or
+  full date) value to a BE-labeled `"MM/YYYY"` string (e.g. `"2026-01"` -> `"01/2569"`), matching the
+  app's existing dd/mm/yyyy-BE convention. Internal storage/comparison/matching untouched.
+- `populateMonthSelect(id, selectedMonth)` (`views/budget.js`) — populates a Start/End Month
+  `<select>` with the 12 Thai month names (reusing the existing `MONTHS_TH` array), value 1-12.
+- `_onBpoolYearChange()` / `_onBpoolStartMonthChange()` (`views/budget.js`) — wire the new Budget
+  Year/Start Month selects: changing Year resets Start/End Month to January/December (the "2569 ->
+  2026-01 to 2026-12" requirement); changing Start Month bumps End Month up to match if it would
+  otherwise precede it, preventing an invalid range structurally rather than only at save time.
+
+#### Changed
+- **Budget Year is now user-selectable** (`bpool-year` is a `<select>`, no longer a readonly text
+  input). `populateBudgetYearSelect(id, extraYear)` gained an optional `extraYear` parameter so an
+  existing pool's own (possibly outside current±1) year is always representable and pre-selected,
+  never silently dropped.
+- **Start/End Month picker redesign**: `bpool-start`/`bpool-end` (free-text `type="month"` inputs)
+  replaced with `bpool-start-month`/`bpool-end-month` (Thai month-name `<select>`s, values 1-12)
+  sharing the one Budget Year select — a pool can never span multiple years (already enforced by
+  `validateBudgetPoolRecord`), so one year field is sufficient for both. `saveBudgetPool()` now
+  constructs Gregorian `startMonth`/`endMonth` from `financialYearToGregorian(yearBE) + '-' +
+  month`, removing the free-text BE/CE ambiguity that caused the "3112" bug — there is no longer any
+  typed month value to mistype.
+- **In-app BE display**: Budget Settings pool list, BvA pool rows, and the Assign Budget Pool
+  modal's period line now show `formatMonthBE()` output instead of raw Gregorian `YYYY-MM`.
+- **Actual Spend year filter (`as-year`)**: option labels now show `ปี {BE year}` via
+  `gregorianYearToBuddhistEra()`; the underlying `<option value>` stays Gregorian since
+  `actualSpendRecordInYear()` compares it against `record.startDate`'s Gregorian year. The
+  `as-period-label` text (display-only) was also converted to BE for consistency with the dropdown
+  right next to it.
+- **Overlap warning**: `saveBudgetPool()`'s conflict `confirm()` now lists each conflicting pool by
+  `project / name (BE period)` instead of a bare count — still built entirely from
+  `validateBudgetPoolChange()`'s existing `conflicts` data; no new validation engine.
+- **Delete messaging**: `deleteBudgetPool()`'s block alert now names the pool and breaks down
+  reference counts by source (`Actual Spend N รายการ` / `Manual Expense N รายการ` / `Memo N
+  รายการ`) instead of one bare total; the no-blocker confirm now also names the pool. **Behavior is
+  unchanged** — deletion remains fully blocked whenever any reference exists. Delete-to-Unbudgeted
+  cascade is explicitly deferred to a separate, later reviewed phase (per approved decision), pending
+  closing the known gap where `budgetPoolDeletionBlockers()` doesn't check a memo's own legacy
+  `budgetPoolId` (`docs/BvA_REQUIREMENT.md` "Phase 7A-1" §9).
+
+#### Removed
+- `_updateBpoolYearFromStart()` (`views/budget.js`) — dead code once `bpool-start` (free-text month
+  input) no longer exists; its behavior (live year derivation from Start Month) is now structurally
+  guaranteed by construction (Year and Month selects can never disagree) rather than needing a live
+  re-derivation listener.
+
+#### Explicitly not done (per approved decisions)
+- Export (`exportBudgetPoolsCSV`) still shows raw Gregorian — not converted to BE this phase.
+- Archive/Active/Inactive — not implemented; confirmed deferred to 7A-9C.
+- Delete-to-Unbudgeted cascade behavior — not implemented; hard-block behavior unchanged, only its
+  messaging improved.
+- Bulk import (`handlePoolBulkUpload`/`_confirmPoolImport`) untouched — its own hardcoded `'2569'`
+  fallback and inline duplicate check remain open items (TD-7A-01/TD-7A-04).
+- No Supabase, persistence model, or Forecast changes.
+
+#### Tests
+- `tests/financial-models.test.js`: `formatMonthBE()` unit tests (BE conversion, BE-year-boundary
+  correctness, empty/invalid input, full-date input); `openBudgetTagModal()` structural test extended
+  to confirm it renders the pool period via `formatMonthBE()`.
+- `tests/budget-expenses.test.js`: replaced the Phase 7A-9A `_updateBpoolYearFromStart`/free-text
+  `bpool-start`/`bpool-end` tests (now-impossible scenarios) with equivalent-purpose tests for the
+  new Year+Month-select mechanism — including the exact "2569 -> 2026-01 to 2026-12" auto-populate
+  requirement, the Start-Month-bumps-End-Month guard, and the legacy `year:"3112"` self-heal in the
+  new picker. Added: `populateBudgetYearSelect`'s `extraYear` behavior; Budget Settings/BvA BE period
+  display (and that raw Gregorian no longer leaks into either table); `as-year` BE label (structural,
+  no execution harness for `renderActualSpend()`'s full dependency set); `deleteBudgetPool()`
+  messaging (named pool + per-source breakdown when blocked; named pool when not); `saveBudgetPool()`
+  overlap warning naming the specific conflicting pool. Full suite (205 tests) re-run and passes.
+
+---
+
 ### Phase 7A-9A - Year/BE Normalization Foundation & Project Dropdown Foundation
 #### Added
 - `getCurrentBuddhistYear()` (`app.js`) — the single "what year is it right now, in BE" helper,

@@ -81,13 +81,15 @@ Budget Pool `year` is derived from normalized `startMonth`.
 - Assignment selectors must use canonical Budget Pool records.
 - Legacy corrupted records may be normalized at runtime for display, but should not be auto-migrated unless explicitly approved.
 
-## Current 7A-9A Rule
+## 7A-9A Rule (superseded — see below)
 
 Budget Year remains read-only and derives from Start Month.
 
-## Future 7A-9B Rule
+## 7A-9B Rule (implemented)
 
-Budget Year should become selectable by the user, and Start/End Month should auto-populate from the selected Budget Year.
+Budget Year is selectable by the user, and Start/End Month auto-populate from the selected Budget
+Year. `year` is still always derived (never independently persisted) — selecting a year sets
+Start/End Month, and `createBudgetPoolRecord()` derives `year` from that, same as before.
 
 ---
 
@@ -249,31 +251,37 @@ The following areas should use consistent display and filter behavior:
 
 ## UI-01 — Actual Spend Year Display
 
-Status: Open / Deferred
+Status: Resolved (7A-9B, in-app scope) / Export still open
 
-Actual Spend year filter currently displays Gregorian years while Budget vs Actual and Budget Settings display Buddhist Era.
+The Actual Spend year filter (`as-year`) now labels its options in Buddhist Era (`ปี 2569`) via
+`gregorianYearToBuddhistEra()`, matching Budget vs Actual and Budget Settings. The underlying
+`<option value>` intentionally stays Gregorian since `actualSpendRecordInYear()` compares it against
+`record.startDate`'s Gregorian year — value/label are deliberately different, label only.
 
-Target: BE display everywhere.
+Still open: Export formats (CSV columns) were explicitly left in their current/Gregorian format this
+phase per approved decision — export terminology/date format review is a separate later phase.
 
 ---
 
 ## UI-02 — Budget Pool Month Input
 
-Status: Open / Deferred
+Status: Resolved (7A-9B)
 
-Budget Pool Start/End Month still allows typed `YYYY-MM` input.
-
-Target: Month picker or controlled selector.
+Budget Pool Start/End Month are now `<select>` controls (Thai month names, values 1-12) sharing one
+Budget Year select, instead of free-text `type="month"` inputs. A cross-year range is now
+structurally impossible to construct through this UI (previously only caught at save-time
+validation).
 
 ---
 
 ## UI-03 — Budget Year Field
 
-Status: Open / Deferred
+Status: Resolved (7A-9B)
 
-Budget Year is currently read-only.
-
-Target: selectable Budget Year that auto-populates Start/End Month.
+Budget Year is now a user-selectable `<select>` (`populateBudgetYearSelect()`, extended with an
+optional `extraYear` so an existing pool's own year is always representable). Selecting a year
+auto-populates Start Month to January and End Month to December; the data contract is unaffected —
+`createBudgetPoolRecord()` still derives `year` from whatever Start Month this produces.
 
 ---
 
@@ -289,11 +297,15 @@ Target: canonical project source or documented data-derived exception.
 
 ## UI-05 — Delete Behavior
 
-Status: Open / Deferred
+Status: Partially resolved (7A-9B messaging) / cascade behavior still deferred
 
-Budget Pool deletion behavior is not yet aligned with intended workflow.
+`deleteBudgetPool()`'s block message now names the pool and breaks down reference counts by source
+(canonical Actual Spend / Manual Expense / Memo); the no-blocker confirm now also names the pool.
 
-Target: impact-aware confirmation and optional archive workflow.
+Deletion remains a hard block whenever any reference exists — allowing delete-with-cascade-to-
+Unbudgeted was explicitly deferred to a separate, later reviewed phase (approved decision), pending
+closing the known gap where `budgetPoolDeletionBlockers()` doesn't check a memo's own legacy
+`budgetPoolId` field. Archive workflow remains deferred to 7A-9C.
 
 ---
 
@@ -339,17 +351,25 @@ Does not include:
 - full BE UI standardization
 - delete/archive workflow
 
-## 7A-9B
+## 7A-9B (completed, scope as approved)
 
 Budget Pool UX and workflow.
 
-Expected scope:
+Delivered:
 
-- Month picker / Year picker
-- full BE display in Budget & Spend
-- duplicate/overlap warning UX
-- delete confirmation
-- archive flow
+- Month picker / Year picker (Start/End Month selects + selectable Budget Year, auto-populate)
+- BE display in-app for Budget Pool dates/months (Budget Settings, BvA, Assign Budget Pool modal)
+  and the Actual Spend year filter label — Export explicitly excluded, reviewed separately
+- Duplicate/overlap warning UX improvement (existing validation only, no new engine)
+- Delete messaging improvement (named pool + per-source reference breakdown) — behavior still
+  hard-blocked; cascade-to-Unbudgeted explicitly deferred to a separate later phase
+
+Explicitly deferred out of 7A-9B (approved decisions):
+
+- Archive/Active/Inactive → 7A-9C
+- Delete-to-Unbudgeted cascade behavior → separate reviewed phase, after closing the memo-level
+  `budgetPoolId` reference gap
+- Export format/terminology → reviewed later
 
 ## 7A-9C
 

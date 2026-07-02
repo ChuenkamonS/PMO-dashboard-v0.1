@@ -1059,7 +1059,7 @@ function openBudgetTagModal(memoNo) {
               </div>
               <div style="display:flex;gap:10px;margin-top:2px">
                 <span style="font-size:11px;color:var(--text-3)">${esc(types)}</span>
-                <span style="font-size:11px;color:var(--text-3)">${esc(pool.startMonth||'')}${pool.endMonth&&pool.endMonth!==pool.startMonth?' → '+esc(pool.endMonth):''}</span>
+                <span style="font-size:11px;color:var(--text-3)">${esc(formatMonthBE(pool.startMonth))}${pool.endMonth&&pool.endMonth!==pool.startMonth?' → '+esc(formatMonthBE(pool.endMonth)):''}</span>
                 <span style="font-size:11px;color:var(--text-3)">ใช้ไป ${pct}%</span>
                 ${isOver ? '<span style="font-size:10px;background:#FCEBEB;color:#791F1F;padding:1px 5px;border-radius:3px">เกิน budget</span>' : ''}
               </div>

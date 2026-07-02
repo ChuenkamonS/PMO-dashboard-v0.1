@@ -625,6 +625,17 @@ function getCurrentBuddhistYear() {
   return gregorianYearToBuddhistEra(new Date().getFullYear());
 }
 
+// Phase 7A-9B: shared user-facing display helper for a Gregorian "YYYY-MM" (or full date) Budget
+// Pool month value, e.g. "2026-01" -> "01/2569". Mirrors the app's existing dd/mm/yyyy-BE date
+// convention (see parseThaiDate()) so month-only values read consistently with full dates
+// elsewhere. Display-only: internal storage, comparison, and matching remain Gregorian and must
+// keep using the raw "YYYY-MM" value, never this formatted string.
+function formatMonthBE(value) {
+  const parsed = parseStrictCalendarValue(value);
+  if (!parsed) return '';
+  return `${String(parsed.month).padStart(2, '0')}/${gregorianYearToBuddhistEra(value)}`;
+}
+
 // Canonical Project list — the single source of truth for "Project" dropdowns that should reflect
 // Settings' configured project list (as opposed to dropdowns that intentionally derive their
 // options from observed data, e.g. Pending's project filter). Phase 7A-9A foundation: only
