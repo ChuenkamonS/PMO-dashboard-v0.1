@@ -1435,9 +1435,11 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <button class="btn-sm ov-preset-btn" id="ov-pbtn-0"  onclick="ovSetPreset(0)">Custom</button>
             </div>
             <div id="ov-custom-range" style="display:none;align-items:center;gap:6px">
-              <select id="ov-from-sel" onchange="ovApplyCustomRange()" class="ri" style="font-size:11px;padding:3px 6px;width:auto"></select>
+              <!-- Validation (12-month limit) and the resulting graph/KPI update must only happen
+                   on Apply, not while the user is still freely picking start/end months. -->
+              <select id="ov-from-sel" class="ri" style="font-size:11px;padding:3px 6px;width:auto"></select>
               <span style="font-size:11px;color:var(--text-3)">→</span>
-              <select id="ov-to-sel" onchange="ovApplyCustomRange()" class="ri" style="font-size:11px;padding:3px 6px;width:auto"></select>
+              <select id="ov-to-sel" class="ri" style="font-size:11px;padding:3px 6px;width:auto"></select>
               <button class="btn-sm" onclick="ovApplyCustomRange()" style="font-size:11px">Apply</button>
             </div>
             <span style="font-size:11px;color:var(--text-3)" id="ov-period-label"></span>

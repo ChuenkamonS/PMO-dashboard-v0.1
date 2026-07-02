@@ -767,6 +767,13 @@ function ovSetPreset(n) {
   const cr = document.getElementById('ov-custom-range');
   if (n === 0) {
     if (cr) cr.style.display = 'flex';
+    // Seed the custom selectors with the currently applied range instead of leaving them at the
+    // browser's default (first option = oldest available month), which looked like a stale,
+    // multi-year-old default unrelated to the period actually shown on screen.
+    const fromSel = document.getElementById('ov-from-sel');
+    const toSel = document.getElementById('ov-to-sel');
+    if (fromSel) fromSel.value = _ov.fromIdx;
+    if (toSel) toSel.value = _ov.toIdx;
   } else {
     if (cr) cr.style.display = 'none';
     // Cap at 12 months
@@ -1982,13 +1989,24 @@ function showActualSpendDetailModal(title, fields, helper = '', details = '') {
     status ? { label: status, className: actualSpendBudgetStatusBadgeClass(status) } : null,
   ].filter(Boolean);
   // Reference No / Description / Source / Budget Status move into the header above; Project is
-  // shown inline next to the badges. Everything else keeps its place in the grouped field grid
-  // below so no field is dropped, only re-positioned for readability.
+  // shown inline next to the badges. Everything else keeps its place below so no field is dropped,
+  // only re-positioned for readability. The lower section is split into named groups (Spend
+  // Details / Audit / Notes) separated by a thin rule instead of a filled grey box — a flat colour
+  // panel around every group read as visual noise rather than useful separation.
   const headerLabels = ['Reference No', 'Description', 'Source', 'Budget Status', 'Project'];
-  const bodyFields = fields.filter(([label]) => !headerLabels.includes(label));
+  const auditLabels = ['Created By', 'Created Date', 'Updated At', 'Creation Method'];
+  const notesValue = byLabel('Notes');
+  const spendFields = fields.filter(([label]) => !headerLabels.includes(label) && !auditLabels.includes(label) && label !== 'Notes');
+  const auditFields = fields.filter(([label]) => auditLabels.includes(label));
   const field = ([label, fieldValue]) => `<div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">${esc(label)}</div><div style="overflow-wrap:anywhere">${esc(fieldValue == null || fieldValue === '' ? '—' : fieldValue)}</div></div>`;
-  const chunk = (list, size) => Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, i * size + size));
-  const sectionsHtml = chunk(bodyFields, 3).map(group => `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;background:var(--bg-2,var(--bg));border-radius:var(--r-sm);padding:12px 14px;margin-bottom:10px">${group.map(field).join('')}</div>`).join('');
+  const grid = list => `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px 20px">${list.map(field).join('')}</div>`;
+  const sectionLabel = text => `<div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">${esc(text)}</div>`;
+  const divider = 'margin-top:18px;padding-top:14px;border-top:1px solid var(--border)';
+  const bodyHtml = [
+    spendFields.length ? `<div>${sectionLabel('Spend Details')}${grid(spendFields)}</div>` : '',
+    auditFields.length ? `<div style="${divider}">${sectionLabel('Audit')}${grid(auditFields)}</div>` : '',
+    notesValue !== undefined ? `<div style="${divider}">${sectionLabel('Notes')}<div style="overflow-wrap:anywhere;font-size:12px;line-height:1.5">${esc(notesValue == null || notesValue === '' ? '—' : notesValue)}</div></div>` : '',
+  ].filter(Boolean).join('');
 
   panel.innerHTML = `<div class="card" style="width:720px;max-width:95vw;max-height:86vh;overflow:auto;padding:0">
     <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
@@ -2001,7 +2019,7 @@ function showActualSpendDetailModal(title, fields, helper = '', details = '') {
       <button class="btn-sm" onclick="document.getElementById('actual-spend-record-detail').remove()" style="flex-shrink:0">✕</button>
     </div>
     ${helper ? `<div style="margin:12px 16px 0;padding:9px 11px;background:var(--blue-50);color:var(--blue);border-radius:var(--r-sm);font-size:11px">${esc(helper)}</div>` : ''}
-    <div style="padding:16px">${sectionsHtml}</div>
+    <div style="padding:16px">${bodyHtml}</div>
     ${details}
   </div>`;
   document.body.appendChild(panel);
@@ -2496,18 +2514,22 @@ function _renderBvaWith(pools) {
       <div style="height:10px;background:var(--border);border-radius:5px;overflow:hidden"><div style="height:100%;width:${Math.min(pct,100)}%;background:${totalColor};border-radius:5px"></div></div>
     </div>
     ${unbudgetedRecords.length ? `
-      <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px;border-color:var(--amber)">
-        <div onclick="showBvaActualSpend('unbudgeted')" style="padding:12px 14px;cursor:pointer;display:flex;justify-content:space-between;background:var(--amber-50,#FFFBEB)">
+      <div class="card" id="bva-unbudgeted-section" style="padding:0;overflow:hidden;margin-bottom:12px;border-color:var(--amber)">
+        <div style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;background:var(--amber-50,#FFFBEB);border-bottom:1px solid var(--border)">
           <strong style="color:var(--amber)">Unbudgeted Actual Spend (${unbudgetedRecords.length} items)</strong>
-          <strong style="color:var(--amber)">${money(Math.round(totals.unbudgetedActual))} →</strong>
+          <strong style="color:var(--amber)">${money(Math.round(totals.unbudgetedActual))}</strong>
         </div>
+        <div style="max-height:340px;overflow-y:auto;overflow-x:hidden">${actualSpendRowsTable(unbudgetedRecords)}</div>
+        <!-- TODO (future phase, not implemented here): add a per-row "Map to Budget Pool" action
+             in this in-page section so PMO can assign a pool directly from the Unbudgeted list. -->
       </div>` : ''}
     ${needsReviewRecords.length ? `
-      <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px;border-color:var(--amber)">
-        <div onclick="showBvaActualSpend('needs-review')" style="padding:12px 14px;cursor:pointer;display:flex;justify-content:space-between;background:var(--amber-50,#FFFBEB)">
+      <div class="card" id="bva-needs-review-section" style="padding:0;overflow:hidden;margin-bottom:12px;border-color:var(--amber)">
+        <div style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;background:var(--amber-50,#FFFBEB);border-bottom:1px solid var(--border)">
           <strong style="color:var(--amber)">Needs PMO Review (${needsReviewRecords.length} items)</strong>
-          <strong style="color:var(--amber)">${money(Math.round(totals.needsReviewActual))} →</strong>
+          <strong style="color:var(--amber)">${money(Math.round(totals.needsReviewActual))}</strong>
         </div>
+        <div style="max-height:340px;overflow-y:auto;overflow-x:hidden">${actualSpendRowsTable(needsReviewRecords)}</div>
       </div>` : ''}
     ${[...byProj.entries()].map(([proj, projectRows]) => `
       <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
@@ -2555,11 +2577,45 @@ function _renderBvaWith(pools) {
       </div>`).join('')}`;
 }
 
-// ── Canonical Actual Spend drill-down ──
-// Renders as stacked cards (one record per card, fields wrap via auto-fit grid) instead of a wide
-// table — a 5-column table needed horizontal scrolling to see Amount at this modal width, which
-// could make a record look missing rather than just off-screen. The card layout always fits inside
-// the modal's own width, so nothing is hidden due to layout, per Phase 7A-5 scope item 4/5.
+// Shared one-row-per-record, single-line table used by every BvA / Budget Pool drill-down view —
+// the in-page Unbudgeted and Needs PMO Review sections in _renderBvaWith(), and the "all"/per-pool
+// modal in showBvaActualSpend(). `table-layout:fixed` plus per-cell text-overflow:ellipsis keeps
+// every record on exactly one line and never needs horizontal scroll, regardless of how long a
+// Reference/Project value is (the full value is still available via the `title` tooltip).
+function actualSpendRowsTable(records) {
+  if (!records.length) return `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:12px">ยังไม่มี Actual Spend</div>`;
+  const thS = 'padding:7px 10px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text-3);text-align:left;font-weight:600;text-transform:uppercase;white-space:nowrap';
+  const tdS = 'padding:7px 10px;border-bottom:1px solid var(--border);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+  const referenceCell = record => {
+    const ref = esc(record.referenceNo || '—');
+    if (record.source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO && record.referenceNo) {
+      // openMemoReadOnly() is the existing shared read-only Memo viewer already used from the
+      // License/Device tabs (views/history.js) — reuse it instead of building a new memo view.
+      return `<span style="color:var(--blue);font-weight:600;text-decoration:underline;cursor:pointer" onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly('${esc(record.referenceNo)}')">${ref}</span>`;
+    }
+    return `<span style="font-weight:600">${ref}</span>`;
+  };
+  const rows = [...records].sort((a,b) => String(b.startDate||'').localeCompare(String(a.startDate||'')));
+  return `<table style="width:100%;table-layout:fixed;border-collapse:collapse">
+    <colgroup><col style="width:30%"><col style="width:14%"><col style="width:20%"><col style="width:18%"><col style="width:18%"></colgroup>
+    <thead><tr>
+      <th style="${thS}">Reference</th><th style="${thS}">Source</th><th style="${thS}">Project</th>
+      <th style="${thS}">Spend Type</th><th style="${thS};text-align:right">Amount</th>
+    </tr></thead>
+    <tbody>${rows.map(record => `<tr>
+      <td style="${tdS}" title="${esc(record.referenceNo || '—')}">${referenceCell(record)}</td>
+      <td style="${tdS}"><span class="badge ${actualSpendSourceBadgeClass(record.source)}">${actualSpendSourceShortLabel(record.source)}</span></td>
+      <td style="${tdS}" title="${esc(record.project || '')}">${esc(record.project || '—')}</td>
+      <td style="${tdS}" title="${esc(record.spendType || '')}">${esc(record.spendType || '—')}</td>
+      <td style="${tdS};text-align:right;font-weight:600">${money(Number(record.amount)||0)}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+// ── Canonical Actual Spend drill-down (still a modal: Budget Pool rows, and the "all" KPI total) ──
+// Unbudgeted and Needs PMO Review moved out of this modal into their own always-visible in-page
+// sections in _renderBvaWith() (Phase 7A-5 follow-up) so they read as part of the page, not a
+// pop-up, and so a future "map to Budget Pool" action has a natural place to live.
 function showBvaActualSpend(scope) {
   if (!_bvaDataset) return;
   let records;
@@ -2567,12 +2623,6 @@ function showBvaActualSpend(scope) {
   if (scope === 'all') {
     records = [..._bvaDataset.rows.flatMap(row => row.records), ..._bvaDataset.unbudgetedRecords, ...(_bvaDataset.needsReviewRecords || [])];
     title = 'Actual Spend';
-  } else if (scope === 'unbudgeted') {
-    records = _bvaDataset.unbudgetedRecords;
-    title = 'Unbudgeted Actual Spend';
-  } else if (scope === 'needs-review') {
-    records = _bvaDataset.needsReviewRecords || [];
-    title = 'Needs PMO Review';
   } else {
     const row = _bvaDataset.rows.find(item => item.pool.id === scope);
     if (!row) return;
@@ -2588,25 +2638,8 @@ function showBvaActualSpend(scope) {
   panel.id    = 'bva-memo-panel';
   panel.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;display:flex;align-items:center;justify-content:center';
 
-  const referenceCell = record => {
-    const ref = esc(record.referenceNo || '—');
-    if (record.source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO && record.referenceNo) {
-      // openMemoReadOnly() is the existing shared read-only Memo viewer already used from the
-      // License/Device tabs (views/history.js) — reuse it instead of building a new memo view.
-      return `<span style="color:var(--blue);font-weight:600;text-decoration:underline;cursor:pointer" onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly('${esc(record.referenceNo)}')">${ref}</span>`;
-    }
-    return `<span style="font-weight:600">${ref}</span>`;
-  };
-  const recordCard = record => `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);align-items:start">
-    <div style="min-width:0"><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Reference</div><div style="overflow-wrap:anywhere">${referenceCell(record)}</div></div>
-    <div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Source</div><span class="badge ${actualSpendSourceBadgeClass(record.source)}">${actualSpendSourceShortLabel(record.source)}</span></div>
-    <div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Project</div><div>${esc(record.project || '—')}</div></div>
-    <div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Spend Type</div><div>${esc(record.spendType || '—')}</div></div>
-    <div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Amount</div><div style="font-weight:700">${money(Number(record.amount)||0)}</div></div>
-  </div>`;
-
   panel.innerHTML = `
-    <div class="card" style="width:720px;max-width:95vw;max-height:85vh;overflow-x:hidden;overflow-y:auto;padding:0">
+    <div class="card" style="width:760px;max-width:95vw;max-height:85vh;overflow-x:hidden;overflow-y:auto;padding:0">
       <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--surface)">
         <div>
           <div style="font-size:14px;font-weight:600">${esc(title)}</div>
@@ -2614,11 +2647,7 @@ function showBvaActualSpend(scope) {
         </div>
         <button class="btn-sm" onclick="document.getElementById('bva-memo-panel').remove()" style="padding:4px 10px">✕</button>
       </div>
-      <div style="padding:10px;display:flex;flex-direction:column;gap:8px">
-        ${records.length
-          ? records.sort((a,b) => String(b.startDate||'').localeCompare(String(a.startDate||''))).map(recordCard).join('')
-          : `<div style="padding:32px;text-align:center;color:var(--text-3)">ยังไม่มี Actual Spend</div>`}
-      </div>
+      ${actualSpendRowsTable(records)}
     </div>`;
   document.body.appendChild(panel);
   panel.addEventListener('click', e => { if (e.target === panel) panel.remove(); });

@@ -1143,16 +1143,28 @@ test('Overview totals stay equal for a custom period', () => {
   assertOverviewTotals(context, 3000);
 });
 
-test('Phase 7A-5: Overview custom range over 12 months is blocked with a clear message, not silently capped', () => {
+test('Phase 7A-5v2: Overview custom range selectors validate only via Apply, not on change', () => {
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const customRangeBlock = html.match(/<div id="ov-custom-range"[\s\S]*?<\/div>/)[0];
+  assert.doesNotMatch(customRangeBlock, /onchange=/, 'from/to selects must not validate or apply on every change');
+  assert.match(customRangeBlock, /<button[^>]*onclick="ovApplyCustomRange\(\)"[^>]*>Apply<\/button>/);
+});
+
+test('Phase 7A-5v2: an invalid (>12 month) custom range shows an alert and does not update the graph/KPI state', () => {
   const context = createOverviewContext();
   seedOverview(context);
   const periodBefore = context.__elements.get('ov-period-label').textContent;
   const kpiBefore = context.__elements.get('bgt-kpi-total').textContent;
+  const chartCallsBefore = context.chartConfigs.length;
   const messages = [];
   context.alert = message => messages.push(message);
 
+  // Freely changing the selectors (no Apply yet) must not trigger validation or a re-render.
   context.__elements.get('ov-from-sel').value = '0';
   context.__elements.get('ov-to-sel').value = '23'; // 24-month span, exceeds the 12-month limit
+  assert.equal(messages.length, 0, 'changing the selectors alone must not validate before Apply is clicked');
+  assert.equal(context.chartConfigs.length, chartCallsBefore, 'the graph must not change before Apply is clicked');
+
   context.ovApplyCustomRange();
 
   assert.equal(messages.length, 1, 'selecting more than 12 months must show a clear popup/message');
@@ -1161,11 +1173,34 @@ test('Phase 7A-5: Overview custom range over 12 months is blocked with a clear m
     'an out-of-range selection must not be silently applied as a (different, e.g. 12-month) period');
   assert.equal(context.__elements.get('bgt-kpi-total').textContent, kpiBefore,
     'the KPI must not update for a blocked, out-of-range custom range');
+  assert.equal(context.chartConfigs.length, chartCallsBefore, 'the graph must not update for a blocked custom range');
+});
 
-  // A valid range immediately afterwards must still work normally.
-  context.__elements.get('ov-to-sel').value = '11'; // 12-month span, valid
+test('Phase 7A-5v2: a valid custom range only applies once Apply is clicked', () => {
+  const context = createOverviewContext();
+  seedOverview(context);
+  const periodBefore = context.__elements.get('ov-period-label').textContent;
+
+  context.__elements.get('ov-from-sel').value = '12';
+  context.__elements.get('ov-to-sel').value = '14'; // valid 3-month span
+  assert.equal(context.__elements.get('ov-period-label').textContent, periodBefore,
+    'selecting a valid range must not apply until Apply is clicked');
+
   context.ovApplyCustomRange();
-  assert.equal(messages.length, 1, 'a valid range must not trigger another block message');
+  assertOverviewTotals(context, 3000);
+  assert.notEqual(context.__elements.get('ov-period-label').textContent, periodBefore,
+    'clicking Apply with a valid range must update the period/graph/KPI');
+});
+
+test('Phase 7A-5v2: switching to Custom seeds the selectors with the currently applied range, not a stale multi-year-old default', () => {
+  const context = createOverviewContext();
+  seedOverview(context); // default preset is 12M
+  context.ovSetPreset(6); // apply a 6-month window first
+  context.ovSetPreset(0); // switch to Custom
+  const toIdx = context.__elements.get('ov-to-sel').value;
+  const fromIdx = context.__elements.get('ov-from-sel').value;
+  assert.equal(Number(toIdx), 23, 'the "to" selector should reflect the currently applied period, not default to the last option only by coincidence');
+  assert.equal(Number(fromIdx), 18, 'the "from" selector must reflect the currently applied 6-month window, not a stale default two years back');
 });
 
 test('historical expense migration is additive, RLS-enabled, and forbids delete access', () => {
@@ -1237,46 +1272,41 @@ function seedBvaScenario(context) {
   return pools;
 }
 
-test('Phase 7A-5: BvA drill-down includes Needs PMO Review records and its total equals the KPI Actual total', () => {
+test('Phase 7A-5v2: Unbudgeted and Needs PMO Review render as always-visible in-page sections, one line per record, not a pop-up', () => {
   const context = createBvaContext();
   seedBvaScenario(context);
+  const html = context.__elements.get('bva-content').innerHTML;
 
-  // KPI card total, as rendered on the BvA tab itself.
-  const kpiHtml = context.__elements.get('bva-content').innerHTML;
-  const expectedTotal = context.money(Math.round(5000 + 1200 + 3300));
-  assert.ok(kpiHtml.includes(expectedTotal), 'KPI Actual total must equal Mapped + Unbudgeted + Needs PMO Review');
-
-  // "Needs PMO Review" must have its own visible section on the BvA tab (not folded into Unbudgeted).
-  assert.match(kpiHtml, /Needs PMO Review \(1 items\)/);
-  assert.doesNotMatch(kpiHtml, /Needs PMO Review \(0 items\)/);
-
-  // Clicking the Needs PMO Review section must drill down to exactly that record.
-  context.showBvaActualSpend('needs-review');
-  const reviewPanel = context.__lastPanel.innerHTML;
-  assert.match(reviewPanel, /INFRA-UI-1/);
-  assert.doesNotMatch(reviewPanel, /MEMO-UI-1|MAN-UI-1/);
-  assert.ok(reviewPanel.includes(context.money(3300)));
-
-  // The "all" drill-down (KPI Actual click-through) must include every bucket, with no record
-  // hidden or double counted, and its total must equal the KPI Actual total exactly.
-  context.showBvaActualSpend('all');
-  const allPanel = context.__lastPanel.innerHTML;
-  ['MEMO-UI-1','MAN-UI-1','INFRA-UI-1'].forEach(ref => assert.match(allPanel, new RegExp(ref)));
-  assert.ok(allPanel.includes(expectedTotal), 'drill-down total must equal the KPI Actual total');
-  assert.equal((allPanel.match(/>Reference<\/div>/g) || []).length, 3, 'each record must render as exactly one card, never duplicated');
+  assert.match(html, /id="bva-unbudgeted-section"/);
+  assert.match(html, /id="bva-needs-review-section"/);
+  assert.match(html, /Needs PMO Review \(1 items\)/);
+  // Both sections are rendered inline on the page itself (in bva-content), not behind a click.
+  assert.match(html, /MAN-UI-1/);
+  assert.match(html, /INFRA-UI-1/);
+  assert.doesNotMatch(html, /onclick="showBvaActualSpend\('unbudgeted'\)"|onclick="showBvaActualSpend\('needs-review'\)"/);
+  // One row per record, single line, no horizontal scroll.
+  assert.match(html, /table-layout:fixed/);
+  assert.match(html, /overflow-x:hidden/);
 });
 
-test('Phase 7A-5: BvA drill-down fits without a wide table, and reference links open the Memo only for Approved Memo rows', () => {
+test('Phase 7A-5v2: BvA "all" drill-down includes Mapped, Unbudgeted, and Needs PMO Review as one row per record, and its total equals the KPI and export totals', () => {
   const context = createBvaContext();
-  seedBvaScenario(context);
+  const pools = seedBvaScenario(context);
+  const dataset = context.calculateBudgetVsActualDataset(pools, context.loadActualSpendRecords(), { year:'2569' });
+  const expectedTotal = context.money(Math.round(dataset.totals.actual));
+
+  const kpiHtml = context.__elements.get('bva-content').innerHTML;
+  assert.ok(kpiHtml.includes(expectedTotal), 'KPI Actual total must equal Mapped + Unbudgeted + Needs PMO Review');
 
   context.showBvaActualSpend('all');
   const html = context.__lastPanel.innerHTML;
+  assert.match(html, /table-layout:fixed/, 'records render one per row in a single-line table, not a card');
+  ['MEMO-UI-1','MAN-UI-1','INFRA-UI-1'].forEach(ref => assert.match(html, new RegExp(ref)));
+  assert.equal((html.match(/class="badge /g) || []).length, 3, 'each record renders as exactly one row, never duplicated');
+  assert.ok(html.includes(expectedTotal), 'drill-down total must equal the KPI Actual total');
 
-  // Stacked/detail-card layout instead of a wide multi-column table, so nothing requires
-  // horizontal scrolling to see (e.g. Amount) at the modal's fixed width.
-  assert.doesNotMatch(html, /<table/);
-  assert.match(html, /grid-template-columns:repeat\(auto-fit/);
+  const exported = context.budgetVsActualExportDataset(dataset);
+  assert.equal(exported.totals.actual, dataset.totals.actual, 'export total must equal the drill-down/KPI total');
 
   // Approved Memo rows are clickable through to the existing read-only Memo viewer...
   assert.match(html, /onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly\('MEMO-UI-1'\)"/);
@@ -1285,14 +1315,15 @@ test('Phase 7A-5: BvA drill-down fits without a wide table, and reference links 
   assert.doesNotMatch(html, /openMemoReadOnly\('INFRA-UI-1'\)/);
 });
 
-test('Phase 7A-5: Budget Pool row drill-down shows all of its records without a wide table', () => {
+test('Phase 7A-5v2: Budget Pool row drill-down shows one row per item, single line, without horizontal scroll', () => {
   const context = createBvaContext();
   seedBvaScenario(context);
 
   context.showBvaActualSpend('bva-ui-pool');
   const html = context.__lastPanel.innerHTML;
   assert.match(html, /MEMO-UI-1/);
-  assert.doesNotMatch(html, /<table/);
+  assert.match(html, /table-layout:fixed/);
+  assert.match(html, /overflow-x:hidden/);
   assert.doesNotMatch(html, /MAN-UI-1|INFRA-UI-1/, 'a pool drill-down must only show that pool\'s own records');
 });
 

@@ -22,6 +22,66 @@
 
 ## Current Baseline
 
+### Phase 7A-5 Follow-up - Match Budget & Spend UX Brief v2
+#### Fixed
+- Overview custom range (`ov-from-sel`/`ov-to-sel`, `views/budget.js`, `index.html`) validated and
+  applied on every dropdown `onchange`, so picking a new start month before choosing an end month
+  could pop the ">12 months" alert immediately, mid-selection. The `onchange` handlers were removed
+  from both selects — only the existing "Apply" button now calls `ovApplyCustomRange()` — so the
+  user can freely change both dropdowns and validation/apply only happens once, on Apply.
+- Switching to "Custom" (`ovSetPreset(0)`) never set `ov-from-sel`/`ov-to-sel`'s value, so the
+  browser defaulted the `from` selector to its first `<option>` — the oldest of the 24 months built
+  by `_ovBuildMonths()`, i.e. up to two years back — even though a different period (e.g. the last
+  12 months) was actually applied and displayed next to it. `ovSetPreset(0)` now seeds both
+  selectors with `_ov.fromIdx`/`_ov.toIdx` (the currently applied range) when entering Custom mode.
+- `showBvaActualSpend()`'s drill-down (Budget Pool rows, and the "all" KPI Actual click-through)
+  rendered one stacked, multi-line card per record (Phase 7A-5's fix for horizontal scroll). The
+  brief clarified the request was one row per record on a single line, not multiple lines per
+  record. Replaced with a shared `actualSpendRowsTable()` table (`table-layout:fixed` + per-cell
+  `text-overflow:ellipsis`), so every record is exactly one line and the table never needs
+  horizontal scroll regardless of content length (full values remain available via the `title`
+  attribute).
+- Unbudgeted and Needs PMO Review no longer open as a pop-up drill-down at all. `_renderBvaWith()`
+  now renders both as always-visible in-page sections (`#bva-unbudgeted-section` /
+  `#bva-needs-review-section`) directly on the Budget vs Actual tab, each using the same one-row-
+  per-record table, so the full list is visible as part of the page rather than behind a click —
+  and so a future "map to Budget Pool" action (not implemented in this phase) has a natural home.
+
+#### Changed
+- `showActualSpendDetailModal()`'s lower field section (Spend Type through Notes) no longer wraps
+  every group of fields in a filled grey (`var(--bg-2)`) box. Fields are now split into three named,
+  visually separated groups — "Spend Details", "Audit", and "Notes" (its own full-width block) —
+  divided by a thin top border instead of a background panel. The header (Reference/Description/
+  Source/Budget Status/Project badges), the function's call signature, and every field both Actual
+  Spend Detail and Manual Entry Detail already passed are unchanged — no field was removed and no
+  data value changed, only how the lower section is grouped and separated.
+
+#### Unchanged
+- No change to `app.js`, to any Actual Spend/Budget Pool/mapping/Forecast calculation function, or
+  to the Supabase schema. The 3M/6M/12M Overview preset buttons' behavior is untouched — only the
+  Custom branch of `ovSetPreset()` changed.
+
+#### Tests
+- Replaced the prior Phase 7A-5 BvA drill-down/layout tests in `tests/budget-expenses.test.js` with
+  versions matching the one-row-per-record table and the new in-page Unbudgeted/Needs PMO Review
+  sections (the old tests asserted a card layout and a `showBvaActualSpend('unbudgeted'/'needs-
+  review')` pop-up, both superseded by this follow-up). Added: custom-range selects carry no
+  `onchange`; changing the selects alone (no Apply) does not validate, alert, or touch the
+  graph/KPI/chart-render count; a valid range only applies on Apply; switching to Custom seeds the
+  selectors with the currently applied range; the in-page Unbudgeted/Needs PMO Review sections
+  render inline with one row per record and no horizontal scroll; the "all" drill-down includes
+  Mapped, Unbudgeted, and Needs PMO Review with the KPI, drill-down, and export totals all equal and
+  no record duplicated; a Budget Pool row drill-down shows only its own records, one per line; the
+  Approved-Memo reference-link behavior is preserved in the new table layout. Kept unmodified: the
+  Phase 7A-5 Actual Spend Detail field-completeness/badge test and the Source-badge helper tests
+  (unaffected by this round's layout-only changes).
+
+#### Remaining Work (intentionally deferred, not part of this brief)
+- "Prepare for future budget mapping from the Unbudgeted list" is limited to a code comment marking
+  where a future per-row "Map to Budget Pool" action would go; no mapping UI or logic was added.
+- Manual Entries' own list table, BvA filter/button row alignment, and Budget Settings pool table
+  readability remain unchanged, as in the prior Phase 7A-5 round.
+
 ### Phase 7A-5 - Budget & Spend Functional UX Fix
 #### Fixed
 - Overview's custom date range (`ovApplyCustomRange()`, `views/budget.js`) no longer silently caps
