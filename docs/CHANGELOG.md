@@ -97,6 +97,34 @@
   month-name, `dd/mm/yy`, and `dd/mm/yyyy` BE dates correctly after the refactor.
 - Full existing suite (183 tests total after these additions) re-run and passes unchanged.
 
+#### Follow-up fix ("3112" bug) — small blocker fix, same phase
+- **Bug**: typing a Buddhist Era-shaped value directly into the Start/End Month field (e.g.
+  `2569-01`, meaning January BE 2569 / Gregorian 2026-01) was never normalized to Gregorian before
+  being used. `gregorianYearToBuddhistEra()` then treated `2569` as if it were already the
+  Gregorian year and added 543 again, producing a nonsensical `3112` in the `bpool-year` field and,
+  worse, in the persisted pool's `year` (since `createBudgetPoolRecord()` re-derives `year` from
+  the same un-normalized `startMonth` on save).
+- **Fix**: added `normalizeMonthValueToGregorian()` (`app.js`) — converts a `"YYYY-MM"`/
+  `"YYYY-MM-DD"` value's year from BE to Gregorian using the same `>2400` threshold as
+  `financialYearToGregorian()`, leaving an already-Gregorian value unchanged. Wired in at three
+  points in `views/budget.js`: `_updateBpoolYearFromStart()` (normalizes before deriving the
+  live-displayed `bpool-year`), `openBudgetPoolModal()` (normalizes a pool's stored `startMonth`
+  before seeding the modal, self-healing any legacy record saved with this bug), and
+  `saveBudgetPool()` (normalizes `bpool-start`/`bpool-end` before building the entry passed to
+  `createBudgetPoolRecord()`, which is where the bug actually reached persisted storage).
+- **Scope**: this is a normalization fix only — `bpool-start`/`bpool-end` remain plain `type="month"`
+  text inputs. Replacing them with a proper month picker/select is explicitly deferred to
+  Phase 7A-9B, not done here.
+- **Tests**: `normalizeMonthValueToGregorian('2569-01')` / `('2026-01')` both resolve to `2026-01`
+  and both derive BE year `2569` (not `3112`) — `tests/financial-models.test.js`.
+  `_updateBpoolYearFromStart()` with a typed `'2569-01'` Start Month resolves `bpool-year` to
+  `2569`; `openBudgetPoolModal()` normalizes a legacy pool stored with BE-typed `startMonth`
+  (`'2569-01'`/`year:'3112'`) so the modal shows `bpool-start="2026-01"` and `bpool-year="2569"`;
+  `saveBudgetPool()` end-to-end with typed BE `'2569-01'`/`'2569-12'` persists
+  `startMonth:'2026-01'`, `endMonth:'2026-12'`, `year:'2569'` — `tests/budget-expenses.test.js`.
+  Manually verified in-browser: typing `2569-01` into Start Month live-updates the year field to
+  `2569`, and saving persists Gregorian `2026-01`/`2026-12`.
+
 ---
 
 ### Phase 7A-8 - Budget vs Actual UX Consistency & Polish (pending review — not committed)

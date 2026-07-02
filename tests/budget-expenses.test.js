@@ -2001,6 +2001,56 @@ test('Phase 7A-9A: _updateBpoolYearFromStart recomputes bpool-year live via greg
   assert.equal(year.value, context.getCurrentBuddhistYear(), 'must fall back to the shared current-year helper as a last resort');
 });
 
+test('Phase 7A-9A blocker fix ("3112" bug): _updateBpoolYearFromStart normalizes a typed BE Start Month before deriving bpool-year', () => {
+  const context = createBudgetPoolModalContext();
+  const start = context.__elements.get('bpool-start');
+  const year = context.__elements.get('bpool-year');
+
+  start.value = '2569-01'; // typed BE, not Gregorian
+  context._updateBpoolYearFromStart();
+  assert.equal(year.value, '2569', 'must resolve to the correct BE year, not 3112 (2569 + 543)');
+  assert.notEqual(year.value, '3112');
+
+  start.value = '2026-01'; // the equivalent Gregorian spelling must resolve identically
+  context._updateBpoolYearFromStart();
+  assert.equal(year.value, '2569');
+});
+
+test('Phase 7A-9A blocker fix ("3112" bug): openBudgetPoolModal normalizes a legacy BE-typed startMonth before seeding bpool-start/bpool-year', () => {
+  const context = createBudgetPoolModalContext();
+  context.loadSettings = () => ({ projects: ['Alpha'] });
+  // A pool saved before this fix, with startMonth stored as typed BE instead of Gregorian.
+  context.loadBudgetPools = () => [{ id: 'legacy-1', project: 'Alpha', name: 'Legacy Pool', year: '3112', startMonth: '2569-01', endMonth: '2569-12' }];
+  context.openBudgetPoolModal('legacy-1');
+  const html = context.__lastPanel.innerHTML;
+  assert.match(html, /id="bpool-start"[^>]*value="2026-01"/, 'bpool-start must display the normalized Gregorian value, not the raw stored BE text');
+  assert.match(html, /id="bpool-year"[^>]*value="2569"/, 'bpool-year must show the correct BE year, not the stored "3112" bug value');
+});
+
+test('Phase 7A-9A blocker fix ("3112" bug): saveBudgetPool normalizes typed BE Start/End Month to Gregorian before persisting', async () => {
+  const context = createBudgetPoolModalContext();
+  context.loadSettings = () => ({ projects: ['Alpha'] });
+  ['bpool-project', 'bpool-name', 'bpool-budget', 'bpool-end', 'bpool-edit-id'].forEach(id => {
+    if (!context.__elements.has(id)) context.__elements.set(id, { id, value: '' });
+  });
+  const el = id => context.__elements.get(id);
+  el('bpool-project').value = 'Alpha';
+  el('bpool-name').value = 'Alpha Pool';
+  el('bpool-budget').value = '1000';
+  el('bpool-year').value = '2569';
+  el('bpool-start').value = '2569-01'; // typed BE
+  el('bpool-end').value = '2569-12';   // typed BE
+  el('bpool-edit-id').value = '';
+
+  await context.saveBudgetPool();
+
+  const saved = context.loadBudgetPools().find(p => p.project === 'Alpha' && p.name === 'Alpha Pool');
+  assert.ok(saved, 'the pool must have been persisted');
+  assert.equal(saved.startMonth, '2026-01', 'startMonth must be normalized to Gregorian, not stored as typed BE');
+  assert.equal(saved.endMonth, '2026-12', 'endMonth must be normalized to Gregorian, not stored as typed BE');
+  assert.equal(saved.year, '2569', 'derived year must be the correct BE year, not the "3112" bug value');
+});
+
 test('Phase 7A-9A: parseThaiDate still parses Thai month-name, dd/mm/yy, and dd/mm/yyyy BE dates after folding onto the shared financialYearToGregorian() helper', () => {
   const context = createActualSpendContext();
 

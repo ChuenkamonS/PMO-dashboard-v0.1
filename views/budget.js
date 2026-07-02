@@ -3074,7 +3074,9 @@ function renderBudgetSettings() {
 function _updateBpoolYearFromStart() {
   const yearEl = document.getElementById('bpool-year');
   if (!yearEl) return;
-  const startVal = document.getElementById('bpool-start')?.value || '';
+  // Normalize a typed BE value (e.g. "2569-01") to Gregorian before deriving BE year, or the "3112
+  // bug" reappears: gregorianYearToBuddhistEra() would add 543 a second time (2569 + 543 = 3112).
+  const startVal = normalizeMonthValueToGregorian(document.getElementById('bpool-start')?.value || '');
   const derived = startVal ? gregorianYearToBuddhistEra(startVal) : '';
   yearEl.value = derived || document.getElementById('bset-year')?.value || getCurrentBuddhistYear();
 }
@@ -3087,7 +3089,9 @@ function openBudgetPoolModal(editId) {
 
   const g = (f, def = '') => pool ? (pool[f] ?? def) : def;
   const projOpts = projects.map(p => `<option value="${esc(p)}" ${g('project') === p ? 'selected' : ''}>${esc(p)}</option>`).join('');
-  const initialStart = g('startMonth');
+  // Normalize a legacy/pre-fix BE-typed startMonth (see the "3112" bug fix in saveBudgetPool()
+  // and _updateBpoolYearFromStart() below) before deriving or displaying it.
+  const initialStart = normalizeMonthValueToGregorian(g('startMonth'));
   const initialYear  = (initialStart ? gregorianYearToBuddhistEra(initialStart) : '') || g('year', year);
 
   // Create inline modal
@@ -3148,8 +3152,12 @@ async function saveBudgetPool() {
   const name    = g('bpool-name');
   const budget  = parseFloat(g('bpool-budget')) || 0;
   const year    = g('bpool-year');
-  const start   = g('bpool-start') || null;
-  const end     = g('bpool-end')   || null;
+  // Normalize a typed BE value (e.g. "2569-01") to Gregorian before saving — storage must stay
+  // Gregorian-safe per docs/BvA_REQUIREMENT.md "Phase 7A-1" §2, and createBudgetPoolRecord() derives
+  // `year` from this exact value, so an un-normalized BE value here reproduces the "3112" bug in
+  // the persisted record even if the modal's own bpool-year field displayed correctly.
+  const start   = normalizeMonthValueToGregorian(g('bpool-start')) || null;
+  const end     = normalizeMonthValueToGregorian(g('bpool-end'))   || null;
   const editId  = g('bpool-edit-id');
 
   const memoTypes = Object.keys(BGT_TYPE_LABELS).filter(k => document.getElementById('bpool-type-' + k)?.checked);

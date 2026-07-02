@@ -1034,3 +1034,18 @@ test('Phase 7A-9A: financialYearToGregorian and gregorianYearToBuddhistEra remai
   assert.equal(ctx.gregorianYearToBuddhistEra('2026'), '2569');
   assert.equal(ctx.financialYearToGregorian('2026'), '2026', 'a Gregorian-looking year must pass through unchanged');
 });
+
+test('Phase 7A-9A blocker fix ("3112" bug): normalizeMonthValueToGregorian converts a typed BE month value to Gregorian and leaves an already-Gregorian one unchanged', () => {
+  const ctx = context();
+  assert.equal(ctx.normalizeMonthValueToGregorian('2569-01'), '2026-01');
+  assert.equal(ctx.normalizeMonthValueToGregorian('2026-01'), '2026-01');
+  // Deriving BE straight from the un-normalized value would double-convert (2569 + 543 = 3112);
+  // normalizing first must make both spellings resolve to the same, correct BE year.
+  assert.equal(ctx.gregorianYearToBuddhistEra(ctx.normalizeMonthValueToGregorian('2569-01')), '2569');
+  assert.equal(ctx.gregorianYearToBuddhistEra(ctx.normalizeMonthValueToGregorian('2026-01')), '2569');
+  assert.notEqual(ctx.gregorianYearToBuddhistEra('2569-01'), '2569', 'sanity check: this is exactly how the un-fixed "3112" bug reproduced');
+  // Full-date and empty/garbage inputs.
+  assert.equal(ctx.normalizeMonthValueToGregorian('2569-01-15'), '2026-01-15');
+  assert.equal(ctx.normalizeMonthValueToGregorian(''), '');
+  assert.equal(ctx.normalizeMonthValueToGregorian(null), '');
+});

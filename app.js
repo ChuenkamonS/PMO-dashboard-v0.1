@@ -588,6 +588,19 @@ function financialYearToGregorian(year) {
   return numeric > 2400 ? String(numeric - 543) : String(numeric || '');
 }
 
+// Normalizes the year of a "YYYY-MM" / "YYYY-MM-DD" value that looks like Buddhist Era (e.g. a
+// user typing "2569-01" into a Gregorian month input) down to Gregorian, via the same >2400
+// threshold as financialYearToGregorian() above. An already-Gregorian value (or anything that
+// isn't a plain "YYYY-..." string) passes through unchanged. Fixes the "3112" bug: deriving BE
+// from an un-normalized BE-typed value double-converts (2569 + 543 = 3112) instead of converting
+// once (2569 -> 2026 -> 2569).
+function normalizeMonthValueToGregorian(value) {
+  const str = String(value || '');
+  const match = str.match(/^(\d{4})(-.*)?$/);
+  if (!match) return str;
+  return financialYearToGregorian(match[1]) + (match[2] || '');
+}
+
 // Shared Gregorian -> Buddhist Era year helper (the inverse of financialYearToGregorian above).
 // Accepts either a full calendar value ("2026-01", "2026-01-15") or a bare year. Used wherever a
 // Budget Pool or Actual Spend coverage year needs to be derived and compared consistently, so year
