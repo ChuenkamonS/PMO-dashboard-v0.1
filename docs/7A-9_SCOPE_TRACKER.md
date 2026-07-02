@@ -427,3 +427,58 @@ Phase 7A-9A is complete only when:
 - Existing legacy pools behave correctly through canonical reads.
 - All regression tests pass.
 - Remaining work is documented and deferred.
+
+- # Design Decisions
+
+These decisions are intentional and must not be changed unless explicitly approved.
+
+## DD-01
+
+Budget Pool Source of Truth
+
+Source of Truth
+
+- startMonth
+- endMonth
+
+Derived
+
+- year
+
+Internal
+
+- Gregorian
+
+Display
+
+- Buddhist Era
+
+---
+
+## DD-02
+
+Budget Pool Assignment
+
+Assignment is based on Pool ID.
+
+Displayed year is for filtering only.
+
+---
+
+## DD-03
+
+Canonical Read
+
+All Budget Pool reads must pass through createBudgetPoolRecord().
+
+Raw Budget Pool objects must not be used for year-sensitive logic.
+
+---
+
+## DD-04
+
+No Automatic Data Repair
+
+Legacy data may be normalized at runtime.
+
+No automatic migration or rewrite is allowed in this phase.
