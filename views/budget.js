@@ -779,14 +779,18 @@ function ovSetPreset(n) {
 
 function ovApplyCustomRange() {
   const f = parseInt(document.getElementById('ov-from-sel')?.value ?? 0);
-  const t = parseInt(document.getElementById('ov-to-sel')?.value ?? _ov.allMonths.length - 1);
-  // Cap range at 12 months
-  const cappedT = Math.min(Math.max(f, t), f + 11);
+  const t = Math.max(f, parseInt(document.getElementById('ov-to-sel')?.value ?? _ov.allMonths.length - 1));
+  const span = t - f + 1;
+  // A range over 12 months must be blocked with a clear message, not silently truncated to 12
+  // months while the selectors keep showing the wider range the user actually picked.
+  if (span > 12) {
+    alert('เลือกช่วงเวลาได้สูงสุด 12 เดือนเท่านั้น กรุณาเลือกช่วงใหม่ (You can select a maximum of 12 months only)');
+    const toSel = document.getElementById('ov-to-sel');
+    if (toSel) toSel.value = _ov.toIdx;
+    return;
+  }
   _ov.fromIdx = f;
-  _ov.toIdx   = cappedT;
-  // Sync to-sel if capped
-  const toSel = document.getElementById('ov-to-sel');
-  if (toSel) toSel.value = cappedT;
+  _ov.toIdx   = t;
   _ovUpdatePeriodLabels();
   _ovUpdateKPIs();
   _ovRenderChart();
@@ -1956,14 +1960,71 @@ function renderManualEntries() {
   container.innerHTML = `<div class="card" style="padding:0;overflow:auto"><table class="hist-table"><thead><tr><th>Reference No</th><th>Project</th><th>Spend Type</th><th>Description</th><th style="text-align:right">Amount</th><th>Expense / Coverage Date</th><th>Budget Status</th><th>Updated At</th><th>Actions</th></tr></thead><tbody>${rows.map(({ expense, record, referenceNo, schedule }) => `<tr><td style="${cell};font-weight:600">${esc(referenceNo)}</td><td style="${cell}">${esc(expense.project)}</td><td style="${cell}">${esc(record.spendType)}</td><td style="${cell}">${esc(expense.description)}</td><td style="${cell};text-align:right;font-weight:600">${money(record.amount)}</td><td style="${cell}">${esc(schedule)}</td><td style="${cell}">${esc(record.budgetStatus)}</td><td style="${cell}">${esc(formatActualSpendDateTime(expense.updatedAt))}</td><td style="${cell};white-space:nowrap"><button class="btn-sm" onclick="showManualEntryDetail('${esc(expense.id)}')">View Detail</button>${isPMO() ? ` <button class="btn-sm" onclick="openManualExpenseModal('${esc(expense.id)}')">Edit</button> <button class="btn-sm" style="color:var(--red)" onclick="voidManualExpense('${esc(expense.id)}')">Delete</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
+// Follows the same header (reference + subject + badges) / grouped-section style as the All Memo
+// "Memo Detail" modal (views/history.js _buildMemoDetailContent), minus an approval log — Actual
+// Spend and Manual Entry records have no approval workflow of their own. `fields` keeps the exact
+// same flat [label, value] list every caller already passed before this layout change, so every
+// existing field is still rendered; this only changes how it is grouped and styled, not the data.
 function showActualSpendDetailModal(title, fields, helper = '', details = '') {
   document.getElementById('actual-spend-record-detail')?.remove();
   const panel = document.createElement('div');
   panel.id = 'actual-spend-record-detail';
   panel.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:310;display:flex;align-items:center;justify-content:center';
-  panel.innerHTML = `<div class="card" style="width:720px;max-width:95vw;max-height:86vh;overflow:auto;padding:0"><div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between"><strong>${esc(title)}</strong><button class="btn-sm" onclick="document.getElementById('actual-spend-record-detail').remove()">✕</button></div>${helper ? `<div style="margin:12px 16px 0;padding:9px 11px;background:var(--blue-50);color:var(--blue);border-radius:var(--r-sm);font-size:11px">${esc(helper)}</div>` : ''}<div style="padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px">${fields.map(([label, fieldValue]) => `<div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">${esc(label)}</div><div style="overflow-wrap:anywhere">${esc(fieldValue == null || fieldValue === '' ? '—' : fieldValue)}</div></div>`).join('')}</div>${details}</div>`;
+
+  const byLabel = label => fields.find(([fieldLabel]) => fieldLabel === label)?.[1];
+  const reference = byLabel('Reference No');
+  const subject = byLabel('Description');
+  const project = byLabel('Project');
+  const source = byLabel('Source');
+  const status = byLabel('Budget Status');
+  const badges = [
+    source ? { label: actualSpendSourceShortLabel(source), className: actualSpendSourceBadgeClass(source) } : null,
+    status ? { label: status, className: actualSpendBudgetStatusBadgeClass(status) } : null,
+  ].filter(Boolean);
+  // Reference No / Description / Source / Budget Status move into the header above; Project is
+  // shown inline next to the badges. Everything else keeps its place in the grouped field grid
+  // below so no field is dropped, only re-positioned for readability.
+  const headerLabels = ['Reference No', 'Description', 'Source', 'Budget Status', 'Project'];
+  const bodyFields = fields.filter(([label]) => !headerLabels.includes(label));
+  const field = ([label, fieldValue]) => `<div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">${esc(label)}</div><div style="overflow-wrap:anywhere">${esc(fieldValue == null || fieldValue === '' ? '—' : fieldValue)}</div></div>`;
+  const chunk = (list, size) => Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, i * size + size));
+  const sectionsHtml = chunk(bodyFields, 3).map(group => `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;background:var(--bg-2,var(--bg));border-radius:var(--r-sm);padding:12px 14px;margin-bottom:10px">${group.map(field).join('')}</div>`).join('');
+
+  panel.innerHTML = `<div class="card" style="width:720px;max-width:95vw;max-height:86vh;overflow:auto;padding:0">
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+      <div style="min-width:0">
+        <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">${esc(title)}</div>
+        ${reference ? `<div style="font-size:15px;font-weight:600;overflow-wrap:anywhere">${esc(reference)}</div>` : ''}
+        ${subject ? `<div style="font-size:12px;color:var(--text-2);margin-top:2px;overflow-wrap:anywhere">${esc(subject)}</div>` : ''}
+        ${badges.length || project ? `<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:6px">${badges.map(b => `<span class="badge ${b.className}">${esc(b.label)}</span>`).join('')}${project ? `<span style="font-size:11px;color:var(--text-2)">${esc(project)}</span>` : ''}</div>` : ''}
+      </div>
+      <button class="btn-sm" onclick="document.getElementById('actual-spend-record-detail').remove()" style="flex-shrink:0">✕</button>
+    </div>
+    ${helper ? `<div style="margin:12px 16px 0;padding:9px 11px;background:var(--blue-50);color:var(--blue);border-radius:var(--r-sm);font-size:11px">${esc(helper)}</div>` : ''}
+    <div style="padding:16px">${sectionsHtml}</div>
+    ${details}
+  </div>`;
   document.body.appendChild(panel);
   panel.addEventListener('click', event => { if (event.target === panel) panel.remove(); });
+}
+
+// Shared Actual Spend source badge helpers (Phase 7A-5 scope item 6) — used wherever a record's
+// `source` is displayed, so Approved Memo / Manual-Historical / Infra Cost are always visually
+// distinguished the same way. Does not change the stored source value, only its presentation.
+function actualSpendSourceShortLabel(source) {
+  return source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO ? 'Memo'
+    : source === ACTUAL_SPEND_SOURCES.INFRA_COST ? 'Infra' : 'Historical';
+}
+function actualSpendSourceBadgeClass(source) {
+  if (source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO) return 'badge-blue';
+  if (source === ACTUAL_SPEND_SOURCES.INFRA_COST) return 'badge-green';
+  return 'badge-amber';
+}
+function actualSpendBudgetStatusBadgeClass(status) {
+  if (status === BUDGET_STATUSES.MAPPED) return 'badge-green';
+  if (status === BUDGET_STATUSES.MANUAL_OVERRIDE) return 'badge-purple';
+  if (status === BUDGET_STATUSES.NEEDS_PMO_REVIEW) return 'badge-amber';
+  return 'badge-gray';
 }
 
 function softwareActualSpendDetails(record) {
@@ -2052,7 +2113,6 @@ async function renderActualSpend() {
     byProject[project][key].amount += Number(record.amount) || 0;
     byProject[project][key].records.push(record);
   });
-  const sourceLabel = source => source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO ? 'Memo' : source === ACTUAL_SPEND_SOURCES.INFRA_COST ? 'Infra' : 'Historical';
   const percentLabel = (amount, total) => {
     const percent = total > 0 ? amount / total * 100 : 0;
     return percent > 0 && percent < 1 ? '<1%' : `${Math.round(percent)}%`;
@@ -2071,7 +2131,7 @@ async function renderActualSpend() {
         <div style="padding:10px 14px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;justify-content:space-between"><strong>${esc(project)}</strong><strong style="color:var(--blue)">${money(Math.round(projectTotal))}</strong></div>
         <table class="hist-table"><thead><tr><th style="${tdS};text-align:left">Type</th><th style="${tdS};text-align:left">Source</th><th style="${tdS};text-align:right">Amount</th><th style="${tdS};text-align:right">รายการ</th><th style="${tdS};text-align:right">% ของ Project</th></tr></thead>
         <tbody>${Object.values(groups).sort((a,b)=>b.amount-a.amount).map(group => `<tr style="cursor:pointer" onclick="showActualSpendGroup('${encodeURIComponent(project)}','${encodeURIComponent(group.spendType)}','${encodeURIComponent(group.source)}')">
-          <td style="${tdS}"><span style="padding:2px 8px;border-radius:4px;background:var(--bg)">${esc(group.spendType)}</span></td><td style="${tdS}"><span style="padding:2px 7px;border-radius:4px;background:var(--blue-50);color:var(--blue)">${sourceLabel(group.source)}</span></td>
+          <td style="${tdS}"><span style="padding:2px 8px;border-radius:4px;background:var(--bg)">${esc(group.spendType)}</span></td><td style="${tdS}"><span class="badge ${actualSpendSourceBadgeClass(group.source)}">${actualSpendSourceShortLabel(group.source)}</span></td>
           <td style="${tdS};text-align:right;font-weight:600">${money(Math.round(group.amount))}</td><td style="${tdS};text-align:right;color:var(--blue)">${group.records.length} <span style="color:var(--text-3)">รายการ →</span></td><td style="${tdS};text-align:right">${percentLabel(group.amount, projectTotal)}</td></tr>`).join('')}</tbody></table></div>`;
     }).join('')}`;
 }
@@ -2082,7 +2142,7 @@ function showActualSpendGroup(projectEncoded, typeEncoded, sourceEncoded) {
   const source = decodeURIComponent(sourceEncoded);
   const rows = filteredActualSpendRecords().filter(record => record.project === project && record.spendType === spendType && record.source === source);
   const rowCard = record => {
-    return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;align-items:start" onclick="document.getElementById('actual-spend-group-panel').remove();showActualSpendRecord('${esc(record.id)}')"><div style="min-width:0"><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Reference No</div><div style="font-weight:600;color:var(--blue);overflow-wrap:anywhere">${esc(record.referenceNo || '—')}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Source</div><div>${esc(record.source)}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Coverage</div><div>${esc(record.startDate||'—')} → ${esc(record.endDate||'—')}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Budget Status</div><div>${esc(record.budgetStatus)}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Amount</div><div style="font-weight:700">${money(record.amount)}</div></div></div>`;
+    return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;align-items:start" onclick="document.getElementById('actual-spend-group-panel').remove();showActualSpendRecord('${esc(record.id)}')"><div style="min-width:0"><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Reference No</div><div style="font-weight:600;color:var(--blue);overflow-wrap:anywhere">${esc(record.referenceNo || '—')}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Source</div><span class="badge ${actualSpendSourceBadgeClass(record.source)}">${actualSpendSourceShortLabel(record.source)}</span></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Coverage</div><div>${esc(record.startDate||'—')} → ${esc(record.endDate||'—')}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Budget Status</div><div>${esc(record.budgetStatus)}</div></div><div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Amount</div><div style="font-weight:700">${money(record.amount)}</div></div></div>`;
   };
   const panel = document.createElement('div');
   panel.id = 'actual-spend-group-panel';
@@ -2390,11 +2450,14 @@ function _renderBvaWith(pools) {
     year: yearVal,
     project: projVal === 'all' ? '' : projVal,
   });
-  const { rows, unbudgetedRecords, totals } = _bvaDataset;
+  const { rows, unbudgetedRecords, needsReviewRecords, totals } = _bvaDataset;
   const alertEl = document.getElementById('bva-untagged-alert');
   if (alertEl) {
-    alertEl.style.display = unbudgetedRecords.length ? '' : 'none';
-    alertEl.textContent = unbudgetedRecords.length ? `⚠ ${unbudgetedRecords.length} Actual Spend items are Unbudgeted` : '';
+    const flagParts = [];
+    if (unbudgetedRecords.length) flagParts.push(`${unbudgetedRecords.length} Unbudgeted`);
+    if (needsReviewRecords.length) flagParts.push(`${needsReviewRecords.length} Needs PMO Review`);
+    alertEl.style.display = flagParts.length ? '' : 'none';
+    alertEl.textContent = flagParts.length ? `⚠ ${flagParts.join(' · ')} Actual Spend items` : '';
   }
 
   if (!rows.length && !unbudgetedRecords.length) {
@@ -2437,6 +2500,13 @@ function _renderBvaWith(pools) {
         <div onclick="showBvaActualSpend('unbudgeted')" style="padding:12px 14px;cursor:pointer;display:flex;justify-content:space-between;background:var(--amber-50,#FFFBEB)">
           <strong style="color:var(--amber)">Unbudgeted Actual Spend (${unbudgetedRecords.length} items)</strong>
           <strong style="color:var(--amber)">${money(Math.round(totals.unbudgetedActual))} →</strong>
+        </div>
+      </div>` : ''}
+    ${needsReviewRecords.length ? `
+      <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px;border-color:var(--amber)">
+        <div onclick="showBvaActualSpend('needs-review')" style="padding:12px 14px;cursor:pointer;display:flex;justify-content:space-between;background:var(--amber-50,#FFFBEB)">
+          <strong style="color:var(--amber)">Needs PMO Review (${needsReviewRecords.length} items)</strong>
+          <strong style="color:var(--amber)">${money(Math.round(totals.needsReviewActual))} →</strong>
         </div>
       </div>` : ''}
     ${[...byProj.entries()].map(([proj, projectRows]) => `
@@ -2486,16 +2556,23 @@ function _renderBvaWith(pools) {
 }
 
 // ── Canonical Actual Spend drill-down ──
+// Renders as stacked cards (one record per card, fields wrap via auto-fit grid) instead of a wide
+// table — a 5-column table needed horizontal scrolling to see Amount at this modal width, which
+// could make a record look missing rather than just off-screen. The card layout always fits inside
+// the modal's own width, so nothing is hidden due to layout, per Phase 7A-5 scope item 4/5.
 function showBvaActualSpend(scope) {
   if (!_bvaDataset) return;
   let records;
   let title;
   if (scope === 'all') {
-    records = [..._bvaDataset.rows.flatMap(row => row.records), ..._bvaDataset.unbudgetedRecords];
+    records = [..._bvaDataset.rows.flatMap(row => row.records), ..._bvaDataset.unbudgetedRecords, ...(_bvaDataset.needsReviewRecords || [])];
     title = 'Actual Spend';
   } else if (scope === 'unbudgeted') {
     records = _bvaDataset.unbudgetedRecords;
     title = 'Unbudgeted Actual Spend';
+  } else if (scope === 'needs-review') {
+    records = _bvaDataset.needsReviewRecords || [];
+    title = 'Needs PMO Review';
   } else {
     const row = _bvaDataset.rows.find(item => item.pool.id === scope);
     if (!row) return;
@@ -2511,9 +2588,25 @@ function showBvaActualSpend(scope) {
   panel.id    = 'bva-memo-panel';
   panel.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300;display:flex;align-items:center;justify-content:center';
 
-  const tdS = 'padding:7px 12px;border-bottom:1px solid var(--border);font-size:12px';
+  const referenceCell = record => {
+    const ref = esc(record.referenceNo || '—');
+    if (record.source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO && record.referenceNo) {
+      // openMemoReadOnly() is the existing shared read-only Memo viewer already used from the
+      // License/Device tabs (views/history.js) — reuse it instead of building a new memo view.
+      return `<span style="color:var(--blue);font-weight:600;text-decoration:underline;cursor:pointer" onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly('${esc(record.referenceNo)}')">${ref}</span>`;
+    }
+    return `<span style="font-weight:600">${ref}</span>`;
+  };
+  const recordCard = record => `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);align-items:start">
+    <div style="min-width:0"><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Reference</div><div style="overflow-wrap:anywhere">${referenceCell(record)}</div></div>
+    <div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Source</div><span class="badge ${actualSpendSourceBadgeClass(record.source)}">${actualSpendSourceShortLabel(record.source)}</span></div>
+    <div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Project</div><div>${esc(record.project || '—')}</div></div>
+    <div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Spend Type</div><div>${esc(record.spendType || '—')}</div></div>
+    <div><div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Amount</div><div style="font-weight:700">${money(Number(record.amount)||0)}</div></div>
+  </div>`;
+
   panel.innerHTML = `
-    <div class="card" style="width:680px;max-width:95vw;max-height:85vh;overflow-y:auto;padding:0">
+    <div class="card" style="width:720px;max-width:95vw;max-height:85vh;overflow-x:hidden;overflow-y:auto;padding:0">
       <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--surface)">
         <div>
           <div style="font-size:14px;font-weight:600">${esc(title)}</div>
@@ -2521,31 +2614,11 @@ function showBvaActualSpend(scope) {
         </div>
         <button class="btn-sm" onclick="document.getElementById('bva-memo-panel').remove()" style="padding:4px 10px">✕</button>
       </div>
-      ${records.length ? `
-      <table class="hist-table">
-        <thead><tr>
-          <th style="${tdS};text-align:left">Reference</th>
-          <th style="${tdS};text-align:left">Source</th>
-          <th style="${tdS};text-align:left">Project</th>
-          <th style="${tdS};text-align:left">Spend Type</th>
-          <th style="${tdS};text-align:right">Amount</th>
-        </tr></thead>
-        <tbody>
-          ${records.sort((a,b) => String(b.startDate||'').localeCompare(String(a.startDate||''))).map(record => {
-            return `<tr>
-              <td style="${tdS};color:var(--blue);font-weight:500">${esc(record.referenceNo)}</td>
-              <td style="${tdS};color:var(--text-3)">${esc(record.source)}</td>
-              <td style="${tdS}">${esc(record.project)}</td>
-              <td style="${tdS}">${esc(record.spendType)}</td>
-              <td style="${tdS};text-align:right;font-weight:500">${money(Number(record.amount)||0)}</td>
-            </tr>`;
-          }).join('')}
-          <tr style="background:var(--bg)">
-            <td colspan="4" style="${tdS};font-weight:600">Total</td>
-            <td style="${tdS};text-align:right;font-weight:700;color:var(--blue)">${money(Math.round(total))}</td>
-          </tr>
-        </tbody>
-      </table>` : `<div style="padding:32px;text-align:center;color:var(--text-3)">ยังไม่มี Actual Spend</div>`}
+      <div style="padding:10px;display:flex;flex-direction:column;gap:8px">
+        ${records.length
+          ? records.sort((a,b) => String(b.startDate||'').localeCompare(String(a.startDate||''))).map(recordCard).join('')
+          : `<div style="padding:32px;text-align:center;color:var(--text-3)">ยังไม่มี Actual Spend</div>`}
+      </div>
     </div>`;
   document.body.appendChild(panel);
   panel.addEventListener('click', e => { if (e.target === panel) panel.remove(); });

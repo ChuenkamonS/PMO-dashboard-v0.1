@@ -22,6 +22,82 @@
 
 ## Current Baseline
 
+### Phase 7A-5 - Budget & Spend Functional UX Fix
+#### Fixed
+- Overview's custom date range (`ovApplyCustomRange()`, `views/budget.js`) no longer silently caps
+  a selection wider than 12 months down to 12 months while leaving the wider range showing in the
+  selectors. A range over 12 months is now blocked outright with a clear `alert()` message, the
+  `to` selector is reverted to the last valid value, and no KPI/period update happens for the
+  rejected selection.
+- The Actual Spend page's grouped "Source" badge (`renderActualSpend()`) was hardcoded to a blue
+  pill for every source (Memo, Historical, Infra alike). It now uses the shared
+  `actualSpendSourceBadgeClass()`/`actualSpendSourceShortLabel()` helpers so each source renders
+  with its own colour, matching the already-correct colour coding in the page's summary line above
+  the table.
+- `showBvaActualSpend()` (Budget vs Actual drill-down / Budget Pool row drill-down / Unbudgeted
+  drill-down) rendered a 5-column table that required horizontal scrolling at the modal's width,
+  which could make a record (e.g. Amount) look missing rather than merely off-screen. It now
+  renders one responsive, auto-wrapping card per record, so every field is visible without
+  horizontal scrolling regardless of screen width.
+- `showBvaActualSpend('all')` did not include `needsReviewRecords` (Phase 7A-4's Needs PMO Review
+  bucket), so the "click Actual Spend KPI to drill down" total could be lower than the KPI card's
+  own `totals.actual`. It now includes Needs PMO Review records in the "all" scope, and
+  `_renderBvaWith()` adds a dedicated "Needs PMO Review" section (mirroring the existing
+  "Unbudgeted" section) with its own drill-down, so the bucket introduced in Phase 7A-4 is now
+  reachable and visible on the BvA tab, not just correctly totaled behind the scenes.
+
+#### Added
+- Budget Pool / Unbudgeted / Needs PMO Review / "all" drill-down rows now show a clickable
+  Reference No for Approved-Memo-sourced records, reusing the existing shared read-only Memo viewer
+  `openMemoReadOnly()` (`views/history.js`, already used the same way from License and Device tabs)
+  — no new memo module was built. Manual/Historical and Infra Cost rows (no backing Memo) render
+  the reference as plain text.
+- `actualSpendSourceShortLabel()` / `actualSpendSourceBadgeClass()` / `actualSpendBudgetStatusBadgeClass()`
+  (`views/budget.js`) — shared presentation-only helpers reused everywhere an Actual Spend record's
+  source or budget status is displayed as a badge. They only map an existing stored value to a CSS
+  class/short label; they do not change any stored value.
+
+#### Changed
+- `showActualSpendDetailModal()` (shared by Actual Spend Detail and Manual Entry Detail) now
+  follows the same header layout as All Memo's "Memo Detail" modal (`views/history.js
+  _buildMemoDetailContent()`): a prominent Reference No, a subject line, and Source/Budget Status
+  badges, followed by the remaining fields grouped into readable 3-column sections — with no
+  approval log, since neither Actual Spend nor Manual Entry records have an approval workflow. The
+  function's call signature (`title, fields, helper, details`) and every field both callers already
+  passed are unchanged, so no Actual Spend or Manual Entry field was dropped or reordered in the
+  underlying data — only how it is grouped and styled changed.
+
+#### Unchanged
+- No change to `app.js`, to any Actual Spend/Budget Pool/Forecast calculation or mapping function,
+  or to the Supabase schema. `calculateBudgetVsActualDataset()`, `mapBudgetPool()`, and
+  `calculateForecast()` are untouched.
+
+#### Tests
+- Added to `tests/budget-expenses.test.js`: a custom Overview range over 12 months is blocked with
+  a message and does not change the KPI/period (and a valid 12-month range immediately afterward
+  still works); a BvA scenario with one Mapped, one Unbudgeted, and one Needs PMO Review record
+  proving the KPI Actual total, the "all" drill-down total, and the dedicated Needs PMO Review
+  drill-down all agree and no record is duplicated; the drill-down panel has no wide `<table>` and
+  uses the auto-fit card layout; an Approved Memo row's reference is wired to `openMemoReadOnly()`
+  while Manual/Infra rows are not; a Budget Pool row drill-down shows only that pool's own records
+  without a wide table; `actualSpendSourceBadgeClass()`/`actualSpendSourceShortLabel()` return a
+  distinct value per source; the Actual Spend page's Source column source uses the shared badge
+  helper instead of a hardcoded colour; the redesigned Actual Spend Detail layout still renders
+  every canonical field (Reference, Description, Source, Project, Spend Type, Amount, Vendor/
+  Program, Budget Pool, Budget Status, Created By, Notes, etc.) with no data loss.
+
+#### Remaining Work (intentionally deferred, not part of this scope)
+- Manual Entries' own list table (Excel import / download template button placement, action-column
+  alignment, description truncation with a "view details" affordance) was not restyled — only its
+  detail modal was. Out of the six scope items given for this phase.
+- Budget vs Actual tab's filter/button row alignment, and the Budget Settings pool table's
+  readability (project/pool colour coding), were not changed — raised in the reference PPT but not
+  in this phase's six numbered scope items.
+- Overview's embedded budget-vs-actual widget (`_ovRenderBvA()`, legacy `loadSLBudgets()` source)
+  was not touched — pre-existing, separately tracked as `TD-7A-03`.
+- Cross-page date/column-name/button consistency beyond the six scope items (raised broadly in the
+  reference PPT) was not attempted, per "do not redesign the whole UI."
+
 ### Phase 7A-4 - Fix BvA Needs PMO Review Total Drop
 #### Fixed
 - `calculateBudgetVsActualDataset()` (`app.js`) no longer silently drops the amount of Actual Spend

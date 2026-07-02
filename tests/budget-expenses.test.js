@@ -80,6 +80,30 @@ function createOverviewContext() {
   return context;
 }
 
+function createBvaContext() {
+  const context = createActualSpendContext();
+  const elements = new Map();
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, {
+      id, value:'', textContent:'', innerHTML:'', style:{}, options:[],
+      classList:{ add() {}, remove() {} },
+      appendChild(child) { this.options.push(child); },
+    });
+    return elements.get(id);
+  };
+  ['bva-year','bva-project','bva-content','bva-untagged-alert'].forEach(element);
+  context.document.getElementById = id => elements.get(id) || null;
+  context.document.createElement = () => ({
+    value:'', textContent:'', innerHTML:'', style:{}, id:'', options:[],
+    appendChild(child) { this.options.push(child); },
+    addEventListener() {},
+    remove() {},
+  });
+  context.document.body = { appendChild(el) { context.__lastPanel = el; }, removeChild() {} };
+  context.__elements = elements;
+  return context;
+}
+
 function monthKey(offset) {
   const now = new Date();
   const date = new Date(now.getFullYear(), now.getMonth() + offset, 1);
@@ -1119,6 +1143,31 @@ test('Overview totals stay equal for a custom period', () => {
   assertOverviewTotals(context, 3000);
 });
 
+test('Phase 7A-5: Overview custom range over 12 months is blocked with a clear message, not silently capped', () => {
+  const context = createOverviewContext();
+  seedOverview(context);
+  const periodBefore = context.__elements.get('ov-period-label').textContent;
+  const kpiBefore = context.__elements.get('bgt-kpi-total').textContent;
+  const messages = [];
+  context.alert = message => messages.push(message);
+
+  context.__elements.get('ov-from-sel').value = '0';
+  context.__elements.get('ov-to-sel').value = '23'; // 24-month span, exceeds the 12-month limit
+  context.ovApplyCustomRange();
+
+  assert.equal(messages.length, 1, 'selecting more than 12 months must show a clear popup/message');
+  assert.match(messages[0], /12/, 'the message must state the 12-month limit');
+  assert.equal(context.__elements.get('ov-period-label').textContent, periodBefore,
+    'an out-of-range selection must not be silently applied as a (different, e.g. 12-month) period');
+  assert.equal(context.__elements.get('bgt-kpi-total').textContent, kpiBefore,
+    'the KPI must not update for a blocked, out-of-range custom range');
+
+  // A valid range immediately afterwards must still work normally.
+  context.__elements.get('ov-to-sel').value = '11'; // 12-month span, valid
+  context.ovApplyCustomRange();
+  assert.equal(messages.length, 1, 'a valid range must not trigger another block message');
+});
+
 test('historical expense migration is additive, RLS-enabled, and forbids delete access', () => {
   const migration = fs.readFileSync(
     path.join(root, 'supabase/migrations/20260629161656_historical_budget_expenses.sql'),
@@ -1169,4 +1218,124 @@ test('Settings exposes Budget Pools only while Actual Spend retains Infra Cost i
   assert.match(html, /id="as-import-file"/);
   assert.match(html, /<option value="infra">Infra Cost<\/option>/);
   assert.match(budgetCode, /\['Infra Cost','INFRA-2026-001','Infra'/);
+});
+
+function seedBvaScenario(context) {
+  const pools = [
+    context.createBudgetPoolRecord({ id:'bva-ui-pool', project:'AOA-MP', name:'Software Pool', budget:50000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] }),
+    context.createBudgetPoolRecord({ id:'bva-ui-pool-a', project:'AOA-MP', name:'Infra Overlap A', budget:20000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Infra'] }),
+    context.createBudgetPoolRecord({ id:'bva-ui-pool-b', project:'AOA-MP', name:'Infra Overlap B', budget:20000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Infra'] }),
+  ];
+  context.storeActualSpendRecords([
+    context.createActualSpendRecord({ id:'bva-ui-mapped', source:'Approved Memo', referenceNo:'MEMO-UI-1', memoId:'MEMO-UI-1', project:'AOA-MP', spendType:'Software', amount:5000, startDate:'2026-03', endDate:'2026-03' }),
+    context.createActualSpendRecord({ id:'bva-ui-unbudgeted', source:'Manual / Historical Expense', referenceNo:'MAN-UI-1', project:'AOA-MP', spendType:'Hardware', amount:1200, startDate:'2026-03', endDate:'2026-03' }),
+    context.createActualSpendRecord({ id:'bva-ui-review', source:'Infra Cost', referenceNo:'INFRA-UI-1', project:'AOA-MP', spendType:'Infra', amount:3300, startDate:'2026-03', endDate:'2026-03' }),
+  ]);
+  context.__elements.get('bva-year').value = '2569';
+  context.__elements.get('bva-project').value = 'all';
+  context._renderBvaWith(pools);
+  return pools;
+}
+
+test('Phase 7A-5: BvA drill-down includes Needs PMO Review records and its total equals the KPI Actual total', () => {
+  const context = createBvaContext();
+  seedBvaScenario(context);
+
+  // KPI card total, as rendered on the BvA tab itself.
+  const kpiHtml = context.__elements.get('bva-content').innerHTML;
+  const expectedTotal = context.money(Math.round(5000 + 1200 + 3300));
+  assert.ok(kpiHtml.includes(expectedTotal), 'KPI Actual total must equal Mapped + Unbudgeted + Needs PMO Review');
+
+  // "Needs PMO Review" must have its own visible section on the BvA tab (not folded into Unbudgeted).
+  assert.match(kpiHtml, /Needs PMO Review \(1 items\)/);
+  assert.doesNotMatch(kpiHtml, /Needs PMO Review \(0 items\)/);
+
+  // Clicking the Needs PMO Review section must drill down to exactly that record.
+  context.showBvaActualSpend('needs-review');
+  const reviewPanel = context.__lastPanel.innerHTML;
+  assert.match(reviewPanel, /INFRA-UI-1/);
+  assert.doesNotMatch(reviewPanel, /MEMO-UI-1|MAN-UI-1/);
+  assert.ok(reviewPanel.includes(context.money(3300)));
+
+  // The "all" drill-down (KPI Actual click-through) must include every bucket, with no record
+  // hidden or double counted, and its total must equal the KPI Actual total exactly.
+  context.showBvaActualSpend('all');
+  const allPanel = context.__lastPanel.innerHTML;
+  ['MEMO-UI-1','MAN-UI-1','INFRA-UI-1'].forEach(ref => assert.match(allPanel, new RegExp(ref)));
+  assert.ok(allPanel.includes(expectedTotal), 'drill-down total must equal the KPI Actual total');
+  assert.equal((allPanel.match(/>Reference<\/div>/g) || []).length, 3, 'each record must render as exactly one card, never duplicated');
+});
+
+test('Phase 7A-5: BvA drill-down fits without a wide table, and reference links open the Memo only for Approved Memo rows', () => {
+  const context = createBvaContext();
+  seedBvaScenario(context);
+
+  context.showBvaActualSpend('all');
+  const html = context.__lastPanel.innerHTML;
+
+  // Stacked/detail-card layout instead of a wide multi-column table, so nothing requires
+  // horizontal scrolling to see (e.g. Amount) at the modal's fixed width.
+  assert.doesNotMatch(html, /<table/);
+  assert.match(html, /grid-template-columns:repeat\(auto-fit/);
+
+  // Approved Memo rows are clickable through to the existing read-only Memo viewer...
+  assert.match(html, /onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly\('MEMO-UI-1'\)"/);
+  // ...but Manual/Historical and Infra Cost rows (no backing Memo) are not.
+  assert.doesNotMatch(html, /openMemoReadOnly\('MAN-UI-1'\)/);
+  assert.doesNotMatch(html, /openMemoReadOnly\('INFRA-UI-1'\)/);
+});
+
+test('Phase 7A-5: Budget Pool row drill-down shows all of its records without a wide table', () => {
+  const context = createBvaContext();
+  seedBvaScenario(context);
+
+  context.showBvaActualSpend('bva-ui-pool');
+  const html = context.__lastPanel.innerHTML;
+  assert.match(html, /MEMO-UI-1/);
+  assert.doesNotMatch(html, /<table/);
+  assert.doesNotMatch(html, /MAN-UI-1|INFRA-UI-1/, 'a pool drill-down must only show that pool\'s own records');
+});
+
+test('Phase 7A-5: Actual Spend source badges are distinct per source type', () => {
+  const context = createActualSpendContext();
+  assert.equal(context.actualSpendSourceBadgeClass('Approved Memo'), 'badge-blue');
+  assert.equal(context.actualSpendSourceBadgeClass('Manual / Historical Expense'), 'badge-amber');
+  assert.equal(context.actualSpendSourceBadgeClass('Infra Cost'), 'badge-green');
+  assert.equal(context.actualSpendSourceShortLabel('Approved Memo'), 'Memo');
+  assert.equal(context.actualSpendSourceShortLabel('Manual / Historical Expense'), 'Historical');
+  assert.equal(context.actualSpendSourceShortLabel('Infra Cost'), 'Infra');
+});
+
+test('Phase 7A-5: Actual Spend page Source column uses a distinct badge class per source, not one hardcoded colour', () => {
+  const renderer = budgetCode.match(/async function renderActualSpend[\s\S]*?function showActualSpendGroup/)[0];
+  assert.match(renderer, /actualSpendSourceBadgeClass\(group\.source\)/);
+  assert.doesNotMatch(renderer, /background:var\(--blue-50\);color:var\(--blue\)"[^>]*>\$\{sourceLabel/);
+});
+
+test('Phase 7A-5: Actual Spend detail renders every canonical field under the new layout, with no data loss', () => {
+  const context = createActualSpendContext();
+  context.document.createElement = () => ({ style:{}, innerHTML:'', id:'', addEventListener() {}, remove() {} });
+  context.document.body = { appendChild(el) { context.__lastPanel = el; } };
+  context.document.getElementById = () => null;
+
+  context.storeBudgetPools([context.createBudgetPoolRecord({
+    id:'detail-pool', project:'AOA-MP', name:'Detail Pool', budget:5000,
+    startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'],
+  })]);
+  context.storeActualSpendRecords([context.createActualSpendRecord({
+    id:'detail-full', source:'Approved Memo', referenceNo:'DETAIL-1', memoId:'DETAIL-1', project:'AOA-MP',
+    spendType:'Software', amount:4200, startDate:'2026-02', endDate:'2026-02', vendorProgram:'Adobe CC',
+    description:'Adobe renewal', notes:'Paid via PO', finalBudgetPoolId:'detail-pool', budgetStatus:'Mapped',
+    createdBy:'PMO User',
+  })]);
+
+  context.showActualSpendRecord('detail-full');
+  const html = context.__lastPanel.innerHTML;
+
+  ['DETAIL-1','Adobe renewal','Software','Adobe CC','Detail Pool','Mapped','AOA-MP','PMO User','Paid via PO']
+    .forEach(text => assert.ok(html.includes(text), `expected rendered detail to include "${text}"`));
+  assert.ok(html.includes(context.money(4200)), 'Amount must still be shown');
+  assert.match(html, /badge-blue/, 'Approved Memo source should render as a distinct badge');
+  assert.match(html, /badge-green/, 'Mapped budget status should render as a distinct badge');
+  assert.doesNotMatch(html, /<table/);
 });
