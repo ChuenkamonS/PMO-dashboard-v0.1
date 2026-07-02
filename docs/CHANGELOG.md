@@ -22,6 +22,61 @@
 
 ## Current Baseline
 
+### Phase 7A-7 - Budget Assignment Workspace Navigation (pending review — not committed)
+#### Added
+- A dedicated Budget Assignment Workspace (`renderBudgetAssignmentWorkspace()`,
+  `budgetAssignmentRowsTable()`, `views/budget.js`) — a sub-view of the Budget vs Actual tab
+  (toggled by a new `_bvaCurrentView` flag: `'summary'` | `'assignment'`), not a new top-level tab,
+  since `MASTER_SPEC.md` fixes Budget & Spend at exactly five tabs. Lists every Unbudgeted and Needs
+  PMO Review Actual Spend record (Reference/Memo No, Project, Source, Spend Type, Description,
+  Amount, Coverage, Budget Status, Reason, and an assignment action) as one-row-per-record tables,
+  in-page — never a modal/popup, per this phase's requirement.
+- `assignBudgetPoolFromWorkspace(recordId)` — dispatches each row's "Assign" action to the existing,
+  already-validated canonical path for that record's source: `openBudgetTagModal()` (→
+  `saveBudgetTag()` → `updateActualSpendBudgetOverride()`) for Approved Memo records, and
+  `openManualExpenseModal()` (→ `saveManualExpenseFromModal()`) for Manual Actual Spend, with a
+  workspace refresh added on top of the existing save flow. No new mapping/validation algorithm was
+  written — every project/year/spend-type rule is enforced by the same `mapBudgetPool()`/
+  `saveManualExpenseFromModal()` guards already in place since Phase 7A-3. Infra Cost has no
+  Budget-Pool field in its persistence model; the workspace shows it as view-only with an explicit
+  note (and `assignBudgetPoolFromWorkspace()` alerts rather than silently doing nothing) instead of
+  inventing a new storage model for it.
+- `showBudgetAssignmentWorkspace()` / `closeBudgetAssignmentWorkspace()` toggle `_bvaCurrentView`
+  and re-render; `renderBudgetVsActual()` now returns its render promise so callers (and tests) can
+  await the refresh instead of racing it.
+
+#### Changed
+- BvA's Unbudgeted / Needs PMO Review summary sections keep their exact same visibility (count +
+  total) but their action changed: "View items" now calls `showBudgetAssignmentWorkspace()` instead
+  of the Phase 7A-5-follow-up behavior of inlining the full record table directly in the BvA
+  summary. Budget Pool rows and the "all" KPI drill-down (`showBvaActualSpend()`) are unchanged —
+  still the existing lightweight modal, per this phase's Part 1 allowance.
+
+#### Unchanged
+- No change to `app.js`, `mapBudgetPool()`, `updateActualSpendBudgetOverride()`,
+  `calculateBudgetVsActualDataset()`, Forecast, Import/Export, or the Supabase schema. The five
+  Budget & Spend tabs and their current behavior are unchanged; this is an additional in-page
+  sub-view of the existing "Budget vs Actual" tab only.
+
+#### Tests
+- Added to `tests/budget-expenses.test.js`: BvA "View items" navigates to the workspace rather than
+  a modal (with a round-trip back to the summary); the workspace lists Unbudgeted and Needs PMO
+  Review records with all required fields, memo-reference click-through preserved, and no
+  horizontal-scrolling table; `assignBudgetPoolFromWorkspace()` routes to the correct existing
+  function per source and surfaces a clear Infra Cost note; a Manual Actual Spend assignment updates
+  manual persistence and reconciles to Manual Override; a memo-origin Needs PMO Review assignment
+  resolves via the existing override path; cross-project and cross-year assignments are blocked and
+  never persist; BvA totals stay equal while only the bucket allocation changes after an assignment;
+  Forecast and export totals are unaffected by an assignment.
+
+#### Remaining Work / Deferred
+- Not committed — implementation is pending review per this phase's explicit instruction.
+- `saveBudgetTag()`'s own DOM-bound radio-button flow (views/history.js) was exercised indirectly
+  (via `updateActualSpendBudgetOverride()`, the function it calls) rather than end-to-end through
+  the Tag Budget modal's DOM, since `views/history.js` is not loaded in this test harness.
+- Infra Cost Budget Pool assignment remains unimplemented by design (Part 4) — no safe existing
+  persistence path exists for it without introducing a new storage model.
+
 ### Phase 7A-6 - Overview Chart Layout Fix
 #### Fixed
 - Overview's "Spend breakdown" chart card (`index.html`) laid out the main chart and the donut +

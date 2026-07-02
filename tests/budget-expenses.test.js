@@ -1326,21 +1326,264 @@ function seedBvaScenario(context) {
   return pools;
 }
 
-test('Phase 7A-5v2: Unbudgeted and Needs PMO Review render as always-visible in-page sections, one line per record, not a pop-up', () => {
+test('Phase 7A-7: BvA keeps Unbudgeted/Needs PMO Review summaries visible, but "View items" now navigates to the Budget Assignment Workspace, not a modal', async () => {
   const context = createBvaContext();
   seedBvaScenario(context);
   const html = context.__elements.get('bva-content').innerHTML;
 
   assert.match(html, /id="bva-unbudgeted-section"/);
   assert.match(html, /id="bva-needs-review-section"/);
+  assert.match(html, /Unbudgeted Actual Spend \(1 items\)/);
   assert.match(html, /Needs PMO Review \(1 items\)/);
-  // Both sections are rendered inline on the page itself (in bva-content), not behind a click.
-  assert.match(html, /MAN-UI-1/);
-  assert.match(html, /INFRA-UI-1/);
-  assert.doesNotMatch(html, /onclick="showBvaActualSpend\('unbudgeted'\)"|onclick="showBvaActualSpend\('needs-review'\)"/);
-  // One row per record, single line, no horizontal scroll.
+  const viewItemsButtons = (html.match(/onclick="showBudgetAssignmentWorkspace\(\)"/g) || []).length;
+  assert.equal(viewItemsButtons, 2, 'both summary sections must link to the workspace');
+  assert.doesNotMatch(html, /onclick="showBvaActualSpend\('unbudgeted'\)"|onclick="showBvaActualSpend\('needs-review'\)"/,
+    'these buckets must no longer open a modal/popup');
+  // The summary itself must stay a lightweight count/total, not the full record list.
+  assert.doesNotMatch(html, /MAN-UI-1|INFRA-UI-1/, 'the BvA summary should not inline the full record list any more — that now lives in the workspace');
+
+  await context.showBudgetAssignmentWorkspace();
+  assert.match(context.__elements.get('bva-content').innerHTML, /Budget Assignment/);
+
+  await context.closeBudgetAssignmentWorkspace();
+  const backToSummary = context.__elements.get('bva-content').innerHTML;
+  assert.doesNotMatch(backToSummary, /Budget Assignment</);
+  assert.match(backToSummary, /id="bva-unbudgeted-section"/, 'closing the workspace must return to the BvA summary');
+});
+
+async function seedAssignmentWorkspaceScenario(context) {
+  const pools = [
+    context.createBudgetPoolRecord({ id:'ws-pool-infra-a', project:'AOA-MP', name:'Infra A', budget:20000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Infra'] }),
+    context.createBudgetPoolRecord({ id:'ws-pool-infra-b', project:'AOA-MP', name:'Infra B', budget:20000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Infra'] }),
+  ];
+  // Persist to the actual pool store (not just a local variable) — showBudgetAssignmentWorkspace()
+  // re-renders via renderBudgetVsActual(), which reloads pools from storage, not from whatever was
+  // passed directly into the first _renderBvaWith() call below.
+  context.storeBudgetPools(pools);
+  context.storeActualSpendRecords([
+    context.createActualSpendRecord({ id:'ws-memo-unbudgeted', source:'Approved Memo', referenceNo:'WS-MEMO-1', memoId:'WS-MEMO-1', project:'AOA-MP', spendType:'Software', description:'Adobe renewal', amount:5000, startDate:'2026-03', endDate:'2026-03' }),
+    context.createActualSpendRecord({ id:'ws-infra-review', source:'Infra Cost', referenceNo:'WS-INFRA-1', project:'AOA-MP', spendType:'Infra', description:'AWS bill', amount:4400, startDate:'2026-03', endDate:'2026-03' }),
+  ]);
+  // A real manual expense (not a hand-crafted canonical record) so reconciliation projects it
+  // through manualExpenseToActualSpend() with the genuine `actual-spend-manual-<id>` id shape that
+  // assignBudgetPoolFromWorkspace() expects to strip.
+  await context.saveManualExpenseAsync({
+    id:'ws-manual-1', entryKind:'historical', referenceNo:'WS-MAN-1', project:'AOA-MP',
+    expenseType:'hw', description:'Laptop batch', frequency:'one_time', expenseDate:'2026-03-15',
+    quantity:1, unitCost:3000, amount:3000, vendorProgram:'', notes:'',
+  });
+  context.__elements.get('bva-year').value = '2569';
+  context.__elements.get('bva-project').value = 'all';
+  context._renderBvaWith(pools);
+  return pools;
+}
+
+test('Phase 7A-7: Budget Assignment Workspace lists Unbudgeted and Needs PMO Review records with key fields, and keeps the memo reference clickable', async () => {
+  const context = createBvaContext();
+  await seedAssignmentWorkspaceScenario(context);
+  await context.showBudgetAssignmentWorkspace();
+  const html = context.__elements.get('bva-content').innerHTML;
+
+  assert.match(html, /Budget Assignment/);
+  assert.match(html, /WS-MEMO-1/, 'Unbudgeted memo-origin record must be listed');
+  assert.match(html, /WS-MAN-1/, 'Unbudgeted manual-origin record must be listed');
+  assert.match(html, /WS-INFRA-1/, 'Needs PMO Review record must be listed');
+
+  ['AOA-MP', 'Adobe renewal', 'Software', context.money(5000), '2026-03'].forEach(text =>
+    assert.ok(html.includes(text), `expected a workspace row to include "${text}"`));
+  assert.match(html, /Unbudgeted/);
+  assert.match(html, /No matching Budget Pool|Manual Actual Spend has no assigned Budget Pool/);
+  assert.match(html, /Multiple Budget Pools match/);
+
+  // Memo reference remains clickable through to the existing read-only Memo viewer.
+  assert.match(html, /onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly\('WS-MEMO-1'\)"/);
+
+  // Rendered directly in the page (table, no horizontal scroll), not a popup.
   assert.match(html, /table-layout:fixed/);
-  assert.match(html, /overflow-x:hidden/);
+  assert.doesNotMatch(html, /id="bva-memo-panel"/);
+
+  // A clear way back to the BvA summary.
+  assert.match(html, /onclick="closeBudgetAssignmentWorkspace\(\)"/);
+
+  // Assignable sources get an action; Infra Cost is view-only with a clear note.
+  assert.match(html, /onclick="assignBudgetPoolFromWorkspace\('ws-memo-unbudgeted'\)"/);
+  assert.match(html, /onclick="assignBudgetPoolFromWorkspace\('actual-spend-manual-ws-manual-1'\)"/);
+  assert.match(html, /View only/);
+});
+
+test('Phase 7A-7: assignBudgetPoolFromWorkspace() routes to the existing Tag Budget / Manual Expense paths by source, and never invents Infra Cost assignment', async () => {
+  const context = createBvaContext();
+  await seedAssignmentWorkspaceScenario(context);
+
+  let tagCalledWith = null;
+  context.openBudgetTagModal = memoNo => { tagCalledWith = memoNo; };
+  context.assignBudgetPoolFromWorkspace('ws-memo-unbudgeted');
+  assert.equal(tagCalledWith, 'WS-MEMO-1', 'Approved Memo records must route through the existing Tag Budget modal');
+
+  let manualCalledWith = null;
+  context.openManualExpenseModal = id => { manualCalledWith = id; };
+  context.document.querySelector = () => null;
+  context.assignBudgetPoolFromWorkspace('actual-spend-manual-ws-manual-1');
+  assert.equal(manualCalledWith, 'ws-manual-1', 'Manual Actual Spend records must route through the existing Manual Expense modal using the underlying manual expense id (prefix stripped)');
+
+  let infraAlert = null;
+  context.alert = message => { infraAlert = message; };
+  context.assignBudgetPoolFromWorkspace('ws-infra-review');
+  assert.ok(infraAlert && /Infra Cost/.test(infraAlert), 'Infra Cost must show a clear note instead of silently doing nothing');
+});
+
+test('Phase 7A-7: assigning a valid pool to Manual Actual Spend updates manual persistence and reconciles it from Unbudgeted to Manual Override', async () => {
+  const context = createBvaContext();
+  const pool = context.createBudgetPoolRecord({ id:'assign-pool-manual', project:'AOA-MP', name:'Manual Pool', budget:20000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Hardware'] });
+  context.storeBudgetPools([pool]);
+  await context.saveManualExpenseAsync({
+    id:'assign-manual-1', entryKind:'historical', referenceNo:'ASSIGN-M-1', project:'AOA-MP',
+    expenseType:'hw', description:'Assign test', frequency:'one_time', expenseDate:'2026-03-15',
+    quantity:1, unitCost:900, amount:900, vendorProgram:'', notes:'',
+  });
+
+  const before = context.reconcileActualSpendSources(context.loadMemos(), context.activeManualExpenses(), context.loadInfraCosts(), [pool]);
+  assert.equal(before.find(r => r.id === 'actual-spend-manual-assign-manual-1').budgetStatus, 'Unbudgeted');
+
+  // Simulate assignBudgetPoolFromWorkspace() opening the existing Manual Expense modal and the
+  // PMO picking the pool, then saving through the existing, unmodified save path.
+  context.isPMO = () => true;
+  const elements = new Map();
+  const setField = (id, value) => elements.set(id, { id, value, textContent:'' });
+  setField('me-id', 'assign-manual-1');
+  setField('me-frequency', 'one_time');
+  setField('me-reference', 'ASSIGN-M-1');
+  setField('me-project', 'AOA-MP');
+  setField('me-pool', 'assign-pool-manual');
+  setField('me-type', 'hw');
+  setField('me-description', 'Assign test');
+  setField('me-date', '2026-03-15');
+  setField('me-start', ''); setField('me-end', '');
+  setField('me-amount-input', '900');
+  setField('me-vendor-program', ''); setField('me-notes', '');
+  context.document.getElementById = id => elements.get(id) || null;
+
+  await context.saveManualExpenseFromModal();
+
+  const updatedExpense = context.loadManualExpenses().find(e => e.id === 'assign-manual-1');
+  assert.equal(updatedExpense.budgetPoolId, 'assign-pool-manual', 'manual persistence must store the assigned Budget Pool');
+
+  const after = context.reconcileActualSpendSources(context.loadMemos(), context.activeManualExpenses(), context.loadInfraCosts(), [pool]);
+  const afterRecord = after.find(r => r.id === 'actual-spend-manual-assign-manual-1');
+  assert.equal(afterRecord.budgetStatus, 'Manual Override', 'reconciliation must move it from Unbudgeted to Manual Override');
+  assert.equal(afterRecord.finalBudgetPoolId, 'assign-pool-manual');
+});
+
+test('Phase 7A-7: memo-origin Needs PMO Review assignment via the existing override path resolves into the selected Budget Pool', () => {
+  const context = createBvaContext();
+  const poolA = context.createBudgetPoolRecord({ id:'assign-pool-a', project:'AOA-MP', name:'Pool A', budget:10000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const poolB = context.createBudgetPoolRecord({ id:'assign-pool-b', project:'AOA-MP', name:'Pool B', budget:10000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const record = context.createActualSpendRecord({
+    id:'actual-spend-memo-ASSIGN-MEMO-1', source:'Approved Memo', referenceNo:'ASSIGN-MEMO-1', memoId:'ASSIGN-MEMO-1',
+    project:'AOA-MP', spendType:'Software', amount:4000, startDate:'2026-04', endDate:'2026-04',
+  });
+  const mapped = context.mapBudgetPool(record, [poolA, poolB]);
+  assert.equal(mapped.budgetStatus, 'Needs PMO Review', 'sanity: two equally-matching pools produce Needs PMO Review');
+  context.storeActualSpendRecords([mapped]);
+
+  // saveBudgetTag() (views/history.js, invoked by the Tag Budget modal assignBudgetPoolFromWorkspace()
+  // opens) itself calls updateActualSpendBudgetOverride() to persist the assignment — call the same
+  // canonical function directly here since saveBudgetTag()'s own DOM-bound radio input is outside
+  // this test harness's loaded files.
+  const updated = context.updateActualSpendBudgetOverride('ASSIGN-MEMO-1', 'assign-pool-a', [poolA, poolB]);
+  assert.equal(updated.budgetStatus, 'Manual Override');
+  assert.equal(updated.finalBudgetPoolId, 'assign-pool-a');
+
+  const dataset = context.calculateBudgetVsActualDataset([poolA, poolB], context.loadActualSpendRecords(), { year:'2569', project:'AOA-MP' });
+  assert.equal(dataset.needsReviewRecords.length, 0, 'the record must no longer appear in Needs PMO Review after assignment');
+  assert.equal(dataset.rows.find(r => r.pool.id === 'assign-pool-a').actual, 4000);
+});
+
+test('Phase 7A-7: cross-project Budget Pool assignment is blocked for memo-origin records and does not persist', () => {
+  const context = createBvaContext();
+  const poolOther = context.createBudgetPoolRecord({ id:'assign-pool-other-proj', project:'OTHER-PRJ', name:'Other', budget:10000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const record = context.createActualSpendRecord({
+    id:'actual-spend-memo-ASSIGN-MEMO-2', source:'Approved Memo', referenceNo:'ASSIGN-MEMO-2', memoId:'ASSIGN-MEMO-2',
+    project:'AOA-MP', spendType:'Software', amount:2000, startDate:'2026-04', endDate:'2026-04', budgetStatus:'Unbudgeted',
+  });
+  context.storeActualSpendRecords([record]);
+  const updated = context.updateActualSpendBudgetOverride('ASSIGN-MEMO-2', 'assign-pool-other-proj', [poolOther]);
+  assert.equal(updated.budgetStatus, 'Unbudgeted', 'a cross-project assignment must not persist as a valid override');
+  assert.equal(updated.finalBudgetPoolId, null, 'the invalid budgetPoolId must not take effect');
+  assert.equal(updated.mappingWarning, 'blocked-cross-project-override');
+});
+
+test('Phase 7A-7: cross-year Budget Pool assignment is blocked for memo-origin records and does not persist', () => {
+  const context = createBvaContext();
+  const poolDiffYear = context.createBudgetPoolRecord({ id:'assign-pool-diff-year', project:'AOA-MP', name:'Old Year', budget:10000, startMonth:'2025-01', endMonth:'2025-12', spendTypes:['Software'] });
+  const record = context.createActualSpendRecord({
+    id:'actual-spend-memo-ASSIGN-MEMO-3', source:'Approved Memo', referenceNo:'ASSIGN-MEMO-3', memoId:'ASSIGN-MEMO-3',
+    project:'AOA-MP', spendType:'Software', amount:2500, startDate:'2026-04', endDate:'2026-04', budgetStatus:'Unbudgeted',
+  });
+  context.storeActualSpendRecords([record]);
+  const updated = context.updateActualSpendBudgetOverride('ASSIGN-MEMO-3', 'assign-pool-diff-year', [poolDiffYear]);
+  assert.equal(updated.budgetStatus, 'Unbudgeted');
+  assert.equal(updated.finalBudgetPoolId, null, 'the invalid budgetPoolId must not take effect');
+  assert.equal(updated.mappingWarning, 'blocked-cross-year-override');
+});
+
+test('Phase 7A-7: after assignment, BvA total stays the same but the bucket allocation moves from Unbudgeted to Mapped', () => {
+  const context = createBvaContext();
+  const pool = context.createBudgetPoolRecord({ id:'assign-total-pool', project:'AOA-MP', name:'Total Pool', budget:50000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const record = context.createActualSpendRecord({
+    id:'actual-spend-memo-ASSIGN-TOTAL-1', source:'Approved Memo', referenceNo:'ASSIGN-TOTAL-1', memoId:'ASSIGN-TOTAL-1',
+    project:'AOA-MP', spendType:'Software', amount:6000, startDate:'2026-04', endDate:'2026-04', budgetStatus:'Unbudgeted',
+  });
+  context.storeActualSpendRecords([record]);
+
+  const before = context.calculateBudgetVsActualDataset([pool], context.loadActualSpendRecords(), { year:'2569', project:'AOA-MP' });
+  assert.equal(before.totals.actual, 6000);
+  assert.equal(before.totals.unbudgetedActual, 6000);
+  assert.equal(before.totals.mappedActual, 0);
+
+  context.updateActualSpendBudgetOverride('ASSIGN-TOTAL-1', 'assign-total-pool', [pool]);
+
+  const after = context.calculateBudgetVsActualDataset([pool], context.loadActualSpendRecords(), { year:'2569', project:'AOA-MP' });
+  assert.equal(after.totals.actual, 6000, 'the grand total must not change from assignment alone');
+  assert.equal(after.totals.unbudgetedActual, 0);
+  assert.equal(after.totals.mappedActual, 6000);
+});
+
+test('Phase 7A-7: Forecast remains unchanged by a Budget Assignment', () => {
+  const context = createBvaContext();
+  const pool = context.createBudgetPoolRecord({ id:'assign-forecast-pool', project:'AOA-MP', name:'FC Pool', budget:50000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const record = context.createActualSpendRecord({
+    id:'actual-spend-memo-ASSIGN-FC-1', source:'Approved Memo', referenceNo:'ASSIGN-FC-1', memoId:'ASSIGN-FC-1',
+    project:'AOA-MP', spendType:'Software', amount:12000, startDate:'2026-01', endDate:'2026-12', budgetStatus:'Unbudgeted',
+  });
+  context.storeActualSpendRecords([record]);
+
+  const forecastBefore = context.calculateForecast(context.loadActualSpendRecords(), new Date(2026, 6, 15));
+  context.updateActualSpendBudgetOverride('ASSIGN-FC-1', 'assign-forecast-pool', [pool]);
+  const forecastAfter = context.calculateForecast(context.loadActualSpendRecords(), new Date(2026, 6, 15));
+
+  assert.deepEqual(JSON.parse(JSON.stringify(forecastBefore)), JSON.parse(JSON.stringify(forecastAfter)));
+});
+
+test('Phase 7A-7: Export totals remain unchanged (still equal the dataset total) after a Budget Assignment', () => {
+  const context = createBvaContext();
+  const pool = context.createBudgetPoolRecord({ id:'assign-export-pool', project:'AOA-MP', name:'Export Pool', budget:50000, startMonth:'2026-01', endMonth:'2026-12', spendTypes:['Software'] });
+  const record = context.createActualSpendRecord({
+    id:'actual-spend-memo-ASSIGN-EXP-1', source:'Approved Memo', referenceNo:'ASSIGN-EXP-1', memoId:'ASSIGN-EXP-1',
+    project:'AOA-MP', spendType:'Software', amount:7000, startDate:'2026-04', endDate:'2026-04', budgetStatus:'Unbudgeted',
+  });
+  context.storeActualSpendRecords([record]);
+
+  const before = context.calculateBudgetVsActualDataset([pool], context.loadActualSpendRecords(), { year:'2569', project:'AOA-MP' });
+  const exportedBefore = context.budgetVsActualExportDataset(before);
+  assert.equal(exportedBefore.totals.actual, 7000);
+
+  context.updateActualSpendBudgetOverride('ASSIGN-EXP-1', 'assign-export-pool', [pool]);
+
+  const after = context.calculateBudgetVsActualDataset([pool], context.loadActualSpendRecords(), { year:'2569', project:'AOA-MP' });
+  const exportedAfter = context.budgetVsActualExportDataset(after);
+  assert.equal(exportedAfter.totals.actual, 7000, 'export total must remain the same after assignment, only the bucket changes');
+  assert.equal(exportedAfter.totals.actual, exportedBefore.totals.actual);
 });
 
 test('Phase 7A-5v2: BvA "all" drill-down includes Mapped, Unbudgeted, and Needs PMO Review as one row per record, and its total equals the KPI and export totals', () => {

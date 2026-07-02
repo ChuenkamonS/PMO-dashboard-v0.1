@@ -2440,9 +2440,23 @@ function getPoolActual(pool, approvedMemos, allPools) {
 // TAB: BUDGET VS ACTUAL
 // ══════════════════════════════════════════
 let _bvaDataset = null;
+// 'summary' (default Budget vs Actual report) or 'assignment' (Budget Assignment Workspace,
+// Phase 7A-7). A view flag rather than a new `_bgtCurrentTab` value/top-level tab, since
+// MASTER_SPEC.md fixes Budget & Spend at exactly five tabs — this is a sub-view within "bva".
+let _bvaCurrentView = 'summary';
 
 function renderBudgetVsActual() {
-  loadBudgetPoolsAsync().then(_renderBvaWith).catch(() => _renderBvaWith(loadBudgetPools()));
+  return loadBudgetPoolsAsync().then(_renderBvaWith).catch(() => _renderBvaWith(loadBudgetPools()));
+}
+
+function showBudgetAssignmentWorkspace() {
+  _bvaCurrentView = 'assignment';
+  return renderBudgetVsActual();
+}
+
+function closeBudgetAssignmentWorkspace() {
+  _bvaCurrentView = 'summary';
+  return renderBudgetVsActual();
 }
 
 function _renderBvaWith(pools) {
@@ -2476,6 +2490,14 @@ function _renderBvaWith(pools) {
     if (needsReviewRecords.length) flagParts.push(`${needsReviewRecords.length} Needs PMO Review`);
     alertEl.style.display = flagParts.length ? '' : 'none';
     alertEl.textContent = flagParts.length ? `⚠ ${flagParts.join(' · ')} Actual Spend items` : '';
+  }
+
+  // Budget Assignment Workspace (Phase 7A-7): a dedicated in-page view, not a modal, for
+  // reviewing/assigning Unbudgeted and Needs PMO Review records. Rendered before the "no Budget
+  // Pool yet" empty-state check below, since the workspace is exactly for records with no pool.
+  if (_bvaCurrentView === 'assignment') {
+    container.innerHTML = renderBudgetAssignmentWorkspace(_bvaDataset);
+    return;
   }
 
   if (!rows.length && !unbudgetedRecords.length) {
@@ -2515,21 +2537,23 @@ function _renderBvaWith(pools) {
     </div>
     ${unbudgetedRecords.length ? `
       <div class="card" id="bva-unbudgeted-section" style="padding:0;overflow:hidden;margin-bottom:12px;border-color:var(--amber)">
-        <div style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;background:var(--amber-50,#FFFBEB);border-bottom:1px solid var(--border)">
+        <div style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;background:var(--amber-50,#FFFBEB)">
           <strong style="color:var(--amber)">Unbudgeted Actual Spend (${unbudgetedRecords.length} items)</strong>
-          <strong style="color:var(--amber)">${money(Math.round(totals.unbudgetedActual))}</strong>
+          <div style="display:flex;align-items:center;gap:10px">
+            <strong style="color:var(--amber)">${money(Math.round(totals.unbudgetedActual))}</strong>
+            <button class="btn-sm" onclick="showBudgetAssignmentWorkspace()">View items →</button>
+          </div>
         </div>
-        <div style="max-height:340px;overflow-y:auto;overflow-x:hidden">${actualSpendRowsTable(unbudgetedRecords)}</div>
-        <!-- TODO (future phase, not implemented here): add a per-row "Map to Budget Pool" action
-             in this in-page section so PMO can assign a pool directly from the Unbudgeted list. -->
       </div>` : ''}
     ${needsReviewRecords.length ? `
       <div class="card" id="bva-needs-review-section" style="padding:0;overflow:hidden;margin-bottom:12px;border-color:var(--amber)">
-        <div style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;background:var(--amber-50,#FFFBEB);border-bottom:1px solid var(--border)">
+        <div style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;background:var(--amber-50,#FFFBEB)">
           <strong style="color:var(--amber)">Needs PMO Review (${needsReviewRecords.length} items)</strong>
-          <strong style="color:var(--amber)">${money(Math.round(totals.needsReviewActual))}</strong>
+          <div style="display:flex;align-items:center;gap:10px">
+            <strong style="color:var(--amber)">${money(Math.round(totals.needsReviewActual))}</strong>
+            <button class="btn-sm" onclick="showBudgetAssignmentWorkspace()">View items →</button>
+          </div>
         </div>
-        <div style="max-height:340px;overflow-y:auto;overflow-x:hidden">${actualSpendRowsTable(needsReviewRecords)}</div>
       </div>` : ''}
     ${[...byProj.entries()].map(([proj, projectRows]) => `
       <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
@@ -2612,10 +2636,135 @@ function actualSpendRowsTable(records) {
   </table>`;
 }
 
+// ══════════════════════════════════════════
+// BUDGET ASSIGNMENT WORKSPACE (Phase 7A-7)
+// ══════════════════════════════════════════
+// A dedicated in-page sub-view of the Budget vs Actual tab (toggled by _bvaCurrentView, not a new
+// top-level tab — MASTER_SPEC.md fixes Budget & Spend at exactly five tabs) for reviewing and
+// assigning a Budget Pool to Unbudgeted / Needs PMO Review records. Deliberately does not
+// reimplement mapping: every assignment action reuses the existing, already-validated canonical
+// paths (openBudgetTagModal()/saveBudgetTag() for Approved Memo, openManualExpenseModal()/
+// saveManualExpenseFromModal() for Manual Actual Spend) instead of a new pool-picker or algorithm.
+
+// Human-readable reason a record needs PMO action — informational only, derived entirely from
+// fields the canonical mapping (mapBudgetPool()) already computed; invents no new business rule.
+function actualSpendAssignmentReason(record) {
+  if (record.mappingWarning === 'blocked-cross-year-override') return 'Blocked: selected pool is a different year';
+  if (record.mappingWarning === 'blocked-cross-project-override') return 'Blocked: selected pool is a different project';
+  if (record.budgetStatus === BUDGET_STATUSES.NEEDS_PMO_REVIEW) return 'Multiple Budget Pools match — needs PMO decision';
+  if (record.source === ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE) return 'Manual Actual Spend has no assigned Budget Pool';
+  return 'No matching Budget Pool';
+}
+
+// Dispatches to the existing, already-validated assignment path for the record's source. Does not
+// duplicate mapBudgetPool()'s project/year/spend-type rules — those existing paths already enforce
+// them (block + alert + no persist on an invalid pool) exactly as required by this phase's Part 3.
+function assignBudgetPoolFromWorkspace(recordId) {
+  const record = loadActualSpendRecords().find(r => r.id === recordId);
+  if (!record) return;
+  if (record.source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO) {
+    if (!record.memoId) { alert('ไม่พบ Memo ที่เกี่ยวข้องกับรายการนี้'); return; }
+    // openBudgetTagModal()/saveBudgetTag() (views/history.js) is the existing Tag Budget path,
+    // already used from All Memo — reuse it as-is instead of a new pool-picker.
+    if (typeof openBudgetTagModal === 'function') openBudgetTagModal(record.memoId);
+    return;
+  }
+  if (record.source === ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE) {
+    const expenseId = String(record.id).slice('actual-spend-manual-'.length);
+    openManualExpenseModal(expenseId); // existing Manual Actual Spend edit modal
+    // saveManualExpenseFromModal()'s own onclick already persists via the canonical manual
+    // expense path; only add a workspace refresh on top of it (it only removes the modal on a
+    // successful save, so absence of the modal afterward reliably means the save went through).
+    const saveBtn = document.querySelector('#manual-expense-modal .btn-primary');
+    if (saveBtn) saveBtn.onclick = async () => {
+      await saveManualExpenseFromModal();
+      if (!document.getElementById('manual-expense-modal')) renderBudgetVsActual();
+    };
+    return;
+  }
+  // Infra Cost: the Infra Cost persistence model has no Budget Pool field to assign today. Do not
+  // invent a new storage model for it — surface this clearly instead of silently doing nothing.
+  alert('Infra Cost ยังไม่รองรับการ assign Budget Pool จากหน้านี้ — โปรดติดต่อ PMO เพื่อจัดการโดยตรงใน Budget Pool');
+}
+
+function budgetAssignmentRowsTable(records) {
+  if (!records.length) return `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:12px">ไม่มีรายการที่ต้อง assign</div>`;
+  const thS = 'padding:7px 10px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text-3);text-align:left;font-weight:600;text-transform:uppercase;white-space:nowrap';
+  const tdS = 'padding:7px 10px;border-bottom:1px solid var(--border);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+  const referenceCell = record => {
+    const ref = esc(record.referenceNo || '—');
+    if (record.source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO && record.referenceNo) {
+      return `<span style="color:var(--blue);font-weight:600;text-decoration:underline;cursor:pointer" onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly('${esc(record.referenceNo)}')">${ref}</span>`;
+    }
+    return `<span style="font-weight:600">${ref}</span>`;
+  };
+  const actionCell = record => {
+    if (record.source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO || record.source === ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE) {
+      return `<button class="btn-sm" onclick="assignBudgetPoolFromWorkspace('${esc(record.id)}')">Assign</button>`;
+    }
+    return `<span style="font-size:11px;color:var(--text-3)" title="Infra Cost Budget Pool assignment is not yet supported">View only</span>`;
+  };
+  const rows = [...records].sort((a,b) => String(b.startDate||'').localeCompare(String(a.startDate||'')));
+  return `<table style="width:100%;table-layout:fixed;border-collapse:collapse">
+    <colgroup>
+      <col style="width:13%"><col style="width:9%"><col style="width:8%"><col style="width:8%">
+      <col style="width:15%"><col style="width:8%"><col style="width:11%"><col style="width:13%"><col style="width:15%">
+    </colgroup>
+    <thead><tr>
+      <th style="${thS}">Reference / Memo No</th><th style="${thS}">Project</th><th style="${thS}">Source</th>
+      <th style="${thS}">Spend Type</th><th style="${thS}">Description</th><th style="${thS};text-align:right">Amount</th>
+      <th style="${thS}">Coverage</th><th style="${thS}">Status</th><th style="${thS}">Action</th>
+    </tr></thead>
+    <tbody>${rows.map(record => `<tr>
+      <td style="${tdS}" title="${esc(record.referenceNo || '—')}">${referenceCell(record)}</td>
+      <td style="${tdS}" title="${esc(record.project || '')}">${esc(record.project || '—')}</td>
+      <td style="${tdS}"><span class="badge ${actualSpendSourceBadgeClass(record.source)}">${actualSpendSourceShortLabel(record.source)}</span></td>
+      <td style="${tdS}" title="${esc(record.spendType || '')}">${esc(record.spendType || '—')}</td>
+      <td style="${tdS}" title="${esc(record.description || '')}">${esc(record.description || '—')}</td>
+      <td style="${tdS};text-align:right;font-weight:600">${money(Number(record.amount)||0)}</td>
+      <td style="${tdS}" title="${esc(record.startDate || '—')} → ${esc(record.endDate || '—')}">${esc(record.startDate || '—')} → ${esc(record.endDate || '—')}</td>
+      <td style="${tdS}">
+        <div style="font-weight:500">${esc(record.budgetStatus || '—')}</div>
+        <div style="font-size:10px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis" title="${esc(actualSpendAssignmentReason(record))}">${esc(actualSpendAssignmentReason(record))}</div>
+      </td>
+      <td style="${tdS};overflow:visible">${actionCell(record)}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+function renderBudgetAssignmentWorkspace(dataset) {
+  const unbudgeted = dataset.unbudgetedRecords || [];
+  const needsReview = dataset.needsReviewRecords || [];
+  const section = (title, records, total) => records.length ? `
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
+      <div style="padding:10px 14px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <strong>${esc(title)} (${records.length} items)</strong>
+        <strong style="color:var(--amber)">${money(Math.round(total))}</strong>
+      </div>
+      <div style="overflow-x:hidden">${budgetAssignmentRowsTable(records)}</div>
+    </div>` : '';
+
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div>
+        <div style="font-size:14px;font-weight:600">Budget Assignment</div>
+        <div style="font-size:11px;color:var(--text-3)">Review and assign a Budget Pool to Unbudgeted / Needs PMO Review Actual Spend</div>
+      </div>
+      <button class="btn-sm" onclick="closeBudgetAssignmentWorkspace()">← Back to Budget vs Actual</button>
+    </div>
+    ${section('Unbudgeted', unbudgeted, dataset.totals.unbudgetedActual)}
+    ${section('Needs PMO Review', needsReview, dataset.totals.needsReviewActual)}
+    ${!unbudgeted.length && !needsReview.length ? `
+      <div class="card" style="padding:32px;text-align:center;color:var(--text-3)">
+        <div style="font-size:32px;margin-bottom:12px">✅</div>
+        <div style="font-size:13px;font-weight:600;color:var(--text)">Nothing needs assignment right now</div>
+      </div>` : ''}`;
+}
+
 // ── Canonical Actual Spend drill-down (still a modal: Budget Pool rows, and the "all" KPI total) ──
-// Unbudgeted and Needs PMO Review moved out of this modal into their own always-visible in-page
-// sections in _renderBvaWith() (Phase 7A-5 follow-up) so they read as part of the page, not a
-// pop-up, and so a future "map to Budget Pool" action has a natural place to live.
+// Unbudgeted and Needs PMO Review have their own summary section in _renderBvaWith() with a "View
+// items" action that opens the dedicated Budget Assignment Workspace above (Phase 7A-7) instead of
+// this modal, so PMO can resolve them in-page rather than in a pop-up.
 function showBvaActualSpend(scope) {
   if (!_bvaDataset) return;
   let records;
