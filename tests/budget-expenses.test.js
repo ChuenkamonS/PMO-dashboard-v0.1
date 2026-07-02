@@ -1203,6 +1203,60 @@ test('Phase 7A-5v2: switching to Custom seeds the selectors with the currently a
   assert.equal(Number(fromIdx), 18, 'the "from" selector must reflect the currently applied 6-month window, not a stale default two years back');
 });
 
+function seedOverviewManyProjects(context, count) {
+  const records = Array.from({ length: count }, (_, i) => context.createActualSpendRecord({
+    id: `many-proj-${i}`, source: 'Manual / Historical Expense', referenceNo: `MP-${i}`,
+    project: `Project ${i}`, spendType: 'Hardware', amount: 1000 + i,
+    startDate: monthKey(0), endDate: monthKey(0),
+  }));
+  context.storeActualSpendRecords(records);
+  context.renderBudgetOverview();
+}
+
+test('Phase 7A-6: Overview chart card uses a responsive wrapper so the donut/legend cannot be pushed off-screen', () => {
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  assert.match(html, /\.ov-breakdown-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0,1fr\)\s+minmax\(180px,220px\)/,
+    'the main chart column must be allowed to shrink (minmax(0,1fr)), not a bare 1fr, or it can force the donut/legend past the viewport');
+  assert.match(html, /@media\s*\(max-width:\s*720px\)\s*\{\s*\.ov-breakdown-grid\s*\{\s*grid-template-columns:\s*minmax\(0,1fr\)\s*;/,
+    'the donut/legend must be able to stack below the main chart on narrow widths instead of overflowing');
+  assert.match(html, /<div class="ov-breakdown-grid">/, 'the breakdown chart row must use the responsive wrapper class');
+  assert.doesNotMatch(html, /<div style="display:grid;grid-template-columns:1fr 200px/, 'the old fixed, non-shrinking grid must be removed');
+  assert.match(html, /id="ov-donut-legend"[^>]*max-height:200px[^>]*overflow-y:auto/, 'many legend items must scroll internally instead of growing the card unboundedly');
+});
+
+test('Phase 7A-6: Group by Project with many projects keeps every project in the (non-overflowing, scrollable) legend', () => {
+  const context = createOverviewContext();
+  seedOverviewManyProjects(context, 18);
+  context.ovSetGroup('project');
+
+  const legendHtml = context.__elements.get('ov-donut-legend').innerHTML;
+  const legendRows = (legendHtml.match(/<span style="width:8px;height:8px/g) || []).length;
+  assert.equal(legendRows, 18, 'every project must still be represented in the legend, none hidden by the layout fix');
+  assert.match(legendHtml, /text-overflow:ellipsis;white-space:nowrap/, 'long project names must truncate rather than force the row wider');
+
+  const bar = [...context.chartConfigs].reverse().find(config => config.type === 'bar');
+  assert.equal(bar.data.datasets.length, 18, 'the main chart must still carry one series per project');
+});
+
+test('Phase 7A-6: Group by Type still renders after the chart layout change', () => {
+  const context = createOverviewContext();
+  seedOverview(context);
+  context.ovSetGroup('type');
+  const bar = [...context.chartConfigs].reverse().find(config => config.type === 'bar');
+  assert.ok(bar && bar.data.datasets.length > 0, 'the main bar chart must still render when grouped by Type');
+  assert.match(context.__elements.get('ov-donut-legend').innerHTML, /width:8px;height:8px/);
+});
+
+test('Phase 7A-6: Overview totals remain unchanged by the chart layout fix, across presets and Group by Project', () => {
+  const context = createOverviewContext();
+  seedOverview(context);
+  assertOverviewTotals(context, 33000);
+  context.ovSetGroup('project');
+  assertOverviewTotals(context, 33000);
+  context.ovSetPreset(6);
+  assertOverviewTotals(context, 27000);
+});
+
 test('historical expense migration is additive, RLS-enabled, and forbids delete access', () => {
   const migration = fs.readFileSync(
     path.join(root, 'supabase/migrations/20260629161656_historical_budget_expenses.sql'),

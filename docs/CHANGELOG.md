@@ -22,6 +22,48 @@
 
 ## Current Baseline
 
+### Phase 7A-6 - Overview Chart Layout Fix
+#### Fixed
+- Overview's "Spend breakdown" chart card (`index.html`) laid out the main chart and the donut +
+  legend with `grid-template-columns:1fr 200px`. A bare `1fr` track cannot shrink below its
+  content's min-content width, so when Group by = Project rendered many series/legend entries the
+  row could demand more width than the card/viewport, pushing the donut/legend toward or past the
+  right edge instead of staying inside the card. Changed to
+  `grid-template-columns:minmax(0,1fr) minmax(180px,220px)` (new `.ov-breakdown-grid` class) plus
+  `min-width:0` on both grid items, which lets the main chart column shrink instead of forcing
+  page-level horizontal overflow.
+
+#### Added
+- A `@media (max-width: 720px)` rule collapses `.ov-breakdown-grid` to a single column, so on
+  narrow widths the donut/legend stacks below the main chart instead of squeezing beside it.
+- `#ov-donut-legend` now has `max-height:200px;overflow-y:auto;overflow-x:hidden`, so Group by
+  Project with many projects grows an internal scrollbar instead of growing the card/page height
+  (or width) without bound. Every project still appears in the legend — none are hidden — they
+  simply scroll into view.
+
+#### Unchanged
+- No change to `app.js`, `views/budget.js` JS logic, KPI calculation, filters (3M/6M/12M/Custom),
+  Group by Type/Project behavior, chart data/totals, or donut percentages — this is a CSS/HTML
+  layout-only fix. `_ovRenderChart()`/`_ovRenderDonut()` were not modified; individual legend rows
+  already truncated long labels via `text-overflow:ellipsis` before this phase.
+- Forecast, Budget vs Actual, Actual Spend, Manual Entry, Supabase, and mapping logic untouched.
+
+#### Tests
+- Added to `tests/budget-expenses.test.js`: the responsive `.ov-breakdown-grid` class and its
+  `minmax(0,1fr)`/media-query/legend-scroll rules exist in `index.html` and the old fixed
+  `1fr 200px` grid is gone; Group by Project with many (18) projects keeps every project in the
+  legend and in the chart's dataset count, with rows still truncating instead of widening; Group by
+  Type still renders a populated bar chart and legend after the layout change; Overview KPI/chart/
+  donut/comparison totals remain equal across presets and after switching Group by Project (i.e.
+  the layout change did not alter any calculated value).
+
+#### Remaining Work (intentionally deferred, not part of this scope)
+- Section B (Budget vs Actual comparison rows) and other Overview sub-sections were not reviewed
+  for the same responsive-grid issue — only the Section A "Spend breakdown" chart card named in
+  this ticket was in scope.
+- No JS changes were needed or made; if a future phase wants virtualized/paginated legends for
+  very large project counts, that remains a separate, larger change.
+
 ### Phase 7A-5 Follow-up - Match Budget & Spend UX Brief v2
 #### Fixed
 - Overview custom range (`ov-from-sel`/`ov-to-sel`, `views/budget.js`, `index.html`) validated and
