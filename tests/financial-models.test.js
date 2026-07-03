@@ -100,6 +100,99 @@ test('budget pool stores budget and multiple spend types only', () => {
   assert.equal('actualSpend' in pool, false);
 });
 
+// ══════════════════════════════════════════════════════════════════
+// Milestone 2 Task 2.1 — THB/USD currency support. No FX conversion is
+// implemented: THB and USD amounts are stored and validated independently,
+// never converted into one another.
+// ══════════════════════════════════════════════════════════════════
+
+test('validateActualSpendRecord accepts THB and USD, rejects an unsupported currency', () => {
+  const ctx = context();
+  assert.equal(ctx.validateActualSpendRecord({ ...base, currency: 'THB' }).valid, true);
+  assert.equal(ctx.validateActualSpendRecord({ ...base, currency: 'USD' }).valid, true);
+  const invalid = ctx.validateActualSpendRecord({ ...base, currency: 'EUR' });
+  assert.equal(invalid.valid, false);
+  assert.ok(invalid.errors.some(e => /Currency must be/.test(e)));
+});
+
+test('validateBudgetPoolRecord accepts THB and USD, rejects an unsupported currency', () => {
+  const ctx = context();
+  const poolBase = { id:'pool-cur', project:'AOA-MP', budget:1000, spendTypes:['Software'], startDate:'2026-01-01', endDate:'2026-12-31' };
+  assert.equal(ctx.validateBudgetPoolRecord({ ...poolBase, currency:'THB' }).valid, true);
+  assert.equal(ctx.validateBudgetPoolRecord({ ...poolBase, currency:'USD' }).valid, true);
+  const invalid = ctx.validateBudgetPoolRecord({ ...poolBase, currency:'JPY' });
+  assert.equal(invalid.valid, false);
+  assert.ok(invalid.errors.some(e => /Currency must be/.test(e)));
+});
+
+test('money() is currency-aware: USD never shows ฿, THB is unchanged (backward compatible default)', () => {
+  const ctx = context();
+  assert.equal(ctx.money(1234), '฿1,234');
+  assert.equal(ctx.money(1234, 'THB'), '฿1,234');
+  const usd = ctx.money(1234, 'USD');
+  assert.equal(usd, '$1,234');
+  assert.doesNotMatch(usd, /฿/, 'a USD amount must never display the ฿ symbol');
+});
+
+test('actualSpendFromMemo() propagates the memo\'s own currency instead of hardcoding THB', () => {
+  const ctx = context();
+  const usdMemo = {
+    memoNo: 'ORB-USD-001', status: 'completed', type: 'sl', project: 'AOA-MP',
+    total: 500, currency: 'USD', approvedAt: '2026-06-30T00:00:00.000Z',
+  };
+  const record = ctx.actualSpendFromMemo(usdMemo);
+  assert.equal(record.currency, 'USD');
+
+  const thbMemo = { ...usdMemo, memoNo: 'ORB-THB-001', currency: 'THB' };
+  assert.equal(ctx.actualSpendFromMemo(thbMemo).currency, 'THB');
+
+  const noCurrencyMemo = { ...usdMemo, memoNo: 'ORB-LEGACY-001', currency: undefined };
+  assert.equal(ctx.actualSpendFromMemo(noCurrencyMemo).currency, 'THB', 'a pre-Milestone-2 memo with no currency field defaults to THB, unchanged');
+});
+
+test('memoToDb/dbToMemo round-trip preserves currency (defaults to THB for legacy memos)', () => {
+  const ctx = context();
+  const usdMemo = { memoNo: 'ORB-USD-002', currency: 'USD', approvers: [], auditLog: [] };
+  assert.equal(ctx.dbToMemo(ctx.memoToDb(usdMemo)).currency, 'USD');
+  const legacyMemo = { memoNo: 'ORB-LEGACY-002', approvers: [], auditLog: [] };
+  assert.equal(ctx.dbToMemo(ctx.memoToDb(legacyMemo)).currency, 'THB');
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Milestone 2 Task 2.2 — Bangkok timezone. Business-facing timestamps must
+// display in Asia/Bangkok regardless of the viewer's own browser timezone.
+// ══════════════════════════════════════════════════════════════════
+
+test('shortDate()/thaiDate() resolve to the Bangkok calendar day for a UTC instant, not the process/viewer local day', () => {
+  const ctx = context();
+  // 2026-07-03T20:30:00Z is 2026-07-04 03:30 in Bangkok (UTC+7) — a day later.
+  const utcInstant = '2026-07-03T20:30:00.000Z';
+  assert.equal(ctx.shortDate(utcInstant), '04/07/69');
+  assert.equal(ctx.thaiDate(new Date(utcInstant)), '4 กรกฎาคม พ.ศ. 2569');
+});
+
+test('shortDate() resolves a date-only ISO string to the correct Bangkok calendar day regardless of process timezone', () => {
+  const ctx = context();
+  // A bare date-only string parses as UTC midnight per spec; Bangkok (+7) never
+  // rolls it back to the previous day the way a negative-offset viewer would.
+  assert.equal(ctx.shortDate('2026-07-15'), '15/07/69');
+});
+
+test('dateInput() anchors at UTC midnight so thaiDate() always resolves to the picked calendar day', () => {
+  const ctx = context();
+  assert.equal(ctx.dateInput('2026-01-05'), '5 มกราคม พ.ศ. 2569');
+});
+
+test('bangkokTodayISO() derives "today" from the Bangkok calendar day via bangkokParts(), not a raw UTC slice', () => {
+  const ctx = context();
+  const p = ctx.bangkokParts(new Date());
+  const expected = `${p.year}-${String(p.month).padStart(2,'0')}-${String(p.day).padStart(2,'0')}`;
+  assert.equal(ctx.bangkokTodayISO(), expected);
+  // todayISO itself is a top-level `const` (not reachable as a vm context
+  // property), so pin its definition structurally instead.
+  assert.match(appCode, /const todayISO = bangkokTodayISO\(\);/);
+});
+
 test('budget pool storage reuses the existing key and accepts legacy memo types', () => {
   const ctx = context();
   ctx.storeBudgetPoolRecords([{

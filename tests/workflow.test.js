@@ -939,3 +939,134 @@ test("saveDraft() no longer calls the undefined switchPendingTab() and navigates
   assert.match(fn, /switchHistTab\('draft'\)/);
   assert.match(historyCode, /function switchHistTab\(status, btn\)/, 'switchHistTab must exist and be the real tab-switch function');
 });
+
+// ══════════════════════════════════════════════════════════════════
+// Milestone 2 — Financial Foundation
+// ══════════════════════════════════════════════════════════════════
+
+// ── Task 2.1: THB/USD currency support ──
+
+test('Milestone 2: collectMemoData reads #f-currency and validateMemo rejects an unsupported currency', () => {
+  const createCode = fs.readFileSync(path.join(root, 'views/create.js'), 'utf8');
+  assert.match(createCode, /currency: val\('#f-currency'\) \|\| 'THB'/);
+  assert.match(createCode, /SUPPORTED_CURRENCIES\.includes\(data\.currency\)/);
+});
+
+test('Milestone 2: Create Memo form has a THB/USD currency selector, not a free-text field', () => {
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  assert.match(html, /<select id="f-currency" onchange="onCurrencyChange\(\)">/);
+  assert.match(html, /<option value="THB" selected>THB/);
+  assert.match(html, /<option value="USD">USD/);
+});
+
+test('Milestone 2: SL/HW/INT/DEP running totals use the selected currency symbol, never a hardcoded ฿', () => {
+  const createCode = fs.readFileSync(path.join(root, 'views/create.js'), 'utf8');
+  ['function calcSL', 'function calcHW', 'function calcINT', 'function calcDepRow', 'function calcDepGrand'].forEach(sig => {
+    const fn = createCode.match(new RegExp(`${sig.replace(/[()]/g,'\\$&')}\\([^)]*\\) \\{([\\s\\S]*?)\\n\\}\\n`))?.[0] || '';
+    assert.ok(fn, `${sig} must be defined`);
+    assert.doesNotMatch(fn, /'฿'/, `${sig} must not hardcode the ฿ symbol`);
+    assert.match(fn, /currentCurrencySymbol\(\)/, `${sig} must use the currency-aware helper`);
+  });
+});
+
+test('Milestone 2: applyDraftEdit restores the memo\'s currency on Re-edit/Duplicate', () => {
+  const createCode = fs.readFileSync(path.join(root, 'views/create.js'), 'utf8');
+  assert.match(createCode, /currencySel\.value = memo\.currency \|\| 'THB'/);
+});
+
+// ── Task 2.3: Created By / Updated By metadata ──
+
+test('Milestone 2: saveMemoAsync stamps createdBy on first save and preserves it on later saves; updatedBy always refreshes', () => {
+  const { context, userName } = createAppContext();
+  userName.textContent = 'นาย A';
+  const draft = memo({ status: 'draft', memoNo: 'ORB-META-001' });
+  vm.runInContext('_memCache = []', context);
+  return context.saveMemoAsync(draft).then(first => {
+    assert.equal(first.createdBy, 'นาย A');
+    assert.equal(first.updatedBy, 'นาย A');
+    userName.textContent = 'นาย B';
+    return context.saveMemoAsync({ ...first, subject: 'edited' }).then(second => {
+      assert.equal(second.createdBy, 'นาย A', 'createdBy must be preserved, not overwritten by whoever edits later');
+      assert.equal(second.updatedBy, 'นาย B', 'updatedBy must reflect whoever actually made this save');
+    });
+  });
+});
+
+test('Milestone 2: updateMemoStatusAsync stamps updatedBy with the acting user', async () => {
+  const { context, userName } = createAppContext();
+  const pending = memo({ status: 'pending' });
+  vm.runInContext(`_memCache = [${JSON.stringify(pending)}]`, context);
+  userName.textContent = 'นาย ผู้อนุมัติ';
+  const updated = await context.updateMemoStatusAsync(pending.memoNo, 'rejected', { rejectedBy: 'นาย ผู้อนุมัติ' });
+  assert.equal(updated.updatedBy, 'นาย ผู้อนุมัติ');
+});
+
+test('Milestone 2: memoToDb/dbToMemo round-trip preserves createdBy/updatedBy', () => {
+  const { context } = createAppContext();
+  const m = memo({ createdBy: 'นาย A', updatedBy: 'นาย B' });
+  const restored = context.dbToMemo(context.memoToDb(m));
+  assert.equal(restored.createdBy, 'นาย A');
+  assert.equal(restored.updatedBy, 'นาย B');
+});
+
+test('Milestone 2: Device/Purchase Order/Budget Pool writers stamp Created By / Updated By', () => {
+  const deviceCode = fs.readFileSync(path.join(root, 'views/device.js'), 'utf8');
+  const budgetCode = fs.readFileSync(path.join(root, 'views/budget.js'), 'utf8');
+
+  // Device: deviceToDb/dbToDevice map the new columns, saveDevice() stamps them.
+  assert.match(deviceCode, /created_by:\s*d\.createdBy \|\| null/);
+  assert.match(deviceCode, /updated_by:\s*d\.updatedBy \|\| null/);
+  assert.match(deviceCode, /createdBy:\s*r\.created_by \|\| null/);
+  const saveDeviceFn = deviceCode.match(/function saveDevice\(\) \{([\s\S]*?)\n\}/)?.[0] || '';
+  assert.match(saveDeviceFn, /updatedBy:\s*currentUser\(\)/);
+  assert.match(saveDeviceFn, /createdBy:\s*currentUser\(\)/);
+
+  // Purchase Order: poToDb/dbToPo map the new columns; auto-created POs and
+  // markArrived() both stamp an actor.
+  const poToDbFn = deviceCode.match(/function poToDb\(po\) \{([\s\S]*?)\n\}\n/)?.[0] || '';
+  assert.match(poToDbFn, /created_by:\s*po\.createdBy \|\| null/);
+  const createPoFn = deviceCode.match(/function createPurchaseOrdersFromMemo\(memo\) \{([\s\S]*?)\n\}\n/)?.[0] || '';
+  assert.match(createPoFn, /createdBy:\s*currentUser\(\)/);
+  assert.match(deviceCode, /po\.updatedBy\s*=\s*currentUser\(\)/);
+
+  // Budget Pool: savePoolAsync() forwards createdBy/updatedBy to Supabase;
+  // saveBudgetPool() preserves the existing pool's creator on edit.
+  assert.match(budgetCode, /created_by:\s*pool\.createdBy \|\| null/);
+  assert.match(budgetCode, /updated_by:\s*pool\.updatedBy \|\| null/);
+  assert.match(budgetCode, /createdBy:\s*existingPool\?\.createdBy \|\| currentUser\(\)/);
+});
+
+// ── Task 2.4: Budget tag audit log ──
+
+test('Milestone 2: appendAuditLog captures previousBudgetPoolId/newBudgetPoolId alongside the existing actor/timestamp capture', () => {
+  const { context } = createAppContext();
+  const memos = [memo({ auditLog: [] })];
+  context.appendAuditLog(memos, memos[0].memoNo, 'Budget tag changed', '"Auto-match" → "Pool X"', {
+    previousBudgetPoolId: null,
+    newBudgetPoolId: 'pool-x',
+  });
+  const entry = memos[0].auditLog.at(-1);
+  assert.equal(entry.action, 'Budget tag changed');
+  assert.equal(entry.previousBudgetPoolId, null);
+  assert.equal(entry.newBudgetPoolId, 'pool-x');
+  assert.ok(entry.actor, 'actor must still be captured automatically');
+  assert.ok(entry.timestamp, 'timestamp must still be captured automatically');
+});
+
+test('Milestone 2: saveBudgetTag() writes a Budget tag changed audit entry via the shared appendAuditLog helper, without altering the tagging logic', () => {
+  const historyCode = fs.readFileSync(path.join(root, 'views/history.js'), 'utf8');
+  const fn = historyCode.match(/function saveBudgetTag\(memoNo\) \{([\s\S]*?)\n\}\n/)?.[0] || '';
+  assert.ok(fn, 'saveBudgetTag must be defined');
+  assert.match(fn, /const previousPoolId = memos\[idx\]\.budgetPoolId \|\| null;/);
+  assert.match(fn, /appendAuditLog\(memos, memoNo, 'Budget tag changed'/);
+  assert.match(fn, /previousBudgetPoolId: previousPoolId/);
+  assert.match(fn, /newBudgetPoolId: newPoolId/);
+  // The audit entry must be part of the SAME storeMemos() write as the tag
+  // change itself, not a separate save — appendAuditLog() must run before it.
+  const auditIndex = fn.indexOf('appendAuditLog(memos, memoNo');
+  const storeIndex = fn.indexOf('storeMemos(memos)');
+  assert.ok(auditIndex >= 0 && storeIndex >= 0 && auditIndex < storeIndex);
+  // Business logic (cross-year/cross-project guards, pool selection) is untouched.
+  assert.match(fn, /updateActualSpendBudgetOverride/);
+  assert.match(fn, /canonicalPool\.project && memo\.project && canonicalPool\.project !== memo\.project/);
+});

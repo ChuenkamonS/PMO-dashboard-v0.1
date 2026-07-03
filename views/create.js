@@ -135,6 +135,19 @@ function toggleOther() {
 }
 
 // ── Calculations ──
+// Milestone 2 Task 2.1 — running totals must reflect the memo's own selected
+// currency, never a hardcoded ฿ symbol (no FX conversion — THB and USD stay
+// as entered).
+function currentCurrencySymbol() {
+  return document.getElementById('f-currency')?.value === 'USD' ? '$' : '฿';
+}
+function onCurrencyChange() {
+  // Re-run whichever type's calc is active so the total symbol refreshes immediately.
+  if (selectedType === 'sl') calcSL();
+  else if (selectedType === 'hw') calcHW();
+  else if (selectedType === 'int') calcINT();
+  else if (selectedType === 'dep') calcDepGrand();
+}
 function calcSL() {
   let t = 0;
   document.querySelectorAll('#sl-rows .item-row').forEach(r => {
@@ -142,7 +155,7 @@ function calcSL() {
          (parseInt(r.querySelector('.sl-mo')?.value)||0) *
          (parseInt(r.querySelector('.sl-qty')?.value)||0);
   });
-  document.getElementById('sl-total').textContent = '฿'+t.toLocaleString('th-TH');
+  document.getElementById('sl-total').textContent = currentCurrencySymbol()+t.toLocaleString('th-TH');
 }
 function calcHW() {
   let t = 0;
@@ -150,12 +163,12 @@ function calcHW() {
     t += (parseFloat(r.querySelector('.hw-price')?.value)||0) *
          (parseInt(r.querySelector('.hw-qty')?.value)||0);
   });
-  document.getElementById('hw-total').textContent = '฿'+t.toLocaleString('th-TH');
+  document.getElementById('hw-total').textContent = currentCurrencySymbol()+t.toLocaleString('th-TH');
 }
 function calcINT() {
   const pp = parseFloat(document.getElementById('int-pp')?.value)||0;
   const n  = document.querySelectorAll('.int-name').length;
-  document.getElementById('int-total').textContent = '฿'+(pp*n).toLocaleString('th-TH');
+  document.getElementById('int-total').textContent = currentCurrencySymbol()+(pp*n).toLocaleString('th-TH');
   checkIntHeadcount();
 }
 
@@ -283,7 +296,7 @@ function calcDepRow(inp) {
   const qty   = parseInt(row.querySelector('.dep-item-qty')?.value)   || 0;
   const total = price * qty;
   const totalInp = row.querySelector('.dep-item-total');
-  if (totalInp) totalInp.value = total > 0 ? '฿' + total.toLocaleString() : '';
+  if (totalInp) totalInp.value = total > 0 ? currentCurrencySymbol() + total.toLocaleString() : '';
   calcDepGrand();
 }
 
@@ -295,7 +308,7 @@ function calcDepGrand() {
     grand += price * qty;
   });
   const grandEl = document.getElementById('dep-grand-total');
-  if (grandEl) grandEl.textContent = '฿' + grand.toLocaleString();
+  if (grandEl) grandEl.textContent = currentCurrencySymbol() + grand.toLocaleString();
   const totalEl = document.getElementById('dep-total');
   if (totalEl) { totalEl.value = grand; totalEl.dispatchEvent(new Event('input')); }
   // updateTotal() removed — function does not exist; dep-total input event handles display
@@ -472,6 +485,9 @@ function collectMemoData() {
     requesterProfileId: typeof currentUserProfileId === 'function' ? currentUserProfileId() : null,
     requesterName, requesterTitle,
     sourceMemoNo: _editingSourceMemoNo,
+    // Milestone 2 Task 2.1 — currency is stored explicitly at the memo level.
+    // No FX conversion: THB and USD amounts are never converted into one another.
+    currency: val('#f-currency') || 'THB',
     reviewerName: revName || '-', reviewerTitle: revTitle || '-',
     reviewerDate: dateInput(val('#f-signdate')) || TODAY,
     approverName: apprName || '-', approverTitle: apprTitle || '-',
@@ -614,6 +630,9 @@ function validateMemo(data) {
   if(!val('#f-date')) missing.push('วันที่ Memo');
   if(!val('#f-project')) missing.push('โครงการ');
   else if(val('#f-project')==='other' && !val('#f-project-other')) missing.push('ชื่อโครงการ');
+  if(typeof SUPPORTED_CURRENCIES !== 'undefined' && !SUPPORTED_CURRENCIES.includes(data.currency)) {
+    missing.push(`สกุลเงิน (รองรับเฉพาะ ${SUPPORTED_CURRENCIES.join(', ')})`);
+  }
   // เรียน auto-derived from last approver — no validation needed
   if(!data.subject || !data.subject.trim()) missing.push('หัวข้อเรื่อง (ห้ามว่าง)');
   if(!data.reason) missing.push('เหตุผลในการขอ');
@@ -1277,6 +1296,10 @@ async function applyDraftEdit() {
         if(opt) { projSel.value = memo.project; toggleOtherProject(); }
         else { projSel.value = 'other'; toggleOtherProject(); const oth = document.getElementById('f-project-other'); if(oth) oth.value = memo.project || ''; }
       }
+
+      // Milestone 2 Task 2.1 — restore the memo's own currency on Re-edit/Duplicate.
+      const currencySel = document.getElementById('f-currency');
+      if(currencySel) currencySel.value = memo.currency || 'THB';
 
       const toSel = document.getElementById('f-to');
       if(toSel) { const opt = [...toSel.options].find(o => o.value === memo.to); if(opt) toSel.value = memo.to; else { toSel.value = 'other'; toggleToOther(); const oth = document.getElementById('f-to-other'); if(oth) oth.value = memo.to || ''; } }

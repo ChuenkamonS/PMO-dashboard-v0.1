@@ -1965,8 +1965,10 @@ function formatActualSpendDateTime(value) {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
-  const datePart = date.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
-  const timePart = date.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', hour12:false });
+  // Milestone 2 Task 2.2 — business-facing timestamps display in Asia/Bangkok
+  // regardless of the viewer's own browser timezone.
+  const datePart = date.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric', timeZone:'Asia/Bangkok' });
+  const timePart = date.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', hour12:false, timeZone:'Asia/Bangkok' });
   return `${datePart} ${timePart}`;
 }
 
@@ -2376,7 +2378,14 @@ async function savePoolAsync(rawPool, opts = {}) {
         start_month: pool.startMonth || null,
         end_month:   pool.endMonth   || null,
         memo_types:  pool.memoTypes  || [],
-        updated_at:  new Date().toISOString(),
+        created_at:  pool.createdAt,
+        updated_at:  pool.updatedAt,
+        // Milestone 2 Task 2.3 — Created By / Updated By metadata. The
+        // in-memory record (createBudgetPoolRecord() above) already computes
+        // these correctly; this was the one place that dropped them before
+        // reaching Supabase.
+        created_by:  pool.createdBy || null,
+        updated_by:  pool.updatedBy || null,
       }, '?on_conflict=id');
     } catch(e) { console.warn('Pool save failed', e.message); }
   }
@@ -3344,7 +3353,15 @@ async function saveBudgetPool() {
   const memoTypes = Object.keys(BGT_TYPE_LABELS).filter(k => document.getElementById('bpool-type-' + k)?.checked);
 
   const id    = editId || `pool-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
-  const entry = { id, project, name, budget, year: yearBE, startMonth: start, endMonth: end, memoTypes };
+  // Milestone 2 Task 2.3 — Created By / Updated By metadata, same pattern as
+  // saveManualExpenseFromModal(): preserve the existing pool's creator on
+  // edit, always stamp the acting user as the updater.
+  const existingPool = editId ? loadBudgetPools().find(p => p.id === editId) : null;
+  const entry = {
+    id, project, name, budget, year: yearBE, startMonth: start, endMonth: end, memoTypes,
+    createdBy: existingPool?.createdBy || currentUser(),
+    updatedBy: currentUser(),
+  };
   const validation = validateBudgetPoolChange(entry, loadBudgetPools(), editId || null);
   if (!validation.valid) { alert(validation.errors.join('\n')); return; }
   // Business rule update: overlapping Project + Spend Type + Period is an allowed, intentional PMO

@@ -870,6 +870,79 @@ Exit Criteria
 
 ---
 
+# TD-M2-01
+
+Title
+
+Milestone 2 Deployment Prerequisite + Deferred/Partial Scope Items
+
+Status
+
+OPEN
+
+Priority
+
+Medium
+
+Introduced
+
+Milestone 2 — Financial Foundation
+
+Owner Phase
+
+Financial Foundation
+
+Current Situation
+
+1. **Migration not yet applied.** `supabase/migrations/20260703160000_milestone2_financial_foundation.sql`
+   adds `memos.currency`/`created_by`/`updated_by`, `devices.created_by`/`updated_by`,
+   `purchase_orders.created_at`/`created_by`/`updated_by`, and
+   `budget_pools.created_at`/`created_by`/`updated_by`. Not yet applied to the live Supabase project
+   (same constraint as TD-M1-01/TD-M1-03/TD-M1-04). Until it is applied, writes to these tables fall
+   back to local-only persistence for the new columns — the same accepted risk shape as those prior
+   items, not a new one.
+2. **PDF document generation does not vary its wording by currency.** `renderMemoPdf()` (`app.js`)
+   builds its Thai-language body/closing sentences with the literal word "บาท" (Baht) hardcoded
+   throughout — it does not call the now currency-aware `money()` helper for its main totals at all
+   (it formats numbers directly and appends "บาท" as prose). A USD memo's printed PDF will show a
+   USD-denominated number immediately followed by "บาท", which is misleading. Rewriting the
+   bilingual legal/business sentence templates was explicitly out of scope for this milestone (task
+   instructions: "PDF / display only if touched by existing helper" — `renderMemoPdf()`'s main totals
+   are not funneled through `money()`, so they were left untouched rather than redesigned).
+3. **Budget & Spend manual entry stays THB-only by default.** `validateActualSpendRecord()`/
+   `validateBudgetPoolRecord()` now accept USD, and `actualSpendFromMemo()` propagates a memo's own
+   currency — but the Manual Expense modal, the Budget Pool modal, and the Actual Spend bulk-import
+   template still have no currency selector/column, so every manually-entered or imported record is
+   still created with `currency: 'THB'`. Only Approved-Memo-sourced Actual Spend records can be USD
+   today (by inheriting the source memo's currency).
+4. **License module's Created By / Updated By metadata is deferred**, per explicit instruction
+   ("License may be deferred if it depends on future License materialization") — licenses are
+   memo-derived, not their own persisted record with independent metadata.
+5. **A few secondary Device/PO write paths don't stamp Created By / Updated By.** The primary
+   Add/Edit Device modal (`saveDevice()`), photo-arrival device auto-creation (`markArrived()`), and
+   Purchase-Order auto-creation on memo approval (`createPurchaseOrdersFromMemo()`) all stamp an
+   actor. Device bulk import and the photo-only upload/remove helpers (`uploadDevicePhoto()`,
+   `removeDevicePhoto()`-equivalent) do not — they were left untouched to keep this milestone's diff
+   scoped to the primary CRUD paths.
+
+Risk
+
+Item 1 is the one that matters operationally — apply the migration before/with this code, same as
+every prior milestone's deployment step. Items 2–5 are documented, intentionally deferred scope
+reductions, not regressions; none of them cause silent data loss or incorrect financial totals (a
+USD amount is never silently converted to THB anywhere in this milestone).
+
+Exit Criteria
+
+- Apply `20260703160000_milestone2_financial_foundation.sql` to the live Supabase project, then
+  confirm a USD memo's `currency` and a Device/PO/Budget Pool's `created_by`/`updated_by` all survive
+  a real reload (not just local cache).
+- PMO/BA decision on whether the PDF template needs bilingual currency wording (item 2), a Manual
+  Expense/Budget Pool currency selector (item 3), and/or License metadata (item 4) — each is a larger,
+  separately-scoped follow-up if confirmed necessary.
+
+---
+
 # Before Release Checklist
 
 Review every OPEN Technical Debt.

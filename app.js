@@ -5,6 +5,10 @@
 const SUPA_URL = 'https://wokqtivoytzgfuelgeho.supabase.co';
 const SUPA_KEY = 'sb_publishable_38ZMjNiHDP4li7dJB6G2Ng_iwqp5Ty0';
 
+// Milestone 2 Task 2.1 — THB/USD support. Currency is stored explicitly at
+// record level; no FX conversion between currencies is implemented.
+const SUPPORTED_CURRENCIES = ['THB', 'USD'];
+
 // ── Supabase REST helper ──
 async function supaFetch(table, method='GET', body=null, query='') {
   const url = SUPA_URL + '/rest/v1/' + table + query;
@@ -175,7 +179,7 @@ function validateActualSpendRecord(input) {
   if (!record.project) errors.push('Project is required');
   if (!SPEND_TYPE_VALUES.includes(record.spendType)) errors.push('Invalid Spend Type');
   if (!(record.amount > 0)) errors.push('Amount must be greater than zero');
-  if (record.currency !== 'THB') errors.push('Current calculations support THB only');
+  if (!SUPPORTED_CURRENCIES.includes(record.currency)) errors.push(`Currency must be ${SUPPORTED_CURRENCIES.join(' or ')}`);
   if (record.startDate && !parseStrictCalendarValue(record.startDate)) errors.push('Invalid Start Date');
   if (record.endDate && !parseStrictCalendarValue(record.endDate)) errors.push('Invalid End Date');
   if (record.coverageStatus === 'Invalid Coverage') errors.push('Invalid coverage period');
@@ -269,7 +273,7 @@ function validateBudgetPoolRecord(input) {
   if (!record.id) errors.push('ID is required');
   if (!record.project) errors.push('Project is required');
   if (!(record.budget > 0)) errors.push('Budget must be greater than zero');
-  if (record.currency !== 'THB') errors.push('Current calculations support THB only');
+  if (!SUPPORTED_CURRENCIES.includes(record.currency)) errors.push(`Currency must be ${SUPPORTED_CURRENCIES.join(' or ')}`);
   if (!record.spendTypes.length) errors.push('At least one Spend Type is required');
   if (!record.startDate || !record.endDate || !isValidCalendarRange(record.startDate, record.endDate)) {
     errors.push('Valid start/end month or date range is required');
@@ -953,7 +957,7 @@ function actualSpendFromMemo(memo, existing = null) {
     project: memo.project,
     spendType: spendTypeFromMemoType(memo.type),
     amount: memo.total,
-    currency: 'THB',
+    currency: memo.currency || 'THB',
     startDate: coverage.startDate,
     endDate: coverage.endDate,
     date: parseStrictCalendarValue(effectiveDate) ? effectiveDate : null,
@@ -1160,6 +1164,10 @@ function appendAuditLog(memos, memoNo, action, comment, extra = {}) {
     statusAfter:  extra.statusAfter  || null,
     evidenceUrl:  extra.evidenceUrl  || null,
     channel:      extra.channel      || 'in-app',
+    // Milestone 2 Task 2.4 — Budget tag audit: previous/new Budget Pool id,
+    // generic enough to be reused by any other future "value changed" event.
+    previousBudgetPoolId: extra.previousBudgetPoolId ?? null,
+    newBudgetPoolId:      extra.newBudgetPoolId      ?? null,
   });
 }
 
@@ -1261,6 +1269,7 @@ function memoToDb(m) {
     status: m.status || 'pending',
     project: m.project, subject: m.subject, reason: m.reason,
     to: m.to, date: m.date, total: Number(m.total)||0,
+    currency: m.currency || 'THB',
     amount_words: m.amountWords,
     requester_name: m.requesterName, requester_title: m.requesterTitle,
     requester_profile_id: m.requesterProfileId || null,
@@ -1316,6 +1325,8 @@ function memoToDb(m) {
     deleted_by: m.deletedBy || null, delete_reason: m.deleteReason || null,
     created_at: m.createdAt || new Date().toISOString(),
     updated_at: m.updatedAt || new Date().toISOString(),
+    // Milestone 2 Task 2.3 — Created By / Updated By metadata.
+    created_by: m.createdBy || null, updated_by: m.updatedBy || null,
   };
 }
 function dbToMemo(r) {
@@ -1324,6 +1335,7 @@ function dbToMemo(r) {
     type: r.type, typeLabel: r.type_label,
     status: r.status, project: r.project, subject: r.subject, reason: r.reason,
     to: r.to, date: r.date, total: Number(r.total)||0, amountWords: r.amount_words,
+    currency: r.currency || 'THB',
     requesterName: r.requester_name, requesterTitle: r.requester_title,
     requesterProfileId: r.requester_profile_id || null,
     currentApproverProfileId: r.current_approver_profile_id || null,
@@ -1366,6 +1378,8 @@ function dbToMemo(r) {
     deleted: r.deleted || false, deletedAt: r.deleted_at || null,
     deletedBy: r.deleted_by || null, deleteReason: r.delete_reason || null,
     createdAt: r.created_at, updatedAt: r.updated_at,
+    // Milestone 2 Task 2.3 — Created By / Updated By metadata.
+    createdBy: r.created_by || null, updatedBy: r.updated_by || null,
   };
 }
 
@@ -1413,7 +1427,10 @@ async function saveMemoAsync(data) {
   const now = new Date().toISOString();
   const existing = loadMemos().find(m => m.memoNo === data.memoNo);
   const saved = { ...data, id:data.memoNo, status:data.status||'pending',
-    createdAt: existing ? existing.createdAt : now, updatedAt: now };
+    createdAt: existing ? existing.createdAt : now, updatedAt: now,
+    // Milestone 2 Task 2.3 — Created By / Updated By metadata.
+    createdBy: existing ? existing.createdBy : (data.createdBy || currentUser()),
+    updatedBy: currentUser() };
 
   if(await checkSupa()) {
     try {
@@ -1481,7 +1498,9 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
 
   const now     = new Date().toISOString();
   const deferRender = !!extra._deferRender;
-  const updated = { ...memo, ...extra, status, updatedAt: now };
+  // Milestone 2 Task 2.3 — Created By / Updated By metadata: whoever triggered
+  // this transition (approve/reject/cancel/void/PMO override) is the updater.
+  const updated = { ...memo, ...extra, status, updatedAt: now, updatedBy: extra.updatedBy || currentUser() };
   delete updated._deferRender;
   delete updated.throwOnSyncError;
 
@@ -1585,6 +1604,7 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
       if (updated.approvedAt)  patch.approved_at  = updated.approvedAt;
       if (updated.rejectedAt)  patch.rejected_at  = updated.rejectedAt;
       if (updated.cancelledAt) patch.cancelled_at = updated.cancelledAt;
+      if (updated.updatedBy)   patch.updated_by   = updated.updatedBy;
       await supaFetch('memos', 'PATCH', patch, '?memo_no=eq.' + encodeURIComponent(memoNo));
     } catch(e) {
       console.warn('Supabase patch failed', e.message);
@@ -1701,24 +1721,55 @@ async function syncLocalToSupabase() {
 // ─────────────────────────────────────────
 
 // ── Date helpers ──
+// Milestone 2 Task 2.2 — business-facing dates/times must display in Asia/Bangkok
+// regardless of the viewer's own browser/OS timezone (docs/SYSTEM_OVERVIEW.md §7).
+// Shared extraction helper: every display helper below reads its date/time parts
+// through this single function instead of viewer-local getDate()/getMonth()/etc.
+const BANGKOK_TZ = 'Asia/Bangkok';
+function bangkokParts(d) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: BANGKOK_TZ,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(d);
+  const get = type => parts.find(p => p.type === type)?.value || '0';
+  return {
+    year: Number(get('year')), month: Number(get('month')), day: Number(get('day')),
+    hour: Number(get('hour')) % 24, minute: Number(get('minute')),
+  };
+}
 const MONTHS_TH = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
-function thaiDate(d) { return `${d.getDate()} ${MONTHS_TH[d.getMonth()]} พ.ศ. ${d.getFullYear()+543}`; }
+function thaiDate(d) { const p = bangkokParts(d); return `${p.day} ${MONTHS_TH[p.month-1]} พ.ศ. ${p.year+543}`; }
 const TODAY = thaiDate(new Date());
-const todayISO = new Date().toISOString().slice(0,10);
+function bangkokTodayISO() {
+  const p = bangkokParts(new Date());
+  return `${p.year}-${String(p.month).padStart(2,'0')}-${String(p.day).padStart(2,'0')}`;
+}
+const todayISO = bangkokTodayISO();
 
 // ── Shared utils ──
 function esc(v) { return String(v ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch])); }
 function val(sel, root=document) { return root.querySelector(sel)?.value?.trim() || ''; }
-function money(n) { return '฿' + (Number(n)||0).toLocaleString('th-TH', { maximumFractionDigits: 2 }); }
+// Milestone 2 Task 2.1 — currency-aware, backward compatible: every existing
+// call site that omits `currency` keeps returning the same THB-prefixed
+// string as before. USD must never display the ฿ symbol.
+function money(n, currency = 'THB') {
+  const symbol = currency === 'USD' ? '$' : '฿';
+  return symbol + (Number(n)||0).toLocaleString('th-TH', { maximumFractionDigits: 2 });
+}
 function shortDate(iso) {
   if(!iso) return '-';
   const d = new Date(iso);
   if(Number.isNaN(d.getTime())) return '-';
-  return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getFullYear()+543).slice(-2)}`;
+  const p = bangkokParts(d);
+  return `${String(p.day).padStart(2,'0')}/${String(p.month).padStart(2,'0')}/${String(p.year+543).slice(-2)}`;
 }
 function dateInput(v) {
   if(!v) return '-';
-  const d = new Date(v + 'T00:00:00');
+  // UTC-anchored (not viewer-local midnight) so the Bangkok extraction inside
+  // thaiDate() below always resolves to the calendar day the user actually
+  // picked, regardless of the viewer's own browser timezone.
+  const d = new Date(v + 'T00:00:00Z');
   return Number.isNaN(d.getTime()) ? v : thaiDate(d);
 }
 function badgeClass(type) {
@@ -1876,8 +1927,9 @@ function renderMemoPdf(data) {
     if(!v || v === '-') return '';
     // Already a Thai full date string e.g. "17 มิถุนายน 2569" — return as-is
     if(/[ก-๙]/.test(v)) return v;
-    // ISO YYYY-MM-DD or any parseable → full Thai date
-    const d = new Date(v.length===10 ? v+'T00:00:00' : v);
+    // ISO YYYY-MM-DD or any parseable → full Thai date. UTC-anchored for a
+    // date-only value, matching dateInput() — see Bangkok timezone helper above.
+    const d = new Date(v.length===10 ? v+'T00:00:00Z' : v);
     if(isNaN(d.getTime())) return v;
     return thaiDate(d); // "17 มิถุนายน พ.ศ. 2569"
   }

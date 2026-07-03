@@ -34,7 +34,11 @@ function deviceToDb(d, isNew=false) {
     memo_ref:      d.memoNo || null,    // use memoNo as single field name
     note:          d.note || null,
     source:        d.source || 'manual',
+    created_at:    d.createdAt || new Date().toISOString(),
     updated_at:    d.updatedAt || new Date().toISOString(),
+    // Milestone 2 Task 2.3 — Created By / Updated By metadata.
+    created_by:    d.createdBy || null,
+    updated_by:    d.updatedBy || null,
   };
   return row;
 }
@@ -66,6 +70,9 @@ function dbToDevice(r) {
     source:       r.source || 'manual',
     createdAt:    r.created_at,
     updatedAt:    r.updated_at,
+    // Milestone 2 Task 2.3 — Created By / Updated By metadata.
+    createdBy:    r.created_by || null,
+    updatedBy:    r.updated_by || null,
   };
 }
 
@@ -165,7 +172,11 @@ function poToDb(po) {
     arrived_qty:  po.arrivedQty || 0,
     status:       po.status || 'ordered',
     note:         po.note || null,
+    created_at:   po.createdAt || new Date().toISOString(),
     updated_at:   po.updatedAt || new Date().toISOString(),
+    // Milestone 2 Task 2.3 — Created By / Updated By metadata.
+    created_by:   po.createdBy || null,
+    updated_by:   po.updatedBy || null,
   };
 }
 function dbToPo(r) {
@@ -180,6 +191,9 @@ function dbToPo(r) {
     note:        r.note || '',
     createdAt:   r.created_at,
     updatedAt:   r.updated_at,
+    // Milestone 2 Task 2.3 — Created By / Updated By metadata.
+    createdBy:   r.created_by || null,
+    updatedBy:   r.updated_by || null,
   };
 }
 
@@ -252,6 +266,10 @@ function createPurchaseOrdersFromMemo(memo) {
       note:        '',
       createdAt:   new Date().toISOString(),
       updatedAt:   new Date().toISOString(),
+      // Milestone 2 Task 2.3 — Created By / Updated By metadata: whoever's
+      // action (approval) completed the memo and triggered this auto-creation.
+      createdBy:   currentUser(),
+      updatedBy:   currentUser(),
     };
     existing.push(po);
     // Save to Supabase only if not already there
@@ -286,6 +304,7 @@ async function markArrived(poId, qty, serialNumbers = []) {
   po.arrivedQty = newArrived;
   po.status     = newArrived >= po.orderedQty ? 'fulfilled' : 'partial_arrived';
   po.updatedAt  = now;
+  po.updatedBy  = currentUser();
   storePurchaseOrders(pos); // sync save first
   savePurchaseOrderAsync(po).catch(e => console.warn('PO update failed', e));
 
@@ -317,6 +336,9 @@ async function markArrived(poId, qty, serialNumbers = []) {
       source:          'memo',
       createdAt:       now,
       updatedAt:       now,
+      // Milestone 2 Task 2.3 — Created By / Updated By metadata.
+      createdBy:       currentUser(),
+      updatedBy:       currentUser(),
     };
     devices.push(device);
     newDevices.push(device);
@@ -704,6 +726,8 @@ function saveDevice() {
     status:       g('dev-status') || 'not_identified',
     note:         g('dev-note'),
     updatedAt:    now,
+    // Milestone 2 Task 2.3 — Created By / Updated By metadata.
+    updatedBy:    currentUser(),
     source:       'manual',
   };
   if(editId) {
@@ -721,7 +745,7 @@ function saveDevice() {
       if(!confirm(`พบอุปกรณ์ซ้ำ (${matchField})\nอัปเดตข้อมูลอันเดิมแทน?`)) return;
       saveDeviceAsync({ ...dup, ...data }).catch(e => console.warn('Device save failed', e));
     } else {
-      saveDeviceAsync({ id: nextDeviceId(), ...data, createdAt: now }).catch(e => console.warn('Device save failed', e));
+      saveDeviceAsync({ id: nextDeviceId(), ...data, createdAt: now, createdBy: currentUser() }).catch(e => console.warn('Device save failed', e));
     }
   }
   closeDeviceModal();

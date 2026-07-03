@@ -1,5 +1,97 @@
 # CHANGELOG
 
+## Milestone 2 — Financial Foundation (2026-07-03)
+
+Source: `docs/IMPLEMENTATION_ROADMAP.md` Milestone 2, following Milestone 1 (accepted) and its
+hotfixes. Scope: THB/USD currency, Bangkok timezone display, Created By/Updated By metadata, and
+Budget tag audit logging. License Review Queue, Software Master, Device Type Master, Approved PDF
+proof of approval, Resource module, Auth/permission, and Notification are explicitly out of scope
+and untouched. No FX conversion is implemented and no existing financial calculation logic changed.
+
+### Task 2.1 — THB/USD currency support
+- `app.js` — new `SUPPORTED_CURRENCIES = ['THB', 'USD']`. `money(n, currency='THB')` is now
+  currency-aware but 100% backward compatible — every existing call site that omits `currency` keeps
+  returning the same `฿`-prefixed string as before; passing `'USD'` returns `$`-prefixed, never `฿`.
+  `validateActualSpendRecord()`/`validateBudgetPoolRecord()` now accept THB or USD instead of
+  hard-rejecting anything but THB. `actualSpendFromMemo()` now propagates `memo.currency` instead of
+  hardcoding `'THB'`, so an approved USD memo produces a USD Actual Spend record.
+- `views/create.js` — new currency selector (`#f-currency`, THB/USD, defaults to THB) added to the
+  Create Memo form (`index.html`). `collectMemoData()` collects it; `validateMemo()` rejects an
+  unsupported value. The SL/HW/INT/DEP running-total displays (`calcSL`/`calcHW`/`calcINT`/
+  `calcDepRow`/`calcDepGrand`) now use a currency-aware symbol instead of a hardcoded `฿`, refreshed
+  live via `onCurrencyChange()`. `applyDraftEdit()` restores the memo's currency on Re-edit/Duplicate.
+- `memoToDb()`/`dbToMemo()` map `currency` to/from the DB, defaulting to `'THB'` for legacy memos.
+- Not changed (documented in `docs/TECHNICAL_DEBT.md` TD-M2-01): the PDF template's Thai sentence
+  generation and the Manual Expense/Budget Pool/bulk-import paths remain THB-only-by-default — see
+  Technical Debt for the reasoning.
+
+### Task 2.2 — Bangkok timezone
+- `app.js` — new shared `bangkokParts(d)` (backed by `Intl.DateTimeFormat` with
+  `timeZone: 'Asia/Bangkok'`) is the single source of truth for extracting date/time components for
+  display, replacing viewer-local `getDate()`/`getMonth()`/`getFullYear()`. `thaiDate()`, `shortDate()`,
+  and `todayISO` (via new `bangkokTodayISO()`) now route through it — business-facing dates/timestamps
+  display in Bangkok time regardless of the viewer's own browser/OS timezone. `dateInput()`/`fmtDate()`
+  now anchor a date-only value at UTC midnight (not viewer-local midnight) so the Bangkok extraction
+  always resolves to the calendar day the user actually picked, for every viewer everywhere.
+- `views/pending.js` (request time in the Pending list) and `views/budget.js`
+  (`formatActualSpendDateTime()`, used for Manual Expense/Actual Spend timestamps) now pass
+  `timeZone: 'Asia/Bangkok'` to their existing `toLocaleDateString`/`toLocaleTimeString` calls —
+  same visual format as before, corrected timezone. History/License/Device already inherit the fix
+  through the shared `shortDate()` helper; no separate changes were needed there.
+- No stored timestamp changed — this is a display-only fix.
+
+### Task 2.3 — Created By / Updated By metadata
+- **Memo**: `memoToDb()`/`dbToMemo()` map `created_by`/`updated_by`. `saveMemoAsync()` stamps
+  `createdBy` on first save (preserved on every later save) and `updatedBy` on every save.
+  `updateMemoStatusAsync()` stamps `updatedBy` with the acting user on every status transition
+  (approve/reject/cancel/void/PMO override).
+- **Device**: `deviceToDb()`/`dbToDevice()` map `created_by`/`updated_by` (and `deviceToDb()` now also
+  forwards `created_at`, which it previously dropped). `saveDevice()` (Add/Edit Device modal) stamps
+  both; PO-arrival auto-created devices (`markArrived()`) stamp both too.
+- **Purchase Order**: `poToDb()`/`dbToPo()` map `created_at`/`created_by`/`updated_by` (previously
+  `poToDb()` sent neither `created_at` nor any actor field). Auto-creation on memo approval
+  (`createPurchaseOrdersFromMemo()`) and arrival updates (`markArrived()`) both stamp an actor.
+- **Budget Pool**: the in-memory record shape (`createBudgetPoolRecord()`) already computed
+  `createdBy`/`updatedBy`/`createdAt`/`updatedAt` correctly, but `savePoolAsync()` never forwarded
+  them to Supabase (only `updated_at` was sent) — fixed. `saveBudgetPool()` (the Add/Edit Pool modal)
+  now preserves the existing pool's `createdBy` on edit and stamps `updatedBy`, mirroring the working
+  Manual Expense pattern (`saveManualExpenseFromModal()`, unchanged, already correct).
+- **Manual Spend / Actual Spend**: already fully implemented before this milestone — no changes.
+- **License**: deferred, per instruction — see `docs/TECHNICAL_DEBT.md` TD-M2-01 item 4.
+
+### Task 2.4 — Budget tag audit log
+- `app.js` — `appendAuditLog()` gained two additive, optional fields (`previousBudgetPoolId`,
+  `newBudgetPoolId`), generic enough for reuse by any future "value changed" audit event. Every
+  existing caller/field is unchanged.
+- `views/history.js` — `saveBudgetTag()` now captures the previous tag (via the existing
+  `getEffectiveBudgetSource()` helper) before overwriting it, then writes a `'Budget tag changed'`
+  audit log entry (previous tag, new tag, actor, timestamp) via the shared `appendAuditLog()` helper,
+  in the same `storeMemos()` write as the tag change itself. The tagging business logic (pool
+  selection, cross-year/cross-project guards, auto vs. manual resolution) is completely unchanged.
+
+### Tests
+- `tests/financial-models.test.js`: 9 new tests — USD/THB accepted and an unsupported currency
+  rejected for both Actual Spend and Budget Pool validation; `money()` currency-awareness and
+  backward compatibility; `actualSpendFromMemo()` currency propagation; memo currency round-trip;
+  Bangkok-anchored `shortDate()`/`thaiDate()`/`dateInput()`/`bangkokTodayISO()` correctness against
+  known UTC instants.
+- `tests/workflow.test.js`: 10 new tests — currency collection/validation/display/restore wiring in
+  Create Memo; `saveMemoAsync()`/`updateMemoStatusAsync()` Created By/Updated By stamping and
+  memo-level round-trip; Device/Purchase Order/Budget Pool metadata-stamping call sites; the Budget
+  tag audit entry (both the generic `appendAuditLog()` capability and `saveBudgetTag()`'s wiring,
+  including that it runs before the same `storeMemos()` write and leaves the tagging guards intact).
+- Full suite: **331/331 passing** (was 312), zero regressions.
+- Manually verified in-browser: switching the currency selector live-updates a Hardware memo's
+  running total symbol (฿ → $) with no page reload; the currency survives Save Draft → Re-edit
+  end-to-end; tagging a completed memo to a new Budget Pool writes a real audit log entry with the
+  correct previous/new pool, actor, and timestamp. No test data reached the shared Supabase project.
+
+### Technical debt
+- New `docs/TECHNICAL_DEBT.md` TD-M2-01: migration-not-yet-applied deployment prerequisite (same
+  shape as TD-M1-03/TD-M1-04), plus four documented, intentionally deferred scope items (PDF currency
+  wording, Manual Expense/Budget Pool currency selector, License metadata, a few secondary Device/PO
+  write paths).
+
 ## Hotfix — Void Evidence UI (2026-07-03)
 
 Small hotfix before Milestone 2: the Void Memo modal asked PMO users to paste a URL for evidence,

@@ -1277,6 +1277,11 @@ function saveBudgetTag(memoNo) {
   const memos = loadMemos();
   const idx   = memos.findIndex(m => m.memoNo === memoNo);
   if (idx < 0) { closeBudgetTagModal(); return; }
+  // Milestone 2 Task 2.4 — capture the previous tag before it is overwritten.
+  const previousPoolId = memos[idx].budgetPoolId || null;
+  const previousLabel  = typeof getEffectiveBudgetSource === 'function'
+    ? getEffectiveBudgetSource(memos[idx]).source
+    : (memos[idx].budgetSource || '(ไม่ระบุ)');
   const canonicalPools = typeof loadBudgetPoolRecords === 'function' ? loadBudgetPoolRecords() : [];
   let actualSpend = typeof updateActualSpendBudgetOverride === 'function'
     ? updateActualSpendBudgetOverride(memoNo, newPoolId, canonicalPools)
@@ -1298,6 +1303,16 @@ function saveBudgetTag(memoNo) {
     budgetSource: newSource,
     updatedAt: new Date().toISOString(),
   };
+  // Milestone 2 Task 2.4 — Budget tag audit log entry: previous tag, new tag,
+  // actor and timestamp are captured by the shared appendAuditLog() helper.
+  // Business logic above (pool selection, cross-year/project guards) is unchanged.
+  if (typeof appendAuditLog === 'function') {
+    const newLabel = getEffectiveBudgetSource(memos[idx]).source;
+    appendAuditLog(memos, memoNo, 'Budget tag changed', `"${previousLabel}" → "${newLabel}"`, {
+      previousBudgetPoolId: previousPoolId,
+      newBudgetPoolId: newPoolId,
+    });
+  }
   storeMemos(memos);
 
   // ── Write to Supabase directly ──

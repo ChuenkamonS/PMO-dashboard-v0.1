@@ -1026,6 +1026,13 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 <label>ชื่อโครงการ *</label>
                 <input type="text" id="f-project-other" placeholder="กรอกชื่อโครงการ">
               </div>
+              <div class="fg">
+                <label>สกุลเงิน *</label>
+                <select id="f-currency" onchange="onCurrencyChange()">
+                  <option value="THB" selected>THB (บาท)</option>
+                  <option value="USD">USD (ดอลลาร์สหรัฐ)</option>
+                </select>
+              </div>
               <!-- เรียน: hidden — auto-populated from last approver title -->
               <div class="fg" style="display:none">
                 <select id="f-to">

@@ -272,7 +272,7 @@ function buildPendingRow(memo) {
   }
 
   const reqDate = memo.createdAt ? shortDate(memo.createdAt) : '—';
-  const reqTime = memo.createdAt ? new Date(memo.createdAt).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'}) : '';
+  const reqTime = memo.createdAt ? new Date(memo.createdAt).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Bangkok'}) : '';
 
   return `<tr style="cursor:pointer" onclick="if(!event.target.closest('[data-action]'))openDetailModal('${esc(memo.memoNo)}')">
     <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
