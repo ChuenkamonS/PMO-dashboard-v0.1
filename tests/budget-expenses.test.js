@@ -988,6 +988,164 @@ test('Manual Entries table stays compact while detail retains audit and schedule
   assert.match(detail, /Frequency[\s\S]*Expense Date \/ Coverage[\s\S]*Vendor \/ Program[\s\S]*Budget Pool[\s\S]*Created By[\s\S]*Created Date[\s\S]*Notes[\s\S]*Creation Method/);
 });
 
+// ══════════════════════════════════════════════════════════════════
+// Manual Entry audit timeline (2026-07-03) — Manual Entry Detail now shows a chronological
+// timeline (Created / Edited / Voided) styled like the Memo Detail Audit Log block, instead of
+// only the flat Created/Updated fields. Real entries are written going forward by
+// saveManualExpenseAsync()/voidManualExpenseAsync(); older records with no auditLog get a minimal
+// timeline synthesized from their existing created/updated/voided fields.
+// ══════════════════════════════════════════════════════════════════
+
+test('manualExpenseToDb/manualExpenseFromDb round-trip auditLog', () => {
+  const context = createActualSpendContext();
+  const withHistory = {
+    id:'audit-roundtrip', project:'AOA-MP', expenseType:'sl', description:'x', frequency:'one_time',
+    expenseDate:'2026-07-01', quantity:1, unitCost:100, amount:100,
+    auditLog:[{ action:'Created', actor:'PMO User', timestamp:'2026-07-01T00:00:00.000Z' }],
+  };
+  const db = context.manualExpenseToDb(withHistory);
+  assert.deepEqual(db.audit_log, withHistory.auditLog);
+  const loaded = context.manualExpenseFromDb(db);
+  assert.deepEqual(loaded.auditLog, withHistory.auditLog);
+});
+
+test('manualExpenseFromDb defaults auditLog to an empty array, not undefined, for a legacy row with no audit_log column value', () => {
+  const context = createActualSpendContext();
+  const loaded = context.manualExpenseFromDb({ id:'legacy', project:'AOA-MP', expense_type:'sl', description:'x', frequency:'one_time', expense_date:'2026-07-01', amount:100 });
+  assert.equal(loaded.auditLog.length, 0);
+});
+
+test('saveManualExpenseAsync appends a Created entry on first save and an Edited entry on every later save, preserving prior history', async () => {
+  const context = createActualSpendContext();
+  const created = await context.saveManualExpenseAsync({
+    id:'audit-lifecycle', project:'AOA-MP', expenseType:'sl', description:'Track me',
+    frequency:'one_time', expenseDate:'2026-07-01', quantity:1, unitCost:100, amount:100,
+    createdBy:'นาย A', updatedBy:'นาย A',
+  });
+  assert.equal(created.auditLog.length, 1);
+  assert.equal(created.auditLog[0].action, 'Created');
+  assert.equal(created.auditLog[0].actor, 'นาย A');
+  assert.ok(created.auditLog[0].timestamp);
+
+  const edited = await context.saveManualExpenseAsync({ ...created, amount:150, unitCost:150, updatedBy:'นาย B' });
+  assert.equal(edited.auditLog.length, 2, 'the Created entry must be preserved, not overwritten');
+  assert.equal(edited.auditLog[0].action, 'Created');
+  assert.equal(edited.auditLog[1].action, 'Edited');
+  assert.equal(edited.auditLog[1].actor, 'นาย B');
+});
+
+test('voidManualExpenseAsync appends a Voided entry with the reason as its comment, after any prior Created/Edited history', async () => {
+  const context = createActualSpendContext();
+  // currentUser() (app.js) reads document.getElementById('sb-uname').textContent — stub it so the
+  // Voided entry's actor is populated, same as a real logged-in PMO user would produce.
+  context.document.getElementById = id => id === 'sb-uname' ? { textContent: 'PMO Officer' } : null;
+  const created = await context.saveManualExpenseAsync({
+    id:'audit-void', project:'AOA-MP', expenseType:'sl', description:'Void me',
+    frequency:'one_time', expenseDate:'2026-07-01', quantity:1, unitCost:100, amount:100,
+  });
+  const voided = await context.voidManualExpenseAsync(created.id, 'no longer valid');
+  assert.equal(voided.auditLog.length, 2);
+  assert.equal(voided.auditLog[1].action, 'Voided');
+  assert.equal(voided.auditLog[1].comment, 'no longer valid');
+  assert.equal(voided.auditLog[1].actor, 'PMO Officer');
+});
+
+test('manualExpenseAuditTimeline uses real auditLog entries when present', () => {
+  const context = createActualSpendContext();
+  const expense = { auditLog:[{ action:'Created', actor:'A', timestamp:'2026-01-01T00:00:00.000Z' }], createdAt:'2026-01-01T00:00:00.000Z', createdBy:'A' };
+  assert.deepEqual(context.manualExpenseAuditTimeline(expense), expense.auditLog);
+});
+
+test('manualExpenseAuditTimeline synthesizes a minimal Created/Edited/Voided timeline for legacy records with no auditLog', () => {
+  const context = createActualSpendContext();
+  const legacy = {
+    createdAt:'2026-01-01T00:00:00.000Z', createdBy:'นาย A',
+    updatedAt:'2026-02-01T00:00:00.000Z', updatedBy:'นาย B',
+    voidedAt:'2026-03-01T00:00:00.000Z', voidedBy:'PMO', voidReason:'test reason',
+  };
+  const timeline = context.manualExpenseAuditTimeline(legacy);
+  assert.deepEqual(Array.from(timeline, e => e.action), ['Created', 'Edited', 'Voided']);
+  assert.equal(timeline[2].comment, 'test reason');
+});
+
+test('manualExpenseAuditTimeline does not synthesize an Edited entry when updatedAt equals createdAt (record was never actually edited)', () => {
+  const context = createActualSpendContext();
+  const neverEdited = { createdAt:'2026-01-01T00:00:00.000Z', createdBy:'A', updatedAt:'2026-01-01T00:00:00.000Z', updatedBy:'A' };
+  const timeline = context.manualExpenseAuditTimeline(neverEdited);
+  assert.deepEqual(Array.from(timeline, e => e.action), ['Created']);
+});
+
+test('showManualEntryDetail passes an Audit Timeline block as the modal details, alongside the existing fields', async () => {
+  const context = createActualSpendContext();
+  const created = await context.saveManualExpenseAsync({
+    id:'audit-detail', project:'AOA-MP', expenseType:'sl', description:'Detail me',
+    frequency:'one_time', expenseDate:'2026-07-01', quantity:1, unitCost:100, amount:100, createdBy:'นาย A',
+  });
+  let shown;
+  context.showActualSpendDetailModal = (title, fields, helper, details) => { shown = { title, fields, helper, details }; };
+  context.showManualEntryDetail(created.id);
+  assert.match(shown.details, /Audit Timeline/);
+  assert.match(shown.details, /Created/);
+});
+
+test('saveManualExpenseAsync retries without audit_log when Supabase schema cache returns PGRST204 for the new column', async () => {
+  const context = createActualSpendContext();
+  const payloads = [];
+  context.checkSupa = async () => true;
+  context.supaFetch = async (_table, _method, body) => {
+    payloads.push(body);
+    if (payloads.length === 1) {
+      const error = new Error('PGRST204 Could not find the audit_log column in the schema cache');
+      error.code = 'PGRST204';
+      throw error;
+    }
+    return [body];
+  };
+  const saved = await context.saveManualExpenseAsync({
+    id:'audit-schema-lag', project:'AOA-MP', expenseType:'sl', description:'Schema lag',
+    frequency:'one_time', expenseDate:'2026-07-01', quantity:1, unitCost:100, amount:100,
+  });
+  assert.equal(payloads.length, 2);
+  assert.ok(Array.isArray(payloads[0].audit_log));
+  assert.equal(Object.hasOwn(payloads[1], 'audit_log'), false);
+  assert.equal(saved.auditLog.length, 1, 'the audit entry must still exist locally even though Supabase rejected the column');
+});
+
+test('voidManualExpenseAsync retries without audit_log when Supabase schema cache returns PGRST204, but still persists voided_at/voided_by', async () => {
+  const context = createActualSpendContext();
+  const created = await context.saveManualExpenseAsync({
+    id:'audit-void-schema-lag', project:'AOA-MP', expenseType:'sl', description:'Void schema lag',
+    frequency:'one_time', expenseDate:'2026-07-01', quantity:1, unitCost:100, amount:100,
+  });
+  const payloads = [];
+  context.checkSupa = async () => true;
+  context.supaFetch = async (_table, _method, body) => {
+    payloads.push(body);
+    if (payloads.length === 1) {
+      const error = new Error('PGRST204 Could not find the audit_log column in the schema cache');
+      error.code = 'PGRST204';
+      throw error;
+    }
+    return [body];
+  };
+  const voided = await context.voidManualExpenseAsync(created.id, 'schema lag void');
+  assert.equal(payloads.length, 2);
+  assert.ok('audit_log' in payloads[0]);
+  assert.equal(Object.hasOwn(payloads[1], 'audit_log'), false, 'the retry must drop only audit_log, not voided_at/voided_by');
+  assert.equal(payloads[1].voided_by, voided.voidedBy);
+});
+
+test('voidManualExpenseAsync does not hide unrelated Supabase failures', async () => {
+  const context = createActualSpendContext();
+  const created = await context.saveManualExpenseAsync({
+    id:'audit-void-real-failure', project:'AOA-MP', expenseType:'sl', description:'Must fail',
+    frequency:'one_time', expenseDate:'2026-07-01', quantity:1, unitCost:100, amount:100,
+  });
+  context.checkSupa = async () => true;
+  context.supaFetch = async () => { throw new Error('PGRST204 Could not find a different column in the schema cache'); };
+  await assert.rejects(() => context.voidManualExpenseAsync(created.id, 'reason'), /different column/);
+});
+
 test('Manual Entries formats audit timestamps and keeps the shorter search placeholder', () => {
   const context = createBudgetContext();
   const formatted = context.formatActualSpendDateTime('2026-07-01T09:40:31.098+00:00');
@@ -2189,10 +2347,10 @@ test('Phase 7A-9B: populateBudgetYearSelect includes and pre-selects an explicit
   assert.doesNotMatch(el.innerHTML, new RegExp(`<option value="${current}" selected>`), 'the extra year, not the current year, must be the one marked selected');
 });
 
-test('Phase 7A-9A: renderBudgetSettings populates bset-year dynamically instead of relying on hardcoded HTML options', () => {
+test('Phase 7A-9A: renderBudgetSettings populates bset-year dynamically instead of relying on hardcoded HTML options', async () => {
   const context = createBudgetPoolModalContext();
   context.loadBudgetPools = () => [];
-  context.renderBudgetSettings();
+  await context.renderBudgetSettings();
   const el = context.__elements.get('bset-year');
   const current = Number(context.getCurrentBuddhistYear());
   assert.match(el.innerHTML, new RegExp(`<option value="${current}" selected>${current}</option>`));
@@ -2323,13 +2481,13 @@ test('Phase 7A-9B: saveBudgetPool constructs Gregorian startMonth/endMonth/year 
   assert.equal(saved.year, '2569', 'derived year must be the correct BE year');
 });
 
-test('Phase 7A-9B: renderBudgetSettings displays the pool period in Buddhist Era, not Gregorian', () => {
+test('Phase 7A-9B: renderBudgetSettings displays the pool period in Buddhist Era, not Gregorian', async () => {
   const context = createBudgetPoolModalContext();
   context.loadBudgetPools = () => [
     { id: 'be-display-1', project: 'Alpha', name: 'BE Display Pool', budget: 1000, startMonth: '2026-01', endMonth: '2026-12', memoTypes: [] },
   ];
   context.__elements.get('bset-year').value = '2569';
-  context.renderBudgetSettings();
+  await context.renderBudgetSettings();
   const html = context.__elements.get('bset-budget-body').innerHTML;
   assert.match(html, /01\/2569 → 12\/2569/, 'the period column must show BE month/year, not raw Gregorian "2026-01 → 2026-12"');
   assert.doesNotMatch(html, /2026-01/, 'must not leak the raw Gregorian value into the user-facing table');
@@ -2459,7 +2617,7 @@ test('Business rule update: saveBudgetPool still blocks an exact duplicate ident
 // read/write paths that must now benefit from it: Budget Settings, savePoolAsync, and CSV export.
 // ══════════════════════════════════════════════════════════════════
 
-test('Phase 7A-9A contract fix: renderBudgetSettings filters/groups by the canonical derived year, not a stale raw stored year', () => {
+test('Phase 7A-9A contract fix: renderBudgetSettings filters/groups by the canonical derived year, not a stale raw stored year', async () => {
   const context = createBudgetPoolModalContext();
   // Raw stored pool: year label says 2569, but startMonth is really 2025-01 (BE 2568) — the exact
   // mismatch reported in the field (filter=2569, Edit modal shows 2568).
@@ -2467,12 +2625,12 @@ test('Phase 7A-9A contract fix: renderBudgetSettings filters/groups by the canon
     { id: 'mismatch-1', project: 'Alpha', name: 'Mismatched Pool', budget: 1000, year: '2569', startMonth: '2025-01', endMonth: '2025-12', memoTypes: [] },
   ];
   context.__elements.get('bset-year').value = '2569';
-  context.renderBudgetSettings();
+  await context.renderBudgetSettings();
   let html = context.__elements.get('bset-budget-body').innerHTML;
   assert.doesNotMatch(html, /Mismatched Pool/, 'must not show under the 2569 filter just because its stale raw year field says 2569');
 
   context.__elements.get('bset-year').value = '2568';
-  context.renderBudgetSettings();
+  await context.renderBudgetSettings();
   html = context.__elements.get('bset-budget-body').innerHTML;
   assert.match(html, /Mismatched Pool/, 'must appear under 2568, matching its normalized Start Month, same as the Edit modal would show');
 });
@@ -2909,7 +3067,7 @@ test('Phase 7A-10 PR1: renderBudgetSettings() only shows pools that pass the sea
   context.__elements.get('bset-year').value = '2569';
   context.__elements.get('bset-search').value = 'AOA-MP';
 
-  context.renderBudgetSettings();
+  await context.renderBudgetSettings();
   const html = context.__elements.get('bset-budget-body').innerHTML;
 
   assert.match(html, /AOA-MP/);
@@ -3093,4 +3251,37 @@ test('Phase 7A-9D: error summary reports Created 0 / Updated 0 / No Changes 0 / 
   const html = context.__lastPanel.innerHTML;
   assert.match(html, /Created 0 · Updated 0 · No Changes 0 · Errors 1/);
   assert.match(html, /ghost-id/);
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Budget Pool / Budget Settings initial loading fix (2026-07-03)
+//
+// Bug: renderBudgetSettings() only ever read the synchronous local/localStorage pool cache
+// (loadBudgetPools()), which stays empty until some other tab (Budget vs Actual) happens to call
+// loadBudgetPoolsAsync() first in the same session. A user who opened Budget Settings first (a
+// fresh session, a fresh browser, or straight after initApp(), which never preloads Budget Pools
+// either) saw stale/empty data even though real pools existed in Supabase.
+// ══════════════════════════════════════════════════════════════════
+
+test('renderBudgetSettings() fetches Supabase pool data on first navigation, not just the stale local cache', async () => {
+  const context = createBudgetPoolModalContext();
+  // Simulate a fresh session: local cache/localStorage is empty (default createBudgetPoolContext
+  // loadBudgetPools stub returns []), but Supabase has a real pool — and, crucially,
+  // renderBudgetVsActual()/loadBudgetPoolsAsync() was never called first in this test.
+  context.checkSupa = async () => true;
+  context.supaFetch = async (table) => table === 'budget_pools'
+    ? [{ id: 'pool-live-1', project: 'Alpha', name: 'Live Supabase Pool', budget: 5000, year: '2569', start_month: '2026-01', end_month: '2026-12', memo_types: ['sl'] }]
+    : [];
+  context.__elements.get('bset-year').value = '2569';
+
+  await context.renderBudgetSettings();
+
+  const html = context.__elements.get('bset-budget-body').innerHTML;
+  assert.match(html, /Live Supabase Pool/, 'Budget Settings must show real Supabase pool data on first render, not an empty/stale local cache');
+});
+
+test('renderBudgetSettings() is async and awaits loadBudgetPoolsAsync() before rendering (source-level regression pin)', () => {
+  assert.match(budgetCode, /async function renderBudgetSettings\(\) \{/);
+  const fn = budgetCode.match(/async function renderBudgetSettings\(\) \{([\s\S]*?)\n\}\n/)?.[0] || '';
+  assert.match(fn, /await loadBudgetPoolsAsync\(\)/, 'renderBudgetSettings must fetch canonical Supabase pool data before rendering');
 });

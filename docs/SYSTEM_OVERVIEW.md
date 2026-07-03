@@ -98,10 +98,13 @@ Voided memos must not be counted in Actual Spend calculations.
 
 Supported currency:
 
-- THB
-- USD
+- THB only, for now.
 
-Currency handling must be explicit at record level.
+Decision (2026-07-03): USD support was reverted. There is no confirmed USD use case in current
+PMO workflow, and multi-currency created unnecessary complexity across Budget & Spend, Actual
+Spend, PDF, Export, Forecast, and downstream modules. Currency is still stored explicitly at
+record level (a dormant field, always THB) so USD can be reintroduced later without a schema
+change if a confirmed use case emerges.
 
 ---
 

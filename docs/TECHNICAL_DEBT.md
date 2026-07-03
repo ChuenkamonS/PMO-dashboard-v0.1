@@ -901,20 +901,15 @@ Current Situation
    (same constraint as TD-M1-01/TD-M1-03/TD-M1-04). Until it is applied, writes to these tables fall
    back to local-only persistence for the new columns — the same accepted risk shape as those prior
    items, not a new one.
-2. **PDF document generation does not vary its wording by currency.** `renderMemoPdf()` (`app.js`)
-   builds its Thai-language body/closing sentences with the literal word "บาท" (Baht) hardcoded
-   throughout — it does not call the now currency-aware `money()` helper for its main totals at all
-   (it formats numbers directly and appends "บาท" as prose). A USD memo's printed PDF will show a
-   USD-denominated number immediately followed by "บาท", which is misleading. Rewriting the
-   bilingual legal/business sentence templates was explicitly out of scope for this milestone (task
-   instructions: "PDF / display only if touched by existing helper" — `renderMemoPdf()`'s main totals
-   are not funneled through `money()`, so they were left untouched rather than redesigned).
-3. **Budget & Spend manual entry stays THB-only by default.** `validateActualSpendRecord()`/
-   `validateBudgetPoolRecord()` now accept USD, and `actualSpendFromMemo()` propagates a memo's own
-   currency — but the Manual Expense modal, the Budget Pool modal, and the Actual Spend bulk-import
-   template still have no currency selector/column, so every manually-entered or imported record is
-   still created with `currency: 'THB'`. Only Approved-Memo-sourced Actual Spend records can be USD
-   today (by inheriting the source memo's currency).
+2. ~~**PDF document generation does not vary its wording by currency.**~~ **MOOT** (Currency
+   soft-revert, 2026-07-03): `renderMemoPdf()`'s hardcoded "บาท" wording was only a problem for a
+   USD memo, and USD is no longer reachable — `SUPPORTED_CURRENCIES` is `['THB']` and the Create
+   Memo currency selector was removed. No PDF change was made or is needed while currency stays
+   THB-only.
+3. ~~**Budget & Spend manual entry stays THB-only by default.**~~ **MOOT** (Currency soft-revert,
+   2026-07-03): with `SUPPORTED_CURRENCIES` back to `['THB']`, every record — memo-sourced, manual,
+   or imported — is THB-only by validation, not just by absence of a selector. No further action
+   needed.
 4. **License module's Created By / Updated By metadata is deferred**, per explicit instruction
    ("License may be deferred if it depends on future License materialization") — licenses are
    memo-derived, not their own persisted record with independent metadata.
@@ -928,18 +923,140 @@ Current Situation
 Risk
 
 Item 1 is the one that matters operationally — apply the migration before/with this code, same as
-every prior milestone's deployment step. Items 2–5 are documented, intentionally deferred scope
-reductions, not regressions; none of them cause silent data loss or incorrect financial totals (a
-USD amount is never silently converted to THB anywhere in this milestone).
+every prior milestone's deployment step. Items 2–3 are resolved (moot) by the currency soft-revert
+below. Items 4–5 remain documented, intentionally deferred scope reductions, not regressions.
 
 Exit Criteria
 
 - Apply `20260703160000_milestone2_financial_foundation.sql` to the live Supabase project, then
-  confirm a USD memo's `currency` and a Device/PO/Budget Pool's `created_by`/`updated_by` all survive
-  a real reload (not just local cache).
-- PMO/BA decision on whether the PDF template needs bilingual currency wording (item 2), a Manual
-  Expense/Budget Pool currency selector (item 3), and/or License metadata (item 4) — each is a larger,
-  separately-scoped follow-up if confirmed necessary.
+  confirm a memo's `currency` (always `'THB'`) and a Device/PO/Budget Pool's
+  `created_by`/`updated_by` all survive a real reload (not just local cache).
+- PMO/BA decision on License metadata (item 4) — a larger, separately-scoped follow-up if confirmed
+  necessary. Items 2–3 need no further decision (moot, see above).
+
+---
+
+# TD-M2-02
+
+Title
+
+Currency soft-revert to THB-only (USD reverted)
+
+Status
+
+CLOSED (decision implemented 2026-07-03)
+
+Priority
+
+Low
+
+Introduced
+
+Currency soft-revert follow-up (2026-07-03), immediately after Milestone 2
+
+Owner Phase
+
+Financial Foundation
+
+Reason
+
+Milestone 2 Task 2.1 added THB/USD support. PMO confirmed there is no confirmed USD use case in
+current PMO workflow, and multi-currency created unnecessary complexity across Budget & Spend,
+Actual Spend, PDF, Export, Forecast, and downstream modules. Decision: revert to THB-only, but as
+a soft revert — do not drop the `currency` column/mapping already added, so USD can be
+reintroduced later without a schema change if a confirmed use case emerges.
+
+Current Situation
+
+- `SUPPORTED_CURRENCIES` (`app.js`) is `['THB']` — `validateActualSpendRecord()` and
+  `validateBudgetPoolRecord()` now reject `'USD'`.
+- The Create Memo currency selector (`#f-currency`, `index.html`) was removed. `views/create.js`'s
+  currency-aware call sites (`collectMemoData()`, `applyDraftEdit()`, `currentCurrencySymbol()`)
+  were left in place unchanged — they already degrade gracefully to `'THB'` via existing
+  `document.getElementById(...)?.value` / `val(...) || 'THB'` fallbacks now that the element no
+  longer exists, so no memo can be created or restored with a non-THB currency.
+- `money()`, `actualSpendFromMemo()`'s currency propagation, and `memoToDb()`/`dbToMemo()`'s
+  `currency` mapping are all unchanged — still technically currency-aware/dormant, per the
+  soft-revert decision not to drop existing plumbing.
+- The `memos.currency` column added by `20260703160000_milestone2_financial_foundation.sql` is
+  unchanged and not dropped — every new memo simply always writes `'THB'` to it now.
+- Docs updated to match: `SYSTEM_OVERVIEW.md` §3.4, `MEMO_LIFECYCLE.md` §14, and
+  `SYSTEM_STATE_MACHINE.md` §14 now state THB-only with a dated decision note, instead of
+  contradicting the reverted code.
+
+Risk
+
+None currently — this is a completed, intentional business-rule reversion, not an open gap. If a
+confirmed USD use case appears later, re-enabling is a small change (`SUPPORTED_CURRENCIES`, the
+selector markup, and the docs), since nothing downstream of validation was deleted.
+
+Exit Criteria (met)
+
+- [x] `SUPPORTED_CURRENCIES` is THB-only.
+- [x] No USD option reachable from any user-facing UI.
+- [x] Existing `currency` column/mapping preserved, not dropped.
+- [x] Governing docs no longer contradict the code.
+- [x] Regression tests updated (`tests/financial-models.test.js`, `tests/workflow.test.js`).
+
+---
+
+# TD-M2-03
+
+Title
+
+Manual Entry Audit Timeline — Deployment Prerequisite
+
+Status
+
+OPEN
+
+Priority
+
+Medium
+
+Introduced
+
+Manual Entry audit timeline follow-up (2026-07-03)
+
+Owner Phase
+
+Financial Foundation
+
+Current Situation
+
+`supabase/migrations/20260703170000_manual_expense_audit_log.sql` adds an additive
+`budget_manual_expenses.audit_log jsonb` column. `saveManualExpenseAsync()` and
+`voidManualExpenseAsync()` (`views/budget.js`) now write to it on every Create/Edit/Void. Not yet
+applied to the live Supabase project — same constraint as every prior migration in this repo
+(TD-M1-01/TD-M1-03/TD-M1-04/TD-M2-01).
+
+Unlike the plain "falls back to local-only persistence" risk shape of prior items, bundling a
+brand-new column into an existing write's payload risks failing the *whole* write with a Postgrest
+PGRST204 error until the migration is applied — including the already-existing `voided_at`/
+`voided_by` fields on Void, which previously always persisted successfully. To prevent that
+regression, both write paths now catch a missing-`audit_log`-column error specifically
+(`isMissingAuditLogColumnError()`, mirroring the existing `vendor_program` fallback pattern from
+Phase 4) and retry once without `audit_log` — so Create/Edit/Void continue to persist their other
+fields to Supabase even before the migration is applied; only the audit trail itself stays
+local-only until then.
+
+Records saved before this column existed have no `audit_log` — `manualExpenseAuditTimeline()`
+(`views/budget.js`) synthesizes a minimal timeline from their existing
+`createdAt`/`updatedAt`/`voidedAt` fields, so Manual Entry Detail never shows an empty timeline for
+legacy rows.
+
+Risk
+
+Apply the migration before/with this code, same as every prior milestone's deployment step. Until
+then, new audit-timeline entries for Manual Entries persist locally only (not in Supabase) — the
+same accepted risk shape as TD-M1-03/TD-M1-04/TD-M2-01, not a new one, now that the fallback
+prevents it from blocking Create/Edit/Void themselves.
+
+Exit Criteria
+
+- Apply `20260703170000_manual_expense_audit_log.sql` to the live Supabase project, then confirm a
+  Manual Entry's audit timeline (Create, Edit, Void) survives a real `loadManualExpensesAsync()`
+  refetch (not just local cache).
 
 ---
 

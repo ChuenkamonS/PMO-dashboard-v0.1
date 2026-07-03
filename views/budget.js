@@ -59,6 +59,8 @@ function manualExpenseFromDb(r) {
     voidReason: r.void_reason || '',
     createdAt: r.created_at || null,
     updatedAt: r.updated_at || null,
+    // Manual Entry audit timeline (2026-07-03) — see manualExpenseAuditTimelineHtml().
+    auditLog: r.audit_log || [],
   };
 }
 
@@ -87,6 +89,7 @@ function manualExpenseToDb(e) {
     void_reason: e.voidReason || null,
     created_at: e.createdAt || new Date().toISOString(),
     updated_at: e.updatedAt || new Date().toISOString(),
+    audit_log: e.auditLog || [],
   };
 }
 
@@ -126,13 +129,36 @@ function isMissingVendorProgramColumnError(error) {
     && detail.includes('vendor_program')
     && (detail.includes('column') || detail.includes('schema cache'));
 }
+// Same schema-cache-lag fallback as isMissingVendorProgramColumnError(), for the new audit_log
+// column (20260703170000_manual_expense_audit_log.sql) — until that migration is applied, both
+// saveManualExpenseAsync() and voidManualExpenseAsync() retry their write without audit_log rather
+// than failing the whole save/void.
+function isMissingAuditLogColumnError(error) {
+  const detail = `${error?.code || ''} ${error?.message || error || ''}`.toLowerCase();
+  return detail.includes('pgrst204')
+    && detail.includes('audit_log')
+    && (detail.includes('column') || detail.includes('schema cache'));
+}
 
 async function saveManualExpenseAsync(expense) {
   const now = new Date().toISOString();
   const rows = [...loadManualExpenses()];
   const idx = rows.findIndex(e => e.id === expense.id);
+  const isNew = idx < 0;
+  // Manual Entry audit timeline (2026-07-03) — mirrors the memo Audit Log shape
+  // (actor/action/comment/timestamp) so showManualEntryDetail() can render a
+  // timeline the same way Memo Detail does. Centralized here (the single write
+  // path for both the Add/Edit modal and Excel-import promotion) rather than at
+  // each caller, same pattern as createdAt/updatedAt stamping just below.
+  const auditLog = [...(isNew ? [] : (rows[idx].auditLog || []))];
+  auditLog.push({
+    action: isNew ? 'Created' : 'Edited',
+    actor: expense.updatedBy || currentUser(),
+    timestamp: now,
+  });
   const saved = {
     ...expense,
+    auditLog,
     createdAt: idx >= 0 ? rows[idx].createdAt : (expense.createdAt || now),
     updatedAt: now,
   };
@@ -143,9 +169,10 @@ async function saveManualExpenseAsync(expense) {
     try {
       await supaFetch('budget_manual_expenses', 'POST', dbRecord, '?on_conflict=id');
     } catch (error) {
-      if (!isMissingVendorProgramColumnError(error)) throw error;
+      if (!isMissingVendorProgramColumnError(error) && !isMissingAuditLogColumnError(error)) throw error;
       const compatibleRecord = { ...dbRecord };
-      delete compatibleRecord.vendor_program;
+      if (isMissingVendorProgramColumnError(error)) delete compatibleRecord.vendor_program;
+      if (isMissingAuditLogColumnError(error)) delete compatibleRecord.audit_log;
       await supaFetch('budget_manual_expenses', 'POST', compatibleRecord, '?on_conflict=id');
     }
   }
@@ -157,6 +184,12 @@ async function voidManualExpenseAsync(id, reason) {
   const idx = rows.findIndex(e => e.id === id);
   if (idx < 0) throw new Error('ไม่พบรายการ');
   const now = new Date().toISOString();
+  const auditLog = [...(rows[idx].auditLog || []), {
+    action: 'Voided',
+    actor: currentUser(),
+    comment: reason || '',
+    timestamp: now,
+  }];
   const updated = {
     ...rows[idx],
     voidedAt: now,
@@ -164,15 +197,25 @@ async function voidManualExpenseAsync(id, reason) {
     voidReason: reason,
     updatedBy: currentUser(),
     updatedAt: now,
+    auditLog,
   };
   if (await checkSupa()) {
-    await supaFetch('budget_manual_expenses', 'PATCH', {
+    const patch = {
       voided_at: now,
       voided_by: updated.voidedBy,
       void_reason: reason,
       updated_by: updated.updatedBy,
       updated_at: now,
-    }, '?id=eq.' + encodeURIComponent(id));
+      audit_log: auditLog,
+    };
+    try {
+      await supaFetch('budget_manual_expenses', 'PATCH', patch, '?id=eq.' + encodeURIComponent(id));
+    } catch (error) {
+      if (!isMissingAuditLogColumnError(error)) throw error;
+      const compatiblePatch = { ...patch };
+      delete compatiblePatch.audit_log;
+      await supaFetch('budget_manual_expenses', 'PATCH', compatiblePatch, '?id=eq.' + encodeURIComponent(id));
+    }
   }
   rows[idx] = updated;
   storeManualExpenses(rows);
@@ -2094,6 +2137,43 @@ function softwareActualSpendDetails(record) {
   return `<div style="padding:0 16px 16px"><div style="padding-top:14px;border-top:1px solid var(--border)"><strong>Software Details</strong><div style="font-size:11px;color:var(--text-3);margin-top:3px">Detail lines explain the parent amount and are not additional spend.</div></div><div style="display:flex;gap:16px;flex-wrap:wrap;padding:10px 0"><div><div style="font-size:10px;color:var(--text-3)">Parent Actual Spend Amount (Authoritative)</div><strong>${money(Number(record.amount) || 0)}</strong></div><div><div style="font-size:10px;color:var(--text-3)">Detail Subtotal (Informational Only)</div><strong>${money(subtotal)}</strong>${differs ? '<div style="font-size:10px;color:var(--amber);margin-top:2px">Differs from the authoritative parent amount</div>' : ''}</div></div><div style="display:flex;flex-direction:column;gap:8px">${record.detailLines.map(line => `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:10px;padding:10px;border:1px solid var(--border);border-radius:var(--r-sm)">${field('Program', line.program)}${field('Plan', line.plan)}${field('Quantity', line.quantity)}${field('Unit Cost', line.unitCost, money)}${field('Monthly Cost', line.monthlyCost, money)}${field('Coverage Start', line.coverageStart)}${field('Coverage End', line.coverageEnd)}${field('Coverage Months', line.coverageMonths)}${field('Line Amount', line.lineAmount, money)}</div>`).join('')}</div></div>`;
 }
 
+// Manual Entry audit timeline (2026-07-03) — styled to match the Memo Detail "Audit Log" block
+// (views/history.js, _buildMemoDetailContent()'s auditHtml) so the two look consistent: a bordered
+// box of rows, each showing date, "actor — action", and an optional comment underneath.
+// Real auditLog entries (written going forward by saveManualExpenseAsync()/voidManualExpenseAsync())
+// are used when present. Records saved before this feature existed have no auditLog, so a minimal
+// timeline is synthesized from their existing created/updated/voided fields instead of showing
+// nothing.
+function manualExpenseAuditTimeline(expense) {
+  if (expense.auditLog && expense.auditLog.length) return expense.auditLog;
+  const synthesized = [];
+  if (expense.createdAt) synthesized.push({ action: 'Created', actor: expense.createdBy || '—', timestamp: expense.createdAt });
+  if (expense.updatedAt && expense.updatedAt !== expense.createdAt) {
+    synthesized.push({ action: 'Edited', actor: expense.updatedBy || '—', timestamp: expense.updatedAt });
+  }
+  if (expense.voidedAt) {
+    synthesized.push({ action: 'Voided', actor: expense.voidedBy || '—', comment: expense.voidReason || '', timestamp: expense.voidedAt });
+  }
+  return synthesized;
+}
+function manualExpenseAuditTimelineHtml(expense) {
+  const entries = [...manualExpenseAuditTimeline(expense)].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  const rows = entries.length
+    ? entries.map(e => `
+        <div style="display:flex;gap:12px;padding:7px 0;border-bottom:0.5px solid var(--border)">
+          <div style="font-size:11px;color:var(--text-3);white-space:nowrap;min-width:90px">${esc(formatActualSpendDateTime(e.timestamp))}</div>
+          <div style="font-size:12px;color:var(--text-2)">
+            <span style="font-weight:500;color:var(--text-1)">${esc(e.actor || '—')}</span> — ${esc(e.action)}
+            ${e.comment ? `<div style="font-size:11px;color:var(--text-3);margin-top:2px">${esc(e.comment)}</div>` : ''}
+          </div>
+        </div>`).join('')
+    : `<div style="font-size:12px;color:var(--text-3);padding:8px 0">ยังไม่มีประวัติ</div>`;
+  return `<div style="padding:0 16px 16px"><div style="padding-top:14px;border-top:1px solid var(--border)">
+    <div style="font-size:9px;font-weight:500;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">Audit Timeline</div>
+    <div style="border:0.5px solid var(--border);border-radius:var(--r-sm,4px);padding:0 12px">${rows}</div>
+  </div></div>`;
+}
+
 function showManualEntryDetail(id) {
   const expense = activeManualExpenses().find(item => item.id === id);
   if (!expense) return;
@@ -2105,7 +2185,7 @@ function showManualEntryDetail(id) {
     ['Budget Pool', poolLabel], ['Budget Status', record.budgetStatus], ['Created By', expense.createdBy || '—'],
     ['Created Date', formatActualSpendDateTime(expense.createdAt)], ['Updated At', formatActualSpendDateTime(expense.updatedAt)],
     ['Notes', expense.notes || '—'], ['Creation Method', expense.entryKind || '—'],
-  ]);
+  ], '', manualExpenseAuditTimelineHtml(expense));
 }
 
 async function renderActualSpend() {
@@ -3186,9 +3266,15 @@ function visibleBudgetSettingsPools() {
     .filter(p => !search || (p.project || '').toLowerCase().includes(search) || (p.name || '').toLowerCase().includes(search));
 }
 
-function renderBudgetSettings() {
+// Currency-revert-follow-up fix (2026-07-03): Budget Settings previously only read the
+// synchronous local/localStorage pool cache (loadBudgetPools()), which stays empty until some
+// other tab (Budget vs Actual) happens to call loadBudgetPoolsAsync() first in the same session —
+// so a user who opens Budget Settings first saw stale/empty data. Fetch canonical Supabase pool
+// data here too, mirroring the existing Budget vs Actual / Actual Spend render pattern.
+async function renderBudgetSettings() {
   const body = document.getElementById('bset-budget-body');
   if (!body) return;
+  await loadBudgetPoolsAsync();
   populateBudgetYearSelect('bset-year');
   const year  = document.getElementById('bset-year')?.value || getCurrentBuddhistYear();
   const pools = visibleBudgetSettingsPools();

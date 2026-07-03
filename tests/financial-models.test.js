@@ -101,25 +101,30 @@ test('budget pool stores budget and multiple spend types only', () => {
 });
 
 // ══════════════════════════════════════════════════════════════════
-// Milestone 2 Task 2.1 — THB/USD currency support. No FX conversion is
-// implemented: THB and USD amounts are stored and validated independently,
-// never converted into one another.
+// Currency soft-revert (2026-07-03) — THB-only. Milestone 2 Task 2.1 had
+// added THB/USD support; reverted (no confirmed USD use case). The
+// `currency` field/mapping stays in place (dormant, always 'THB') per the
+// soft-revert decision, but validation now accepts THB only.
 // ══════════════════════════════════════════════════════════════════
 
-test('validateActualSpendRecord accepts THB and USD, rejects an unsupported currency', () => {
+test('validateActualSpendRecord accepts THB only; USD is rejected (currency reverted to THB-only)', () => {
   const ctx = context();
   assert.equal(ctx.validateActualSpendRecord({ ...base, currency: 'THB' }).valid, true);
-  assert.equal(ctx.validateActualSpendRecord({ ...base, currency: 'USD' }).valid, true);
+  const usd = ctx.validateActualSpendRecord({ ...base, currency: 'USD' });
+  assert.equal(usd.valid, false);
+  assert.ok(usd.errors.some(e => /Currency must be/.test(e)));
   const invalid = ctx.validateActualSpendRecord({ ...base, currency: 'EUR' });
   assert.equal(invalid.valid, false);
   assert.ok(invalid.errors.some(e => /Currency must be/.test(e)));
 });
 
-test('validateBudgetPoolRecord accepts THB and USD, rejects an unsupported currency', () => {
+test('validateBudgetPoolRecord accepts THB only; USD is rejected (currency reverted to THB-only)', () => {
   const ctx = context();
   const poolBase = { id:'pool-cur', project:'AOA-MP', budget:1000, spendTypes:['Software'], startDate:'2026-01-01', endDate:'2026-12-31' };
   assert.equal(ctx.validateBudgetPoolRecord({ ...poolBase, currency:'THB' }).valid, true);
-  assert.equal(ctx.validateBudgetPoolRecord({ ...poolBase, currency:'USD' }).valid, true);
+  const usd = ctx.validateBudgetPoolRecord({ ...poolBase, currency:'USD' });
+  assert.equal(usd.valid, false);
+  assert.ok(usd.errors.some(e => /Currency must be/.test(e)));
   const invalid = ctx.validateBudgetPoolRecord({ ...poolBase, currency:'JPY' });
   assert.equal(invalid.valid, false);
   assert.ok(invalid.errors.some(e => /Currency must be/.test(e)));

@@ -944,19 +944,20 @@ test("saveDraft() no longer calls the undefined switchPendingTab() and navigates
 // Milestone 2 — Financial Foundation
 // ══════════════════════════════════════════════════════════════════
 
-// ── Task 2.1: THB/USD currency support ──
+// ── Task 2.1 (reverted 2026-07-03 — THB-only, see CHANGELOG) ──
 
-test('Milestone 2: collectMemoData reads #f-currency and validateMemo rejects an unsupported currency', () => {
+test('Currency soft-revert: collectMemoData falls back to THB and validateMemo only accepts THB', () => {
   const createCode = fs.readFileSync(path.join(root, 'views/create.js'), 'utf8');
   assert.match(createCode, /currency: val\('#f-currency'\) \|\| 'THB'/);
   assert.match(createCode, /SUPPORTED_CURRENCIES\.includes\(data\.currency\)/);
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  assert.match(appCode, /const SUPPORTED_CURRENCIES = \['THB'\];/, 'USD must not be a supported currency');
 });
 
-test('Milestone 2: Create Memo form has a THB/USD currency selector, not a free-text field', () => {
+test('Currency soft-revert: Create Memo form has no currency selector — THB-only, no user-facing USD option', () => {
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-  assert.match(html, /<select id="f-currency" onchange="onCurrencyChange\(\)">/);
-  assert.match(html, /<option value="THB" selected>THB/);
-  assert.match(html, /<option value="USD">USD/);
+  assert.doesNotMatch(html, /id="f-currency"/, 'the currency selector must be removed from the Create Memo form');
+  assert.doesNotMatch(html, /option value="USD"/, 'USD must not appear anywhere in user-facing UI');
 });
 
 test('Milestone 2: SL/HW/INT/DEP running totals use the selected currency symbol, never a hardcoded ฿', () => {

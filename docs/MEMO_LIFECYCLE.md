@@ -336,12 +336,12 @@ The memo record remains in the database for audit, but Budget & Spend calculatio
 
 ## 14. Currency
 
-Memo and downstream spend records must support:
+Memo and downstream spend records must support THB only, for now.
 
-- THB
-- USD
-
-Currency should be stored explicitly at transaction or line-item level.
+Decision (2026-07-03): USD support was reverted — there is no confirmed USD use case in current
+PMO workflow. Currency is still stored explicitly at transaction/line-item level (a dormant
+field, always THB), so USD can be reintroduced later without a schema change if a confirmed use
+case emerges. No FX conversion is implemented or planned while currency remains THB-only.
 
 ---
 

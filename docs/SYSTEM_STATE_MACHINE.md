@@ -324,14 +324,16 @@ This applies to:
 
 ## 14. Currency State Rule
 
-The system must support:
+The system supports THB only, for now.
 
-- THB
-- USD
+Decision (2026-07-03): USD support (previously required here) was reverted — there is no
+confirmed USD use case in current PMO workflow, and multi-currency created unnecessary
+complexity across Budget & Spend, Actual Spend, PDF, Export, Forecast, and downstream modules.
+Currency is still stored at record/line-item level (a dormant field, always THB) so financial
+records remain clear and auditable, and so USD can be reintroduced later without a schema change
+if a confirmed use case emerges.
 
-Currency should be stored at record or line-item level so that financial records remain clear and auditable.
-
-Conversion logic is not finalized in this document and should be defined later inside Budget & Spend requirement.
+Conversion logic remains out of scope.
 
 ---
 

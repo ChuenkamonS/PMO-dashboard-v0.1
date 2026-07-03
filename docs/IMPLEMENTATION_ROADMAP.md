@@ -39,7 +39,7 @@ Status: TODO
 # Milestone 2 — Financial Foundation
 
 Scope:
-- THB/USD support
+- THB-only currency support (USD support shipped, then reverted 2026-07-03 — no confirmed use case; see docs/TECHNICAL_DEBT.md)
 - Bangkok timezone
 - Created/Updated metadata
 - Memo number uniqueness

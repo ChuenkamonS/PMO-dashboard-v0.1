@@ -5,9 +5,12 @@
 const SUPA_URL = 'https://wokqtivoytzgfuelgeho.supabase.co';
 const SUPA_KEY = 'sb_publishable_38ZMjNiHDP4li7dJB6G2Ng_iwqp5Ty0';
 
-// Milestone 2 Task 2.1 — THB/USD support. Currency is stored explicitly at
-// record level; no FX conversion between currencies is implemented.
-const SUPPORTED_CURRENCIES = ['THB', 'USD'];
+// Currency soft-revert (2026-07-03) — THB-only. Milestone 2 Task 2.1 added
+// USD support; there is no confirmed USD use case in current PMO workflow,
+// so it was reverted. The `currency` field/column stays in place (dormant,
+// always 'THB') rather than being dropped, so this array is the single place
+// that re-enables USD later if a real use case appears.
+const SUPPORTED_CURRENCIES = ['THB'];
 
 // ── Supabase REST helper ──
 async function supaFetch(table, method='GET', body=null, query='') {

@@ -1,5 +1,99 @@
 # CHANGELOG
 
+## Milestone 2 follow-up — Currency revert, Budget Pool loading fix, Manual Entry audit timeline (2026-07-03)
+
+Three confirmed follow-up fixes before Milestone 3, per explicit instruction: revert currency to
+THB-only, fix Budget Settings' initial-load bug, and add an audit timeline to Manual Entry Detail.
+License Review Queue, Software Master, Device Type Master, and Approved PDF proof remain untouched
+and out of scope, as does all Milestone 3 work.
+
+### 1. Currency soft-revert to THB-only
+- **Reason**: no confirmed USD use case in current PMO workflow; multi-currency added unnecessary
+  complexity across Budget & Spend, Actual Spend, PDF, Export, Forecast, and downstream modules.
+- `app.js` — `SUPPORTED_CURRENCIES` is now `['THB']` (was `['THB', 'USD']`), so
+  `validateActualSpendRecord()`/`validateBudgetPoolRecord()` reject `'USD'` again.
+- `index.html` — the Create Memo currency selector (`#f-currency`, THB/USD) is removed. No user-facing
+  UI can select or display USD anywhere in the app.
+- **Soft revert, not a hard revert**: nothing downstream of validation/UI was deleted. `views/create.js`'s
+  currency-aware call sites (`collectMemoData()`, `applyDraftEdit()`, `currentCurrencySymbol()`),
+  `money()`, `actualSpendFromMemo()`'s currency propagation, `memoToDb()`/`dbToMemo()`'s `currency`
+  mapping, and the `memos.currency` column (migration `20260703160000`) are all unchanged and stay
+  dormant — every new memo simply always writes/reads `'THB'` now. This keeps a later re-enable (if a
+  confirmed USD use case appears) a small, low-risk change.
+- **Docs updated so code and source-of-truth no longer contradict each other**: `docs/SYSTEM_OVERVIEW.md`
+  §3.4, `docs/MEMO_LIFECYCLE.md` §14, and `docs/SYSTEM_STATE_MACHINE.md` §14 now state THB-only with a
+  dated decision note (2026-07-03) instead of "must support THB and USD". `docs/IMPLEMENTATION_ROADMAP.md`
+  (Milestone 2 scope line) and `docs/RELEASE_PLAN.md` (v0.8.1 row) updated to match.
+  `docs/TECHNICAL_DEBT.md`: TD-M2-01 items 2–3 (PDF currency wording, Manual Expense/Budget Pool
+  currency selector) marked MOOT — both were only problems for a reachable USD path, which no longer
+  exists; new TD-M2-02 documents the revert decision itself (CLOSED).
+
+### 2. Budget Pool / Budget Settings initial loading fix
+- **Bug**: `renderBudgetSettings()` only ever read the synchronous local/localStorage pool cache
+  (`loadBudgetPools()`). That cache stays empty/stale until some other tab (Budget vs Actual) happens
+  to call `loadBudgetPoolsAsync()` first in the same session — `initApp()`'s startup preload never
+  included Budget Pools either. A user who opened Budget Settings first (fresh session, fresh browser)
+  saw empty/stale data even though real pools existed in Supabase.
+- **Fix**: `views/budget.js` — `renderBudgetSettings()` is now `async` and calls
+  `await loadBudgetPoolsAsync()` before rendering, mirroring the fetch pattern Budget vs Actual and
+  Actual Spend already use. Verified live in-browser: navigating straight to Budget Settings now fires
+  a fresh `GET .../budget_pools` request and renders the current Supabase data, not a stale cache.
+
+### 3. Manual Entry audit timeline
+- **Gap**: Manual Entry Detail showed only flat `Created By` / `Created Date` / `Updated At` fields —
+  no chronological history, unlike Memo Detail's "Audit Log" block (date, actor — action, optional
+  comment, in a bordered box).
+- `views/budget.js` — new `manualExpenseAuditTimelineHtml()`/`manualExpenseAuditTimeline()`, styled to
+  match Memo Detail's existing Audit Log block exactly (same layout: bordered box, date + "actor —
+  action" + optional comment). `showManualEntryDetail()` now passes this as the modal's `details` block,
+  in addition to the existing flat Audit fields (nothing removed).
+- `saveManualExpenseAsync()` now appends a `Created`/`Edited` entry to the record's `auditLog` on every
+  save (centralized in the single write path shared by the Add/Edit modal and Excel-import promotion).
+  `voidManualExpenseAsync()` now appends a `Voided` entry with the void reason as its comment.
+- **Legacy records** (saved before this feature existed, no `auditLog`) get a **minimal timeline
+  synthesized** from their existing `createdAt`/`createdBy`, `updatedAt`/`updatedBy` (only if actually
+  different from `createdAt`), and `voidedAt`/`voidedBy`/`voidReason` fields — verified live in-browser
+  against a real pre-existing manual expense record, which correctly showed a synthesized
+  Created → Edited timeline.
+- `manualExpenseFromDb()`/`manualExpenseToDb()` map the new `auditLog`/`audit_log` field.
+- New additive migration `supabase/migrations/20260703170000_manual_expense_audit_log.sql`:
+  `budget_manual_expenses.audit_log jsonb not null default '[]'::jsonb`. Both write paths
+  (`saveManualExpenseAsync()`, `voidManualExpenseAsync()`) catch a missing-column PGRST204 error
+  specifically (`isMissingAuditLogColumnError()`, mirroring the existing `vendor_program` fallback) and
+  retry once without `audit_log`, so Create/Edit/Void keep persisting their other fields to Supabase
+  even before the migration is applied — only the audit trail itself stays local-only until then.
+  Documented as TD-M2-03.
+
+### Tests
+- `tests/financial-models.test.js`: the two currency-validation tests now assert USD is **rejected**
+  (was: accepted) for both Actual Spend and Budget Pool records.
+- `tests/workflow.test.js`: replaced the two Milestone 2 currency-selector tests with assertions that
+  `#f-currency`/any `option value="USD"` no longer exists in `index.html`, and that
+  `SUPPORTED_CURRENCIES` is THB-only in `app.js`.
+- `tests/budget-expenses.test.js`: 2 new tests pin the Budget Settings loading fix (fetches Supabase
+  data on first render; source-level regression pin that `renderBudgetSettings()` is `async` and awaits
+  `loadBudgetPoolsAsync()`). Updated 4 existing `renderBudgetSettings()` tests to `await` the now-async
+  call. 12 new tests cover the Manual Entry audit timeline: `auditLog`/`audit_log` round-trip,
+  Created/Edited/Voided entry appending and history preservation, real-vs-synthesized timeline
+  selection, the synthesized Created/Edited/Voided shape (and that no phantom Edited entry appears when
+  a record was never actually edited), `showManualEntryDetail()` wiring, and PGRST204 schema-lag
+  fallback behavior for both `saveManualExpenseAsync()` and `voidManualExpenseAsync()` (including that
+  an unrelated Supabase failure is still not swallowed).
+- Full suite: `node --test tests/*.test.js` — **344/344 passing** (was 331; net +13 new/replaced tests
+  across the three areas above). `node --check` clean on `app.js`, `views/create.js`, `views/budget.js`,
+  and all touched test files.
+- Manually verified in-browser against live Supabase data: Create Memo's SL form has no currency field
+  and its running total shows `฿` only; navigating directly to Budget Settings (without visiting Budget
+  vs Actual first) fires a live `budget_pools` fetch and renders current pool data; Manual Entry Detail
+  for a real pre-existing record shows a synthesized "Created → Edited" Audit Timeline block. No console
+  errors in any of the three flows.
+
+### Remaining / deferred
+- TD-M2-03 (new): the `audit_log` migration is not yet applied to the live Supabase project — same
+  accepted deployment-prerequisite shape as every prior migration in this repo.
+- Everything else explicitly out of scope for this follow-up (per instruction): License Review Queue,
+  Software Master, Device Type Master, Approved PDF proof of approval, and all Milestone 3 work.
+
 ## Milestone 2 — Financial Foundation (2026-07-03)
 
 Source: `docs/IMPLEMENTATION_ROADMAP.md` Milestone 2, following Milestone 1 (accepted) and its
