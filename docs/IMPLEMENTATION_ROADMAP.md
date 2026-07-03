@@ -1,112 +1,214 @@
-# IMPLEMENTATION_ROADMAP.md
+# PMO Dashboard — Implementation Roadmap (Revised)
 
-Version: 1.0
-Status: Active
-
-## Objective
-
-Implement the PMO Dashboard using the approved business requirements and Full System Gap Audit.
-
-## Source Documents
-
-- SYSTEM_OVERVIEW.md
-- MEMO_LIFECYCLE.md
-- SYSTEM_STATE_MACHINE.md
-- FULL_SYSTEM_GAP_AUDIT_2026-07-03.md
+Last Updated: 2026-07-03
 
 ---
 
-# Milestone 1 — Core Lifecycle Foundation (Critical)
+# Development Strategy
 
-Goal:
-- Complete memo lifecycle integrity.
+The project follows a **Function First, UI Last** strategy.
 
-Scope:
-- Void lifecycle
-- Soft delete
-- Audit framework
-- Shared lifecycle/status rules
-- Approved memo immutability
+Priority order:
 
-Definition of Done:
-- Lifecycle matches MEMO_LIFECYCLE.md
-- All lifecycle tests pass
+1. Business Logic
+2. Data Integrity
+3. End-to-End Workflow
+4. Auditability
+5. Testing
+6. UI Integration
 
-Status: TODO
+The objective is to complete all functional requirements before spending effort on UI consistency or visual redesign.
 
 ---
 
-# Milestone 2 — Financial Foundation
+# Core Principles
 
-Scope:
-- THB-only currency support (USD support shipped, then reverted 2026-07-03 — no confirmed use case; see docs/TECHNICAL_DEBT.md)
-- Bangkok timezone
-- Created/Updated metadata
-- Memo number uniqueness
-- Financial consistency
+## 1. Functional Completion First
 
-Definition of Done:
-- Financial calculations remain correct
-- Metadata stored consistently
+Every module should become fully functional before any UI polishing begins.
 
-Status: TODO
+Focus on:
 
----
+- Business rules
+- Workflow correctness
+- Data consistency
+- Module integration
+- Audit trail
+- Testing
 
-# Milestone 3 — License & Device Foundation
+Do NOT spend development time on:
 
-Scope:
-- License review queue
-- Software master approval
-- Purchase Order improvements
-- Partially Arrived
-- Device Registry consistency
+- visual redesign
+- spacing
+- typography
+- colors
+- icons
+- animations
+- responsive refinements
 
-Definition of Done:
-- License and Device downstream flow matches requirements
-
-Status: TODO
+unless they are required for a functional feature.
 
 ---
 
-# Milestone 4 — UX & Workflow Consistency
+## 2. UI Freeze
 
-Scope:
-- Approved PDF
-- Override UX
-- Validation
-- Approval timeline
-- Empty states
-- Shared table behavior
+Until the UI Integration phase:
 
-Definition of Done:
-- UX consistent across modules
+- Existing layouts remain unchanged.
+- Existing component styles remain unchanged.
+- Existing navigation remains unchanged unless required for functionality.
 
-Status: TODO
+New UI should only expose required functionality.
 
 ---
 
-# Milestone 5 — QA & Hardening
+## 3. Settings Module Deferred
 
-Scope:
-- Regression tests
-- Documentation alignment
-- Cleanup
-- Final verification
+The Settings module will **not** be implemented during functional milestones.
 
-Definition of Done:
-- All required tests pass
-- Documentation updated
+Reason:
 
-Status: TODO
+Another developer owns Resource Management and shared master data.
+
+Implementing Settings now would create unnecessary merge conflicts.
+
+Current implementation should:
+
+- use existing data
+- use helper functions
+- avoid hard dependency on Settings UI
+
+Example:
+
+getSoftwareOptions()
+
+getDeviceTypeOptions()
+
+getProjectOptions()
+
+These helpers can later be redirected to the Settings module without changing business logic.
 
 ---
 
-## Working Rule
+# Functional Milestones
 
-Each milestone must:
-1. Read all requirement documents.
-2. Implement only the current milestone.
-3. Run tests.
-4. Update CHANGELOG.
-5. Stop for review.
+## Milestone 1
+
+Memo Lifecycle
+
+✓ Complete
+
+---
+
+## Milestone 2
+
+Financial Foundation
+
+✓ Complete
+
+---
+
+## Milestone 3A
+
+License Logic
+
+Includes:
+
+- License Review Queue
+- License User Mapping
+- License Approval Flow
+- License Audit
+- License end-to-end workflow
+
+Excludes:
+
+- Software Master UI
+- Settings UI
+
+---
+
+## Milestone 3B
+
+Device Logic
+
+Includes:
+
+- Purchase Order
+- Delivery Flow
+- Device Registry
+- Hardware Workflow
+- Audit
+
+Excludes:
+
+- Device Type Settings
+- UI redesign
+
+---
+
+## Milestone 3C
+
+Resource Integration
+
+Focus:
+
+- Resource linkage
+- Shared project data
+- Integration with teammate's Resource module
+
+No UI redesign.
+
+---
+
+## Milestone 3D
+
+Reporting
+
+Focus:
+
+- Export
+- Reports
+- Cross-module validation
+- Final workflow verification
+
+---
+
+## Milestone 4
+
+Authentication / Authorization
+
+Implemented by Tech Team.
+
+Includes:
+
+- Login
+- Roles
+- Permissions
+- Notifications
+
+---
+
+## Milestone 5
+
+UI Integration
+
+Final phase.
+
+Includes:
+
+- Theme consistency
+- Shared components
+- Layout refinement
+- Responsive improvements
+- Iconography
+- UX polishing
+
+No business logic changes should occur during this phase.
+
+---
+
+# Golden Rule
+
+Business Logic must never be delayed because of UI work.
+
+UI improvements should never introduce functional regressions.
