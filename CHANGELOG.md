@@ -1,5 +1,170 @@
 # CHANGELOG
 
+## Milestone 3B acceptance review fixes — Device delete refresh, delete scope, Mark Arrived name mapping (2026-07-03)
+
+Three issues raised during Milestone 3B acceptance review, investigated and fixed in `views/device.js`.
+No PDF work started, no Settings/UI theme changes, per instruction.
+
+### 1. Device delete UI refresh (root cause found and fixed)
+- **Root cause**: `deleteDevice()` called `deleteDeviceAsync(id)` without awaiting it, then immediately
+  called `renderDevice()`. `renderDevice()` triggers `loadDevicesAsync()` — a fresh Supabase `GET` of
+  the whole devices table — which could resolve *before* the delete's own Supabase `PATCH` had
+  landed server-side, overwriting the correctly-updated local cache with stale (not-yet-deleted) data
+  and making the just-deleted row reappear until a manual page reload.
+- **Fix**: `deleteDevice()` now awaits `deleteDeviceAsync(id)` and re-renders directly via
+  `_renderDeviceTable()` (reading the already-updated local cache, no redundant fetch) instead of
+  calling `renderDevice()` — mirroring the pattern `submitMarkArrived()` already used for the same
+  reason.
+
+### 2. Device delete scope (verified correct; found and fixed a related bug)
+- `deleteDeviceAsync(id)` was already correctly scoped to exactly one record (matched by `id`, no
+  `memoNo`/`purchaseOrderId` filtering) — confirmed with a new multi-sibling test.
+- **Found while investigating**: `_renderDeviceTable()`'s row-click, Edit, and Delete `onclick`
+  handlers interpolated `${d.id}` **unquoted** into the generated HTML (e.g.
+  `onclick="deleteDevice(123)"`). For a device whose `id` is still the local string placeholder
+  (`dev_<timestamp>_<n>`, true for any device added manually or arrived via Mark Arrived until the
+  next full reload from Supabase — i.e. exactly the devices a PMO user is most likely to interact
+  with right after creating them), this produced a bare identifier reference
+  (`onclick="deleteDevice(dev_1730000000_0)"`) that throws `ReferenceError` on click and silently does
+  nothing — Delete/Edit/View would appear to not work at all for a freshly created or freshly arrived
+  device in the same session.
+- **Fix**: `_renderDeviceTable()`, `openDeviceDetail()` (its Edit button, photo upload input, and photo
+  remove button), now all quote the id (`'${esc(String(d.id))}'`). `openDeviceModal()`,
+  `openDeviceDetail()`, `uploadDevicePhoto()`, and `removeDevicePhoto()` now compare
+  `String(dev.id) === String(id)` instead of strict `===`, so lookups work correctly regardless of
+  whether `id` is a Supabase-assigned number or a local string placeholder.
+
+### 3. Device Registry name mapping after Mark Arrived (verified correct; added a defensive guard)
+- Extensive verification against real production data (all completed Hardware memos' PO `itemName`
+  and their arrived devices' `name` fields) and direct function-level testing found the mapping
+  already correct end-to-end: `_hwLineItemsFromMemo()` → `createPurchaseOrdersFromMemo()`'s
+  `po.itemName` → `markArrived()`'s `device.name = po.itemName` already preserves the real hardware
+  item name (e.g. "MacBook Pro", "iPhone 13"), never the memo number, in both the structured `hwItems`
+  path and the legacy HTML-scrape fallback, independent of whether Serial/Asset is blank.
+- **Defensive fix added anyway**: `markArrived()`'s device `name` now falls back to the literal string
+  `'Unnamed Hardware Item'` (never blank, never the memo number) in the edge case of a PO record with
+  no `itemName` at all (e.g. manually corrupted/malformed PO data) — closing the one path that could
+  theoretically have shown a blank name.
+
+### Tests
+- 7 new tests added to `tests/device.test.js`: `deleteDevice()` no longer resurrects a deleted row via
+  a stale Supabase re-fetch race; `deleteDeviceAsync()` only hides the targeted device among multiple
+  siblings from the same memo/PO; `_renderDeviceTable()`'s onclick handlers are properly quoted for a
+  non-numeric device id; `openDeviceModal()`/`openDeviceDetail()` resolve a string-id device without
+  throwing; a device created via Mark Arrived preserves the item name from `memo.hwItems` end-to-end
+  (blank serial included); the same via the legacy HTML fallback path; and the new
+  `'Unnamed Hardware Item'` fallback for a PO with no `itemName`.
+- Full suite: `node --test tests/*.test.js` — **387/387 passing** (was 380, net +7). `node --check`
+  clean on `views/device.js` and `tests/device.test.js`.
+- Manually verified in-browser against live Supabase data (read-only checks only): confirmed the
+  rendered row HTML now quotes device ids (`onclick="openDeviceDetail('116')"`); confirmed
+  `openDeviceDetail()` opens correctly for a real device and shows its actual item name ("Stylus"),
+  not a memo number; no console errors. One test PO was briefly written to the shared Supabase project
+  while investigating issue 3 (`TEST-M3B-BUGCHECK-001`) and was deleted immediately after
+  confirmation — no test data was left behind.
+
+### Not changed (explicitly out of scope for this fix round)
+- PDF milestone, Settings/UI theme — untouched, per instruction.
+- `saveDevice()`'s end-of-function `renderDevice()` call uses the same fire-and-forget-then-refetch
+  shape that caused issue 1 for delete. It was **not** changed here (not reported, and this fix round
+  was scoped to the three listed issues) — flagged as a related, not-yet-confirmed risk for a
+  follow-up if Add/Edit Device is ever observed to show similarly stale data immediately after saving.
+
+## Milestone 3B — Device Logic: PO from structured hwItems, Device/PO audit log, Device soft delete (2026-07-03)
+
+Source: `docs/IMPLEMENTATION_ROADMAP.md` Milestone 3B, following the accepted Milestone 3B plan.
+Scope: switch Purchase Order creation to structured `memo.hwItems` (with legacy HTML fallback),
+add audit logging for Device/PO actions, implement Device Registry soft delete, and add behavioral
+tests. Device Type Settings UI, the Settings page, Resource merge, QR/scan enhancements, UI
+redesign, and actor-stamping for secondary write paths (bulk import, photo upload) are explicitly
+out of scope and untouched.
+
+### 1. Purchase Order creation reads structured `hwItems` (closes audit finding G-13)
+- `views/device.js` — new `_hwLineItemsFromMemo(memo)` extracts `{name, qty}` pairs, preferring the
+  structured `memo.hwItems` array (`{name, price, qty}`, already collected by Create Memo's
+  `collectMemoData()` and persisted via `memoToDb()`/`dbToMemo()`'s `hw_items` column since the
+  "Memo Detail Restore" hotfix) over scraping the printable HTML table. A cosmetic edit to Create
+  Memo's Hardware table markup can no longer silently stop PO creation.
+- **Legacy fallback preserved**: when `hwItems` is missing or empty (Hardware memos approved before
+  that hotfix shipped), `_hwLineItemsFromMemo()` falls back to the original `DOMParser` scrape of the
+  `'รายการ Hardware'` section — historical memos still produce POs correctly.
+- `createPurchaseOrdersFromMemo()`'s dedupe-by-`memoNo + itemName` behavior is unchanged. No changes
+  to Create Memo's UI or `views/create.js`'s data collection — the structured data already existed.
+
+### 2. Device / Purchase Order audit log
+- New `appendDeviceAuditLog(record, action, extra)` (`views/device.js`) — mirrors `app.js`'s
+  `appendAuditLog()` shape (`action, actor, timestamp, comment, statusBefore, statusAfter`) but
+  operates on a single device/PO record in place, since neither table has a status-transition helper
+  like `updateMemoStatusAsync()`.
+- Audited actions: manual device Create/Edit (`saveDevice()`), PO status changes
+  (`advancePOStatus()`), Mark Arrived (`markArrived()` — one entry on the PO for the arrival, one
+  entry per newly created device referencing the originating PO), and device Delete (soft delete,
+  see below).
+- New `devices.audit_log` / `purchase_orders.audit_log` (jsonb) columns, mapped in
+  `deviceToDb()`/`dbToDevice()` and `poToDb()`/`dbToPo()`. `saveDeviceAsync()` (POST and PATCH paths)
+  and `savePurchaseOrderAsync()` (POST and PATCH paths) retry once without `audit_log` on the
+  specific PGRST204 "missing column" schema-cache error (`isMissingDeviceAuditColumnError()`,
+  mirroring `views/budget.js`'s `isMissingAuditLogColumnError()`/`saveManualExpenseAsync()` pattern)
+  so Create/Edit/Mark Arrived/Status Change keep persisting their other fields even before the
+  migration below is applied.
+- No UI surface added for the new audit trail (Device Detail / Purchase Orders table are unchanged)
+  — out of scope per "keep UI unchanged unless required for function"; tracked as `TD-M3B-01`.
+
+### 3. Device Registry soft delete (addresses part of audit finding G-02 for devices)
+- `deleteDeviceAsync()` no longer issues a hard Supabase `DELETE`. It now marks the record
+  `deleted:true` with `deletedAt`/`deletedBy` and appends a `'Deleted'` audit entry, then `PATCH`es
+  Supabase (with the same `audit_log` PGRST204 retry-fallback as above) — mirroring the soft-delete
+  pattern already used for memo Draft delete (`app.js`) and Manual Expense void (`views/budget.js`).
+- `loadDevices()`/`loadDevicesAsync()` now filter out `deleted:true` rows at the single shared read
+  path (mirroring `app.js`'s `_excludeDeletedMemos()`) — soft-deleted devices disappear from the
+  Device Registry table, summaries, CSV export, and search with no per-view changes needed.
+- New internal raw accessor `_loadDevicesRaw()` — `saveDeviceAsync()`, `deleteDeviceAsync()`,
+  `markArrived()`, and `importDeviceBulk()` now read the *unfiltered* list before writing the full
+  array back via `storeDevices()`, so an unrelated save/import/arrival can no longer silently drop an
+  already soft-deleted device from the local cache/localStorage backup (the same risk shape
+  documented for memos in `TD-M1-03` item 2, avoided here by design rather than accepted).
+- `findExistingDevice()`'s dedup-by-serial/asset-tag check (manual Add/Edit) and
+  `importDeviceBulk()`'s dedup-by-serial check both read the *filtered* (active-only) device list, so
+  a soft-deleted device's serial/asset tag becomes reusable immediately — mirroring the memo-number
+  reuse-after-soft-delete correction from Milestone 1B.
+- `memoHasIrreversibleDownstreamRecords()` (`app.js`, the memo Void downstream guard) needed **no
+  code change** — it already calls `loadDevices()`, so a soft-deleted device automatically stops
+  blocking Void through the same shared filtered read path.
+- New migration `supabase/migrations/20260703180000_device_registry_m3b.sql`: additive
+  `devices.deleted`/`deleted_at`/`deleted_by`/`audit_log` and `purchase_orders.audit_log` columns.
+
+### Tests
+- New `tests/device.test.js` (21 tests): PO creation from `hwItems` (multi-line, dedupe, non-hw/non-
+  completed no-ops), legacy HTML fallback (missing and empty `hwItems`), the "5 ordered → 3 arrive →
+  2 arrive later" partial-arrival scenario from `SYSTEM_STATE_MACHINE.md` §8 (including arrival-qty
+  clamping and the not-yet-awaiting guard), audit entries for Mark Arrived / PO status change /
+  device Create+Edit (including prior-history preservation on edit), the `audit_log` PGRST204
+  retry-fallback for both `saveDeviceAsync()` and `savePurchaseOrderAsync()` (and that an unrelated
+  Supabase failure still doesn't block local persistence, matching this file's pre-existing
+  catch-and-warn convention), device soft delete (hidden from `loadDevices()`, retained in
+  persistence, retried audit-log fallback), soft-deleted serial reuse, and both directions of the
+  Void-downstream-guard interaction (soft-deleted device does not block Void; an active device still
+  does).
+- Full suite: `node --test tests/*.test.js` — **380/380 passing** (was 359, net +21). `node --check`
+  clean on `views/device.js`, `tests/device.test.js`, and every other touched/adjacent JS file.
+- Manually verified in-browser (static server, live Supabase data): Device Management's Device
+  Registry (116 devices) and Purchase Orders (36 POs) tabs both render correctly against real,
+  pre-existing Supabase rows with the new `audit_log`/soft-delete field mappings in place — no
+  console errors, no visual change (no write actions were performed against the live database during
+  this check).
+
+### Technical debt
+- New `docs/TECHNICAL_DEBT.md` **TD-M3B-01** (OPEN): the new migration is not yet applied to the live
+  Supabase project (same deployment-prerequisite shape as every prior milestone); the new Device/PO
+  audit trail has no UI surface yet (by design, out of scope for this milestone); `importDeviceBulk()`
+  has no dedicated behavioral test for its soft-delete-safe merge (low risk, shares already-tested
+  helpers).
+
+### Not changed (explicitly out of scope for Milestone 3B)
+- Device Type Settings UI, the Settings page, Resource merge, QR/scan enhancements, UI redesign,
+  actor-stamping (`createdBy`/`updatedBy`) for bulk import and device-photo upload/remove (`TD-M2-01`
+  item 5, unchanged), and all future milestones.
+
 ## Milestone 3A — License Logic: PMO Review Queue for account lists (2026-07-03)
 
 Source: `docs/IMPLEMENTATION_ROADMAP.md` Milestone 3A, following the locked business decisions

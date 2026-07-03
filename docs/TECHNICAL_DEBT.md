@@ -1117,6 +1117,76 @@ Exit Criteria
 
 ---
 
+# TD-M3B-01
+
+Title
+
+Milestone 3B Deployment Prerequisite + Device/PO Audit Trail Has No UI Surface Yet
+
+Status
+
+OPEN
+
+Priority
+
+Medium
+
+Introduced
+
+Milestone 3B — Device Logic
+
+Owner Phase
+
+Device Logic
+
+Current Situation
+
+1. **Migration not yet applied.** `supabase/migrations/20260703180000_device_registry_m3b.sql` adds
+   `devices.deleted`/`deleted_at`/`deleted_by`/`audit_log` and `purchase_orders.audit_log`. Not yet
+   applied to the live Supabase project — same constraint as every prior migration in this repo
+   (TD-M1-01/TD-M1-03/TD-M1-04/TD-M2-01/TD-M2-03). Until it is applied, `saveDeviceAsync()` and
+   `savePurchaseOrderAsync()` retry once without `audit_log` on the specific PGRST204 schema-cache
+   error (`isMissingDeviceAuditColumnError()`, mirroring `views/budget.js`'s
+   `isMissingAuditLogColumnError()` pattern), so Create/Edit/Mark Arrived/Status Change keep
+   persisting their other fields. `deleteDeviceAsync()`'s soft-delete columns
+   (`deleted`/`deleted_at`/`deleted_by`) have no such per-column fallback — until the migration is
+   applied, a delete's Supabase `PATCH` fails outright and the soft delete persists locally only
+   (in-memory cache + localStorage), the same accepted risk shape as every other new-column addition
+   in this repo's history (e.g. TD-M1-03 item 1 for the memo Void/soft-delete columns).
+2. **No UI surface for the new Device/PO audit trail.** `appendDeviceAuditLog()` writes structured
+   entries (action/actor/timestamp/comment/statusBefore/statusAfter) on manual device create/edit, PO
+   status changes, Mark Arrived, and device records created from an arrived PO — but there is no
+   Audit Timeline panel exposing this in Device Detail or the Purchase Orders table, unlike Memo
+   Detail's Audit Log block or Manual Expense's `manualExpenseAuditTimeline()`. This was intentional
+   per this milestone's "Function First, keep UI unchanged unless required for function" instruction
+   — the data is captured and tested, but not yet surfaced.
+3. **`importDeviceBulk()`'s soft-delete-safe merge has no dedicated behavioral test.** Bulk import was
+   changed to read the raw (unfiltered) device list and dedupe against only active (non-deleted)
+   devices — reusing the same `_loadDevicesRaw()`/`_excludeDeletedDevices()` helpers already covered
+   by `tests/device.test.js` via the manual Add/Edit and Mark Arrived paths — but no test exercises
+   `importDeviceBulk()` itself end-to-end. Left untested to avoid building CSV-parsing test
+   infrastructure for a change whose underlying correctness is already covered at the helper level.
+
+Risk
+
+Item 1 is the one that matters operationally — apply the migration before/with this code, same as
+every prior milestone's deployment step. Item 2 is a scope decision, not a defect: the audit data is
+correct and tested, it just isn't visible in the app yet. Item 3 is a narrow test-coverage gap on a
+low-risk, mechanical change.
+
+Exit Criteria
+
+- Apply `20260703180000_device_registry_m3b.sql` to the live Supabase project, then confirm a
+  Device delete, a Mark Arrived, and a PO status change all survive a real `loadDevicesAsync()` /
+  `loadPurchaseOrdersAsync()` refetch (not just local cache).
+- Decide whether/when to add a Device Detail / Purchase Orders Audit Timeline UI (candidate for
+  Milestone 3C or 5, or sooner if PMO asks for it) — no code change needed to the audit-writing logic
+  itself, only a new read/render path mirroring `manualExpenseAuditTimeline()`.
+- Add a behavioral test for `importDeviceBulk()`'s soft-deleted-serial-reuse behavior if bulk import
+  becomes a higher-traffic path.
+
+---
+
 # Before Release Checklist
 
 Review every OPEN Technical Debt.

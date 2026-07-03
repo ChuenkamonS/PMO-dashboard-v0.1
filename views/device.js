@@ -39,6 +39,11 @@ function deviceToDb(d, isNew=false) {
     // Milestone 2 Task 2.3 — Created By / Updated By metadata.
     created_by:    d.createdBy || null,
     updated_by:    d.updatedBy || null,
+    // Milestone 3B — Device Registry soft delete + audit log.
+    deleted:       d.deleted || false,
+    deleted_at:    d.deletedAt || null,
+    deleted_by:    d.deletedBy || null,
+    audit_log:     d.auditLog || [],
   };
   return row;
 }
@@ -73,7 +78,63 @@ function dbToDevice(r) {
     // Milestone 2 Task 2.3 — Created By / Updated By metadata.
     createdBy:    r.created_by || null,
     updatedBy:    r.updated_by || null,
+    // Milestone 3B — Device Registry soft delete + audit log.
+    deleted:      r.deleted || false,
+    deletedAt:    r.deleted_at || null,
+    deletedBy:    r.deleted_by || null,
+    auditLog:     r.audit_log || [],
   };
+}
+
+// Milestone 3B — schema-cache-lag fallback for the new `audit_log` column on
+// `devices`/`purchase_orders`, mirroring views/budget.js's
+// isMissingAuditLogColumnError() for budget_manual_expenses. Scoped locally
+// to this file (not shared with budget.js) so views/device.js stays
+// self-contained — the detection logic itself is identical.
+function isMissingDeviceAuditColumnError(error) {
+  const detail = `${error?.code || ''} ${error?.message || error || ''}`.toLowerCase();
+  return detail.includes('pgrst204')
+    && detail.includes('audit_log')
+    && (detail.includes('column') || detail.includes('schema cache'));
+}
+
+// Milestone 3B — Device/PO audit log. Mirrors app.js's appendAuditLog() shape
+// (actor/action/comment/timestamp, optional statusBefore/statusAfter) but
+// operates on a single device/PO record in place, since neither table has a
+// status-transition helper like updateMemoStatusAsync().
+function appendDeviceAuditLog(record, action, extra = {}) {
+  if (!record.auditLog) record.auditLog = [];
+  record.auditLog.push({
+    action,
+    actor: currentUser(),
+    timestamp: new Date().toISOString(),
+    comment: extra.comment || '',
+    statusBefore: extra.statusBefore || null,
+    statusAfter: extra.statusAfter || null,
+  });
+  return record;
+}
+
+// Milestone 3B — Device Registry soft delete. loadDevices()/loadDevicesAsync()
+// filter out `deleted:true` rows (the single shared read path, mirroring
+// app.js's _excludeDeletedMemos()). Internal read-modify-write paths that
+// persist the *entire* local cache/localStorage array (saveDeviceAsync,
+// deleteDeviceAsync, markArrived, importDeviceBulk) must read the raw,
+// unfiltered list first — otherwise storeDevices() would overwrite the whole
+// array and silently drop any already soft-deleted row, the same risk shape
+// documented for memos in docs/TECHNICAL_DEBT.md TD-M1-03 item 2.
+function _excludeDeletedDevices(devices) {
+  return (devices || []).filter(d => !d.deleted);
+}
+function _loadDevicesRaw() {
+  if (_devCache !== null && _devCache.length > 0) return _devCache;
+  try {
+    const d = JSON.parse(localStorage.getItem(DEVICE_KEY) || '[]');
+    if (Array.isArray(d)) {
+      d.forEach(dev => { if (dev.memoRef && !dev.memoNo) { dev.memoNo = dev.memoRef; delete dev.memoRef; } });
+    }
+    return Array.isArray(d) ? d : [];
+  } catch(e) { return []; }
 }
 
 async function loadDevicesAsync() {
@@ -81,18 +142,18 @@ async function loadDevicesAsync() {
     try {
       const rows = await supaFetch('devices', 'GET', null, '?order=created_at.desc&limit=500');
       _devCache = (rows || []).map(dbToDevice);
-      return _devCache;
+      return _excludeDeletedDevices(_devCache);
     } catch(e) {
       console.warn('Supabase devices read failed', e.message);
-      if (_devCache) return _devCache;
+      if (_devCache) return _excludeDeletedDevices(_devCache);
     }
   }
   // Offline fallback
-  try { const d = JSON.parse(localStorage.getItem(DEVICE_KEY)||'[]'); return Array.isArray(d)?d:[]; } catch(e) { return []; }
+  try { const d = JSON.parse(localStorage.getItem(DEVICE_KEY)||'[]'); return _excludeDeletedDevices(Array.isArray(d)?d:[]); } catch(e) { return []; }
 }
 
 async function saveDeviceAsync(data) {
-  const all = loadDevices();
+  const all = _loadDevicesRaw();
   const idx = all.findIndex(d => String(d.id) === String(data.id));
   if (idx >= 0) all[idx] = data; else all.push(data);
   storeDevices(all);
@@ -104,7 +165,15 @@ async function saveDeviceAsync(data) {
         // Don't send id — devices table uses BIGINT GENERATED ALWAYS AS IDENTITY
         const row = deviceToDb(data);
         delete row.id;
-        const result = await supaFetch('devices', 'POST', row, '?select=id');
+        let result;
+        try {
+          result = await supaFetch('devices', 'POST', row, '?select=id');
+        } catch(e) {
+          if (!isMissingDeviceAuditColumnError(e)) throw e;
+          const compatibleRow = { ...row };
+          delete compatibleRow.audit_log;
+          result = await supaFetch('devices', 'POST', compatibleRow, '?select=id');
+        }
         // Store the Supabase-generated id back in cache
         if (result?.[0]?.id) {
           data._supaId = result[0].id;
@@ -115,38 +184,60 @@ async function saveDeviceAsync(data) {
           storeDevices(_devCache || all);
         }
       } else {
-        await supaFetch('devices', 'PATCH', deviceToDb(data), `?id=eq.${data._supaId}`);
+        const patch = deviceToDb(data);
+        try {
+          await supaFetch('devices', 'PATCH', patch, `?id=eq.${data._supaId}`);
+        } catch(e) {
+          if (!isMissingDeviceAuditColumnError(e)) throw e;
+          const compatiblePatch = { ...patch };
+          delete compatiblePatch.audit_log;
+          await supaFetch('devices', 'PATCH', compatiblePatch, `?id=eq.${data._supaId}`);
+        }
       }
       // do NOT null cache here — cache is already up to date from storeDevices above
     } catch(e) { console.warn('Supabase device save failed', e.message); }
   }
 }
 
+// Milestone 3B — Device Registry soft delete (was a hard DELETE with zero
+// trace). Marks the record deleted/deletedAt/deletedBy and appends an audit
+// entry instead of removing the row, matching the pattern already used for
+// memo Draft soft delete (app.js) and Manual Expense void (views/budget.js).
 async function deleteDeviceAsync(id) {
-  const device = loadDevices().find(d => String(d.id) === String(id));
-  storeDevices(loadDevices().filter(d => String(d.id) !== String(id)));
-  // cache already updated by storeDevices
+  const devices = _loadDevicesRaw();
+  const idx = devices.findIndex(d => String(d.id) === String(id));
+  if (idx < 0) return;
+  const now = new Date().toISOString();
+  const updated = {
+    ...devices[idx],
+    deleted: true,
+    deletedAt: now,
+    deletedBy: currentUser(),
+  };
+  appendDeviceAuditLog(updated, 'Deleted');
+  devices[idx] = updated;
+  storeDevices(devices); // soft delete — row stays in cache/localStorage, just hidden from normal reads
   if (await checkSupa()) {
     try {
       // devices table uses BIGINT id — use _supaId stored after INSERT
-      const supaId = device?._supaId;
-      if (supaId) await supaFetch('devices', 'DELETE', null, `?id=eq.${supaId}`);
+      const supaId = updated._supaId;
+      if (supaId) {
+        const patch = { deleted: true, deleted_at: now, deleted_by: updated.deletedBy, audit_log: updated.auditLog };
+        try {
+          await supaFetch('devices', 'PATCH', patch, `?id=eq.${supaId}`);
+        } catch(e) {
+          if (!isMissingDeviceAuditColumnError(e)) throw e;
+          const compatiblePatch = { ...patch };
+          delete compatiblePatch.audit_log;
+          await supaFetch('devices', 'PATCH', compatiblePatch, `?id=eq.${supaId}`);
+        }
+      }
     } catch(e) { console.warn('Supabase device delete failed', e.message); }
   }
 }
 
 function loadDevices() {
-  // Prefer in-memory cache (populated from Supabase by loadDevicesAsync)
-  if (_devCache !== null && _devCache.length > 0) return _devCache;
-  // Offline fallback: localStorage
-  try {
-    const d = JSON.parse(localStorage.getItem(DEVICE_KEY) || '[]');
-    if (Array.isArray(d)) {
-      // Migrate: memoRef → memoNo
-      d.forEach(dev => { if (dev.memoRef && !dev.memoNo) { dev.memoNo = dev.memoRef; delete dev.memoRef; } });
-    }
-    return Array.isArray(d) ? d : [];
-  } catch(e) { return []; }
+  return _excludeDeletedDevices(_loadDevicesRaw());
 }
 function storeDevices(devices) {
   _devCache = Array.isArray(devices) ? devices : [];
@@ -177,6 +268,8 @@ function poToDb(po) {
     // Milestone 2 Task 2.3 — Created By / Updated By metadata.
     created_by:   po.createdBy || null,
     updated_by:   po.updatedBy || null,
+    // Milestone 3B — PO audit log.
+    audit_log:    po.auditLog || [],
   };
 }
 function dbToPo(r) {
@@ -194,6 +287,8 @@ function dbToPo(r) {
     // Milestone 2 Task 2.3 — Created By / Updated By metadata.
     createdBy:   r.created_by || null,
     updatedBy:   r.updated_by || null,
+    // Milestone 3B — PO audit log.
+    auditLog:    r.audit_log || [],
   };
 }
 
@@ -218,10 +313,23 @@ async function savePurchaseOrderAsync(po) {
     try {
       // Use PATCH to update existing PO, POST for new ones
       const existing = await supaFetch('purchase_orders', 'GET', null, `?id=eq.${encodeURIComponent(po.id)}&select=id`);
-      if (existing && existing.length > 0) {
-        await supaFetch('purchase_orders', 'PATCH', poToDb(po), `?id=eq.${encodeURIComponent(po.id)}`);
-      } else {
-        await supaFetch('purchase_orders', 'POST', poToDb(po), '');
+      const row = poToDb(po);
+      const isUpdate = existing && existing.length > 0;
+      try {
+        if (isUpdate) {
+          await supaFetch('purchase_orders', 'PATCH', row, `?id=eq.${encodeURIComponent(po.id)}`);
+        } else {
+          await supaFetch('purchase_orders', 'POST', row, '');
+        }
+      } catch(e) {
+        if (!isMissingDeviceAuditColumnError(e)) throw e;
+        const compatibleRow = { ...row };
+        delete compatibleRow.audit_log;
+        if (isUpdate) {
+          await supaFetch('purchase_orders', 'PATCH', compatibleRow, `?id=eq.${encodeURIComponent(po.id)}`);
+        } else {
+          await supaFetch('purchase_orders', 'POST', compatibleRow, '');
+        }
       }
     } catch(e) { console.warn('Supabase PO save failed', e.message); }
   }
@@ -236,21 +344,45 @@ function storePurchaseOrders(pos) {
   try { localStorage.setItem('orbit-pmo-po-v1', JSON.stringify(pos)); } catch(e) {}
 }
 
-// Auto-create purchase orders when HW memo is approved
-// Called from updateMemoStatus in app.js when status = completed
-function createPurchaseOrdersFromMemo(memo) {
-  if (memo.type !== 'hw') return;
-  if (memo.status !== 'completed') return; // only create POs for approved memos
+// Milestone 3B — hardware line items for PO creation. Prefers the structured
+// memo.hwItems array (populated by Create Memo's collectMemoData() since the
+// "Memo Detail Restore" hotfix, persisted via memoToDb/dbToMemo's hw_items
+// column) over scraping the printable HTML table — a cosmetic edit to Create
+// Memo's Hardware table markup can no longer silently break PO creation
+// (audit finding G-13). Falls back to the legacy HTML-scrape for Hardware
+// memos approved before hwItems existed, so historical memos still produce
+// POs correctly.
+function _hwLineItemsFromMemo(memo) {
+  const structured = (memo.hwItems || [])
+    .map(it => ({ name: (it.name || '').trim(), qty: parseInt(it.qty) || 1 }))
+    .filter(it => it.name && it.name !== '-');
+  if (structured.length) return structured;
+
+  // Legacy fallback — HTML table scrape (memos with no hwItems stored)
   const section = memo.sections?.find(s => s.title === 'รายการ Hardware');
-  if (!section) return;
+  if (!section) return [];
   const doc = new DOMParser().parseFromString(section.html, 'text/html');
-  const existing = loadPurchaseOrders();
+  const legacyItems = [];
   doc.querySelectorAll('tbody tr').forEach(row => {
     const cells = row.querySelectorAll('td');
     if (cells.length < 4) return;
     const name = cells[1]?.textContent?.trim();
     const qty  = parseInt(cells[3]?.textContent) || 1;
     if (!name || name === '-') return;
+    legacyItems.push({ name, qty });
+  });
+  return legacyItems;
+}
+
+// Auto-create purchase orders when HW memo is approved
+// Called from updateMemoStatus in app.js when status = completed
+function createPurchaseOrdersFromMemo(memo) {
+  if (memo.type !== 'hw') return;
+  if (memo.status !== 'completed') return; // only create POs for approved memos
+  const items = _hwLineItemsFromMemo(memo);
+  if (!items.length) return;
+  const existing = loadPurchaseOrders();
+  items.forEach(({ name, qty }) => {
     // Don't duplicate — check by both memoNo + itemName
     const isDup = existing.some(p => p.memoNo === memo.memoNo && p.itemName === name);
     if (isDup) return;
@@ -270,6 +402,7 @@ function createPurchaseOrdersFromMemo(memo) {
       // action (approval) completed the memo and triggered this auto-creation.
       createdBy:   currentUser(),
       updatedBy:   currentUser(),
+      auditLog:    [],
     };
     existing.push(po);
     // Save to Supabase only if not already there
@@ -280,7 +413,14 @@ function createPurchaseOrdersFromMemo(memo) {
           // Check if PO already exists in Supabase
           const existing_supa = await supaFetch('purchase_orders', 'GET', null, `?id=eq.${encodeURIComponent(poId)}&select=id`);
           if (existing_supa && existing_supa.length > 0) return; // already exists, skip
-          await supaFetch('purchase_orders', 'POST', poToDb(po), '');
+          try {
+            await supaFetch('purchase_orders', 'POST', poToDb(po), '');
+          } catch(e) {
+            if (!isMissingDeviceAuditColumnError(e)) throw e;
+            const compatibleRow = poToDb(po);
+            delete compatibleRow.audit_log;
+            await supaFetch('purchase_orders', 'POST', compatibleRow, '');
+          }
         } catch(e) { console.warn('PO save failed:', e.message); }
       });
     }
@@ -301,23 +441,33 @@ async function markArrived(poId, qty, serialNumbers = []) {
   const now        = new Date().toISOString();
   const actualQty  = Math.min(qty, po.orderedQty - po.arrivedQty); // can't exceed remaining
   const newArrived = po.arrivedQty + actualQty;
+  const prevStatus = po.status;
   po.arrivedQty = newArrived;
   po.status     = newArrived >= po.orderedQty ? 'fulfilled' : 'partial_arrived';
   po.updatedAt  = now;
   po.updatedBy  = currentUser();
+  appendDeviceAuditLog(po, 'Marked arrived', {
+    comment: `+${actualQty} arrived (${newArrived}/${po.orderedQty})`,
+    statusBefore: prevStatus,
+    statusAfter: po.status,
+  });
   storePurchaseOrders(pos); // sync save first
   savePurchaseOrderAsync(po).catch(e => console.warn('PO update failed', e));
 
   // Create device records — store to localStorage first, then sync to Supabase
   const batchTs  = Date.now();
-  const devices  = loadDevices();
+  const devices  = _loadDevicesRaw(); // raw list — don't drop soft-deleted rows on write
   const newDevices = [];
 
   for (let i = 0; i < actualQty; i++) {
     const serial = serialNumbers[i] !== undefined ? serialNumbers[i] : '';
     const device = {
       id:              `dev_${batchTs}_${i}`,
-      name:            po.itemName    || '',
+      // Device Registry must show the hardware item/model (e.g. "iPhone 13"),
+      // never the memo number, even in the edge case of a PO with no
+      // itemName — a blank Asset/Serial at arrival is acceptable, a blank or
+      // memo-number-shaped device name is not.
+      name:            po.itemName    || 'Unnamed Hardware Item',
       brand:           '',
       platform:        'other',
       type:            'mobile',
@@ -339,7 +489,9 @@ async function markArrived(poId, qty, serialNumbers = []) {
       // Milestone 2 Task 2.3 — Created By / Updated By metadata.
       createdBy:       currentUser(),
       updatedBy:       currentUser(),
+      auditLog:        [],
     };
+    appendDeviceAuditLog(device, 'Created from PO arrival', { comment: `PO ${po.id} · ${po.memoNo}` });
     devices.push(device);
     newDevices.push(device);
   }
@@ -517,11 +669,15 @@ async function importDeviceBulk(file) {
     if (!confirm('พบข้อมูล ' + valid.length + ' อุปกรณ์ — ยืนยัน import?')) return;
   }
 
-  const existing = loadDevices();
-  // Deduplicate by serial number if present
-  const merged = [...existing];
+  // Raw (unfiltered) base for the write so a soft-deleted device isn't dropped
+  // by this merge; dedupe check uses the active (non-deleted) list only, so a
+  // soft-deleted serial is treated as available for reuse — same rule as the
+  // manual Add/Edit modal's findExistingDevice().
+  const existingRaw = _loadDevicesRaw();
+  const activeExisting = _excludeDeletedDevices(existingRaw);
+  const merged = [...existingRaw];
   valid.forEach(d => {
-    if (d.serial && existing.find(e => e.serial === d.serial)) return;
+    if (d.serial && activeExisting.find(e => e.serial === d.serial)) return;
     merged.push(d);
   });
   storeDevices(merged);
@@ -595,7 +751,13 @@ function _renderDeviceTable() {
     const platLbl = PLATFORM_LABEL[d.platform||'other'] || d.platform || '—';
     const typeLbl = TYPE_LABEL[d.type||'other'] || d.type || '—';
     const updDate = d.updatedAt ? shortDate(d.updatedAt) : (d.assignedDate ? shortDate(d.assignedDate) : '—');
-    return `<tr style="cursor:pointer" onclick="openDeviceDetail(${d.id})">
+    // Device ids are BIGINT (numeric) once synced from Supabase but stay as a
+    // string placeholder (nextDeviceId()) until then — quoting here (and
+    // comparing via String(...) in openDeviceModal/openDeviceDetail/
+    // uploadDevicePhoto/removeDevicePhoto/deleteDevice) keeps a freshly
+    // created or just-arrived device's row clickable in the same session,
+    // instead of throwing a ReferenceError on an unquoted bare identifier.
+    return `<tr style="cursor:pointer" onclick="openDeviceDetail('${esc(String(d.id))}')">
       <td style="padding-left:16px;font-weight:500">
         ${esc(d.name)}
         ${d.brand?`<div style="font-size:10px;color:var(--text-3);font-weight:400">${esc(d.brand)}</div>`:''}
@@ -612,8 +774,8 @@ function _renderDeviceTable() {
       <td style="text-align:center"><span class="badge ${statusB.cls}" style="font-size:10px">${esc(statusB.label)}</span></td>
       <td style="font-size:11px;color:var(--text-3)">${updDate}</td>
       <td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">
-        <button class="btn-sm" onclick="event.stopPropagation();openDeviceModal(${d.id})" style="padding:3px 7px;font-size:11px">✎</button>
-        <button class="btn-sm" onclick="event.stopPropagation();deleteDevice(${d.id})" style="padding:3px 7px;font-size:11px;color:var(--red)">✕</button>
+        <button class="btn-sm" onclick="event.stopPropagation();openDeviceModal('${esc(String(d.id))}')" style="padding:3px 7px;font-size:11px">✎</button>
+        <button class="btn-sm" onclick="event.stopPropagation();deleteDevice('${esc(String(d.id))}')" style="padding:3px 7px;font-size:11px;color:var(--red)">✕</button>
       </td>
     </tr>`;
   }).join('');
@@ -658,10 +820,10 @@ function openDeviceModal(id) {
   const setVal = (elId, v) => { const el=document.getElementById(elId); if(el) el.value=v||''; };
 
   if(id) {
-    const d = loadDevices().find(dev => dev.id === id);
+    const d = loadDevices().find(dev => String(dev.id) === String(id));
     if(!d) return;
     document.getElementById('dev-modal-title').textContent = 'Edit Device';
-    document.getElementById('dev-edit-id').value = id;
+    document.getElementById('dev-edit-id').value = d.id;
     setVal('dev-name', d.name);        setVal('dev-brand', d.brand);
     setVal('dev-platform', d.platform||'other'); setVal('dev-type', d.type||'mobile');
     setVal('dev-asset', d.assetTag);   setVal('dev-serial', d.serial);
@@ -734,7 +896,8 @@ function saveDevice() {
     const allDevs = loadDevices();
     const idx = allDevs.findIndex(d => String(d.id) === String(editId));
     const orig = idx >= 0 ? allDevs[idx] : {};
-    const updated = { ...orig, ...data, id: editId };
+    const updated = { ...orig, ...data, id: editId, auditLog: [...(orig.auditLog||[])] };
+    appendDeviceAuditLog(updated, 'Edited', { statusBefore: orig.status||null, statusAfter: updated.status||null });
     saveDeviceAsync(updated).catch(e => console.warn('Device save failed', e));
   } else {
     const allDevs = loadDevices();
@@ -743,9 +906,13 @@ function saveDevice() {
       const dup = allDevs[dupIdx];
       const matchField = (data.assetTag && data.assetTag === dup.assetTag) ? `Asset: ${data.assetTag}` : `Serial: ${data.serial}`;
       if(!confirm(`พบอุปกรณ์ซ้ำ (${matchField})\nอัปเดตข้อมูลอันเดิมแทน?`)) return;
-      saveDeviceAsync({ ...dup, ...data }).catch(e => console.warn('Device save failed', e));
+      const merged = { ...dup, ...data, auditLog: [...(dup.auditLog||[])] };
+      appendDeviceAuditLog(merged, 'Edited', { comment: `Merged duplicate (${matchField})`, statusBefore: dup.status||null, statusAfter: merged.status||null });
+      saveDeviceAsync(merged).catch(e => console.warn('Device save failed', e));
     } else {
-      saveDeviceAsync({ id: nextDeviceId(), ...data, createdAt: now, createdBy: currentUser() }).catch(e => console.warn('Device save failed', e));
+      const created = { id: nextDeviceId(), ...data, createdAt: now, createdBy: currentUser(), auditLog: [] };
+      appendDeviceAuditLog(created, 'Created');
+      saveDeviceAsync(created).catch(e => console.warn('Device save failed', e));
     }
   }
   closeDeviceModal();
@@ -756,8 +923,18 @@ function deleteDevice(id) {
   const d = loadDevices().find(dev => String(dev.id) === String(id));
   if(!d) return;
   if(!confirm(`ลบ "${d.name}" ออกจากระบบ?`)) return;
-  deleteDeviceAsync(id).catch(e => console.warn('Delete failed', e));
-  renderDevice();
+  // Milestone 3B fix: deleteDeviceAsync() already updates the local cache/
+  // localStorage synchronously before its own Supabase PATCH goes out. Calling
+  // renderDevice() here (instead of re-rendering directly) would fire a fresh
+  // loadDevicesAsync() GET that can race ahead of that PATCH and overwrite the
+  // just-applied soft delete with stale (not-yet-deleted) server data — the
+  // deleted row would flash back into view until the next manual reload.
+  // Awaiting the delete, then re-rendering from the already-updated local
+  // cache directly (no redundant fetch), matches the pattern already used by
+  // submitMarkArrived().
+  deleteDeviceAsync(id).then(() => {
+    _renderDeviceTable();
+  }).catch(e => console.warn('Delete failed', e));
 }
 
 // ── Export CSV ──
@@ -799,8 +976,9 @@ document.addEventListener('click', e => {
 
 // ── Device Detail Panel ──
 function openDeviceDetail(id) {
-  const d = loadDevices().find(dev => dev.id === id);
+  const d = loadDevices().find(dev => String(dev.id) === String(id));
   if(!d) return;
+  const idStr = esc(String(d.id));
   const platLbl = PLATFORM_LABEL[d.platform||'other'] || d.platform || '—';
   const typeLbl = TYPE_LABEL[d.type||'other'] || d.type || '—';
   const statusB = deviceStatusBadge(d.status);
@@ -827,7 +1005,7 @@ function openDeviceDetail(id) {
       </div>
       <div style="display:flex;gap:6px;align-items:center">
         <span class="badge ${statusB.cls}" style="font-size:10px">${esc(statusB.label)}</span>
-        <button class="btn-sm" onclick="openDeviceModal(${id})" style="font-size:11px;padding:3px 8px">✎ Edit</button>
+        <button class="btn-sm" onclick="openDeviceModal('${idStr}')" style="font-size:11px;padding:3px 8px">✎ Edit</button>
         <button class="btn-sm" onclick="document.getElementById('dev-detail-modal').style.display='none'" style="font-size:11px;padding:3px 8px">✕</button>
       </div>
     </div>
@@ -872,10 +1050,10 @@ function openDeviceDetail(id) {
             : `<div style="width:80px;height:80px;border-radius:var(--r-sm);border:1px dashed var(--border-md);background:var(--bg);display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:11px">No photo</div>`}
           <div>
             <label style="cursor:pointer">
-              <input type="file" accept="image/*" style="display:none" onchange="uploadDevicePhoto(${id}, this)">
+              <input type="file" accept="image/*" style="display:none" onchange="uploadDevicePhoto('${idStr}', this)">
               <span class="btn-sm" style="font-size:11px;padding:4px 10px;display:inline-block">📷 Upload photo</span>
             </label>
-            ${d.photoUrl ? `<button class="btn-sm" style="font-size:11px;padding:4px 10px;color:var(--red);margin-left:4px" onclick="removeDevicePhoto(${id})">✕ Remove</button>` : ''}
+            ${d.photoUrl ? `<button class="btn-sm" style="font-size:11px;padding:4px 10px;color:var(--red);margin-left:4px" onclick="removeDevicePhoto('${idStr}')">✕ Remove</button>` : ''}
             <div style="font-size:10px;color:var(--text-3);margin-top:4px">JPG, PNG · max 5MB<br>Photo replaces previous</div>
           </div>
         </div>
@@ -897,7 +1075,7 @@ async function uploadDevicePhoto(id, input) {
   if(!input.files?.length) return;
   const file = input.files[0];
   if(file.size > 5 * 1024 * 1024) { alert('ไฟล์ใหญ่เกิน 5MB'); return; }
-  const device = loadDevices().find(d => d.id === id);
+  const device = loadDevices().find(d => String(d.id) === String(id));
   if(!device) return;
   const ext = ({ 'image/jpeg':'jpg', 'image/png':'png', 'image/webp':'webp' })[file.type];
   if(!ext) { alert('รองรับเฉพาะไฟล์ JPG, PNG หรือ WebP'); return; }
@@ -934,7 +1112,7 @@ async function uploadDevicePhoto(id, input) {
 }
 
 async function removeDevicePhoto(id) {
-  const device = loadDevices().find(d => d.id === id);
+  const device = loadDevices().find(d => String(d.id) === String(id));
   if(!device?.photoUrl || !confirm('ลบรูปอุปกรณ์นี้หรือไม่?')) return;
   const marker = '/storage/v1/object/public/device-photos/';
   const objectPath = device.photoUrl.includes(marker) ? device.photoUrl.split(marker)[1] : '';
@@ -1001,8 +1179,10 @@ function advancePOStatus(poId, newStatus) {
   const pos = loadPurchaseOrders();
   const po = pos.find(p => p.id === poId);
   if (!po) return;
+  const prevStatus = po.status;
   po.status = newStatus;
   po.updatedAt = new Date().toISOString();
+  appendDeviceAuditLog(po, 'Status changed', { statusBefore: prevStatus, statusAfter: newStatus });
   storePurchaseOrders(pos);
   savePurchaseOrderAsync(po).catch(e => console.warn('PO advance failed', e));
   _poCache = null;
