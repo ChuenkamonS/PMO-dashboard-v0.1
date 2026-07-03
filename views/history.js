@@ -641,9 +641,11 @@ function openHistoryDetail(memoNo) {
   const isRejected  = _st === 'rejected';
   const isCancelled = _st === 'cancelled';
   const isDraft     = _st === 'draft';
+  const isVoided    = _st === 'voided'; // Milestone 1B
   const isOwn       = typeof isMemoRequester === 'function' ? isMemoRequester(memo) : false;
   const canApprove  = isPending && typeof canCurrentUserActOnMemo === 'function' && canCurrentUserActOnMemo(memo);
   const canCancel   = isPending && isOwn;
+  const isPMOUser   = typeof isPMO === 'function' && isPMO();
 
   acts.innerHTML = `
     ${canApprove ? `
@@ -659,25 +661,81 @@ function openHistoryDetail(memoNo) {
     ${isRejected ? `
       <button class="btn-sm" type="button" onclick="closeDetailModal();reeditRejectedMemo('${_no}')">✎ Re-edit as New Draft</button>
     ` : ''}
-    ${(isCompleted||isCancelled||isPending) && !isDraft ? `
+    ${(isCompleted||isCancelled||isPending||isVoided) && !isDraft ? `
       <button class="btn-sm" type="button" onclick="closeDetailModal();duplicateMemo('${_no}')">⊕ Duplicate</button>
     ` : ''}
     ${isDraft ? `
       <button class="btn-sm" type="button" style="color:var(--blue)" onclick="closeDetailModal();if(typeof editDraft==='function')editDraft('${_no}')">✎ Edit Draft</button>
       <button class="btn-sm" type="button" style="color:var(--red)"  onclick="closeDetailModal();if(typeof deleteDraft==='function')deleteDraft('${_no}')">✕ Delete Draft</button>
     ` : ''}
-    ${typeof isPMO === 'function' && isPMO() && isCompleted ? `
+    ${isPMOUser && isCompleted ? `
       <button class="btn-sm" type="button"
         onclick="openBudgetTagModal('${_no}')"
         style="background:${memo.budgetSource ? 'var(--green-50,#F0FDF4)' : 'var(--amber-50,#FFFBEB)'};color:${memo.budgetSource ? 'var(--green-800,#166534)' : 'var(--amber-800,#92400E)'}">
         ⚑ ${memo.budgetSource ? esc(memo.budgetSource) : 'Tag Budget'}
       </button>
     ` : ''}
+    ${isPMOUser && isCompleted ? `
+      <button class="btn-sm" type="button" style="color:var(--red)" onclick="closeDetailModal();openVoidModal('${_no}')">⊘ Void</button>
+    ` : ''}
     <button class="btn-ghost" type="button" onclick="closeDetailModal()">ปิด</button>
   `;
   const modalInner = document.querySelector('#detail-modal > div');
   if (modalInner) modalInner.style.maxWidth = '720px';
   document.getElementById('detail-modal').style.display = 'flex';
+}
+
+// ── Void (PMO/Admin only, Milestone 1B) ──
+function openVoidModal(memoNo) {
+  const memo = getHistoryMemos().find(m => m.memoNo === memoNo);
+  if (!memo) return;
+  const existing = document.getElementById('void-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'void-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:400;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML = `
+    <div class="card" style="width:480px;max-width:95vw;max-height:90vh;overflow-y:auto;padding:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <span style="font-size:15px;font-weight:700;color:var(--red)">⊘ Void Memo</span>
+        <button class="btn-sm" onclick="document.getElementById('void-modal').remove()" style="padding:4px 10px">✕</button>
+      </div>
+      <div style="font-size:12px;color:var(--text-2);margin-bottom:16px">
+        Memo: <strong>${esc(memo.memoNo)}</strong> · ${esc(memo.subject || memo.project || '-')}
+      </div>
+      <div class="fg" style="margin-bottom:12px">
+        <label style="font-size:11px;font-weight:600;color:var(--text-2)">เหตุผลที่ Void *</label>
+        <textarea id="void-reason" class="ri" rows="3" style="margin-top:4px" placeholder="ระบุเหตุผลที่ต้อง Void memo นี้"></textarea>
+      </div>
+      <div class="fg" style="margin-bottom:16px">
+        <label style="font-size:11px;font-weight:600;color:var(--text-2)">หลักฐานประกอบ (ถ้ามี)</label>
+        <input id="void-evidence-url" class="ri" style="margin-top:4px" placeholder="URL ของไฟล์หลักฐาน (ไม่บังคับ)">
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px">
+        <button class="btn-ghost" type="button" onclick="document.getElementById('void-modal').remove()">Cancel</button>
+        <button class="btn-sm" type="button" style="background:var(--red);color:#fff" onclick="confirmVoidMemo('${esc(memoNo)}')">⊘ Void Memo</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+}
+
+async function confirmVoidMemo(memoNo) {
+  const reason = document.getElementById('void-reason')?.value.trim();
+  const evidenceUrl = document.getElementById('void-evidence-url')?.value.trim() || '';
+  if (!reason) { alert('กรุณาระบุเหตุผลที่ Void'); return; }
+  const result = await voidMemoAsync(memoNo, reason, evidenceUrl);
+  if (!result.ok) {
+    if (result.error === 'downstream_blocked') { alert(result.message); return; }
+    if (result.error === 'forbidden') { alert('เฉพาะ PMO เท่านั้นที่สามารถ Void memo ได้'); return; }
+    if (result.error === 'invalid_status') { alert('Void ได้เฉพาะ memo ที่ Approved แล้วเท่านั้น'); return; }
+    alert('ไม่สามารถ Void memo ได้'); return;
+  }
+  document.getElementById('void-modal')?.remove();
+  if (typeof closeDetailModal === 'function') closeDetailModal();
+  renderHistoryMemos();
+  alert('✓ Void memo เสร็จสิ้น');
 }
 
 // ── Read-only detail (Budget / License / Device tabs) ──
@@ -856,11 +914,30 @@ function editDraft(memoNo) {
   swView('create', document.querySelector('.sb-sub-item[onclick*="create"]'), 'Create Memo');
   setTimeout(() => { if (typeof applyDraftEdit === 'function') applyDraftEdit(); }, 100);
 }
-function deleteDraft(memoNo) {
+// Milestone 1B — true soft delete: the draft is flagged, not removed. Once
+// flagged, loadMemos()/loadMemosAsync() (app.js) exclude it from every normal
+// view (Pending/History/Budget/License/Device/Dashboard) automatically.
+async function deleteDraft(memoNo) {
+  const memo = loadMemos().find(m => m.memoNo === memoNo);
+  if (!memo || memo.status !== 'draft') return; // only Draft is user-deletable
   if (!confirm(`ลบ Draft "${memoNo}" ออกจากระบบ?`)) return;
-  const memos = loadMemos().filter(m => m.memoNo !== memoNo);
+
+  const now = new Date().toISOString();
+  const user = currentUser();
+  const memos = loadMemos();
+  appendAuditLog(memos, memoNo, `Deleted Draft by ${user}`, '', {
+    statusBefore: 'draft',
+    statusAfter: 'draft',
+  });
   storeMemos(memos);
-  renderHistoryMemos();
+  const updatedAuditLog = memos.find(m => m.memoNo === memoNo)?.auditLog || [];
+
+  await updateMemoStatusAsync(memoNo, 'draft', {
+    deleted: true,
+    deletedAt: now,
+    deletedBy: user,
+    auditLog: updatedAuditLog,
+  });
 }
 
 function duplicateMemo(memoNo) {

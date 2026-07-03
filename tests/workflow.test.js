@@ -356,3 +356,207 @@ test('histStatusLabel and histStatusBadgeClass cover every known memo status unc
   // A falsy status defaults to Pending A1, matching memoStatusKey's fallback.
   assert.equal(context.memoStatusKey({}), 'pending');
 });
+
+// ══════════════════════════════════════════════════════════════════
+// Milestone 1B — Void (memo-side lifecycle)
+// ══════════════════════════════════════════════════════════════════
+
+test('PMO can void a completed memo: reason required, audit logged, excluded from Actual Spend', async () => {
+  const { context, userButton, userName } = createAppContext();
+  userButton.dataset.isPmo = 'true';
+  const completed = memo({ status: 'completed', approvedAt: '2026-06-30T00:00:00.000Z' });
+  vm.runInContext(`_memCache = [${JSON.stringify(completed)}]`, context);
+  context.syncMemoToActualSpend(completed);
+  assert.equal(context.loadActualSpendRecords().length, 1, 'sanity: Actual Spend exists before voiding');
+
+  const result = await context.voidMemoAsync(completed.memoNo, 'Wrong vendor selected');
+  assert.equal(result.ok, true);
+  assert.equal(result.memo.status, 'voided');
+  assert.equal(result.memo.voidedBy, userName.textContent);
+  assert.equal(result.memo.voidReason, 'Wrong vendor selected');
+  assert.equal(result.memo.voidEvidenceUrl, null, 'evidence is optional — null when omitted');
+  assert.ok(result.memo.voidedAt);
+  assert.equal(context.loadActualSpendRecords().length, 0, 'excluded from Budget & Spend Actual');
+
+  const auditEntry = result.memo.auditLog.at(-1);
+  assert.match(auditEntry.action, /^Voided by/);
+  assert.equal(auditEntry.statusBefore, 'completed');
+  assert.equal(auditEntry.statusAfter, 'voided');
+});
+
+test('Void stores evidence when provided (evidence remains optional otherwise)', async () => {
+  const { context, userButton } = createAppContext();
+  userButton.dataset.isPmo = 'true';
+  const completed = memo({ status: 'completed' });
+  vm.runInContext(`_memCache = [${JSON.stringify(completed)}]`, context);
+  const result = await context.voidMemoAsync(completed.memoNo, 'reason', 'https://example.com/evidence.pdf');
+  assert.equal(result.ok, true);
+  assert.equal(result.memo.voidEvidenceUrl, 'https://example.com/evidence.pdf');
+  assert.equal(result.memo.auditLog.at(-1).evidenceUrl, 'https://example.com/evidence.pdf');
+});
+
+test('Void requires a non-empty reason', async () => {
+  const { context, userButton } = createAppContext();
+  userButton.dataset.isPmo = 'true';
+  const completed = memo({ status: 'completed' });
+  vm.runInContext(`_memCache = [${JSON.stringify(completed)}]`, context);
+  const result = await context.voidMemoAsync(completed.memoNo, '   ');
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'reason_required');
+  assert.equal(context.loadMemos().find(m => m.memoNo === completed.memoNo).status, 'completed');
+});
+
+test('only PMO/Admin can void — a non-PMO user is rejected', async () => {
+  const { context, userButton } = createAppContext();
+  userButton.dataset.isPmo = 'false';
+  const completed = memo({ status: 'completed' });
+  vm.runInContext(`_memCache = [${JSON.stringify(completed)}]`, context);
+  const result = await context.voidMemoAsync(completed.memoNo, 'reason');
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'forbidden');
+});
+
+test('only an Approved/completed memo can be voided', async () => {
+  const { context, userButton } = createAppContext();
+  userButton.dataset.isPmo = 'true';
+  for (const status of ['draft', 'pending', 'pending_a2', 'rejected', 'cancelled']) {
+    const m = memo({ status, memoNo: `ORB-${status}` });
+    vm.runInContext(`_memCache = [${JSON.stringify(m)}]`, context);
+    const result = await context.voidMemoAsync(m.memoNo, 'reason');
+    assert.equal(result.ok, false, `status ${status} should not be voidable`);
+    assert.equal(result.error, 'invalid_status');
+  }
+});
+
+test('a voided memo remains visible via loadMemos (All Memo/History)', async () => {
+  const { context, userButton } = createAppContext();
+  userButton.dataset.isPmo = 'true';
+  const completed = memo({ status: 'completed' });
+  vm.runInContext(`_memCache = [${JSON.stringify(completed)}]`, context);
+  await context.voidMemoAsync(completed.memoNo, 'reason');
+  const visible = context.loadMemos().find(m => m.memoNo === completed.memoNo);
+  assert.ok(visible, 'voided memo must still be visible — only "deleted" is hidden, not "voided"');
+  assert.equal(visible.status, 'voided');
+});
+
+test('a voided memo can be duplicated into a clean new draft with void metadata cleared', () => {
+  const { context } = createAppContext();
+  const voided = memo({
+    status: 'voided', voidedAt: '2026-07-03T00:00:00.000Z', voidedBy: 'PMO Officer',
+    voidReason: 'wrong vendor', voidEvidenceUrl: 'https://example.com/e.pdf',
+  });
+  const draft = context.draftFromMemo(voided, voided.memoNo);
+  assert.equal(draft.status, 'draft');
+  assert.equal(draft.voidedAt, undefined);
+  assert.equal(draft.voidedBy, undefined);
+  assert.equal(draft.voidReason, undefined);
+  assert.equal(draft.voidEvidenceUrl, undefined);
+  assert.equal(draft.deleted, false);
+});
+
+test('History detail Duplicate action is available for Voided memos', () => {
+  const historyCode = fs.readFileSync(path.join(root, 'views/history.js'), 'utf8');
+  assert.match(historyCode, /\(isCompleted\|\|isCancelled\|\|isPending\|\|isVoided\) && !isDraft/);
+});
+
+test('History detail offers a PMO-only Void action for completed memos', () => {
+  const historyCode = fs.readFileSync(path.join(root, 'views/history.js'), 'utf8');
+  assert.match(historyCode, /isPMOUser && isCompleted[\s\S]{0,120}openVoidModal/);
+});
+
+// ── Device downstream guard ──
+test('Void is blocked when Device Registry downstream records already exist for the memo', async () => {
+  const { context, userButton } = createAppContext();
+  userButton.dataset.isPmo = 'true';
+  const completed = memo({ type: 'hw', status: 'completed', memoNo: 'HW-001' });
+  vm.runInContext(`_memCache = [${JSON.stringify(completed)}]`, context);
+  vm.runInContext(`function loadDevices() { return [{ id:'dev1', memoNo:'HW-001' }]; }`, context);
+  const result = await context.voidMemoAsync(completed.memoNo, 'reason');
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'downstream_blocked');
+  assert.equal(result.message, 'This memo has already created downstream records. Please resolve downstream records before voiding.');
+  assert.equal(context.loadMemos().find(m => m.memoNo === 'HW-001').status, 'completed', 'blocked void must not change status');
+});
+
+test('Void is allowed when a Purchase Order exists but no device has arrived yet', async () => {
+  const { context, userButton } = createAppContext();
+  userButton.dataset.isPmo = 'true';
+  const completed = memo({ type: 'hw', status: 'completed', memoNo: 'HW-002' });
+  vm.runInContext(`_memCache = [${JSON.stringify(completed)}]`, context);
+  vm.runInContext(`function loadDevices() { return []; }`, context); // PO exists, no device rows yet
+  const result = await context.voidMemoAsync(completed.memoNo, 'reason');
+  assert.equal(result.ok, true);
+  assert.equal(result.memo.status, 'voided');
+});
+
+// ── License exclusion (already-correct code, pinned against regression) ──
+test('memo-derived license parsing gates on completed status, so Voided memos are excluded automatically', () => {
+  const licenseCode = fs.readFileSync(path.join(root, 'views/license.js'), 'utf8');
+  assert.match(licenseCode, /memo\.type !== 'sl' \|\| memo\.status !== 'completed'/);
+  assert.match(licenseCode, /m\.type === 'sl' && m\.status === 'completed'/);
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Milestone 1B — Draft soft delete
+// ══════════════════════════════════════════════════════════════════
+
+test('soft-deleting a draft sets deleted metadata and keeps status as draft', async () => {
+  const { context, userName } = createAppContext();
+  const draft = memo({ status: 'draft', memoNo: 'DRAFT-001' });
+  vm.runInContext(`_memCache = [${JSON.stringify(draft)}]`, context);
+  const updated = await context.updateMemoStatusAsync(draft.memoNo, 'draft', {
+    deleted: true, deletedAt: '2026-07-03T00:00:00.000Z', deletedBy: userName.textContent,
+  });
+  assert.equal(updated.status, 'draft');
+  assert.equal(updated.deleted, true);
+  assert.equal(updated.deletedBy, userName.textContent);
+  assert.ok(updated.deletedAt);
+});
+
+test('a soft-deleted draft disappears from loadMemos() (all normal views) immediately', async () => {
+  const { context } = createAppContext();
+  const draft = memo({ status: 'draft', memoNo: 'DRAFT-002' });
+  vm.runInContext(`_memCache = [${JSON.stringify(draft)}]`, context);
+  await context.updateMemoStatusAsync(draft.memoNo, 'draft', { deleted: true, deletedAt: 'x', deletedBy: 'y' });
+  assert.equal(context.loadMemos().find(m => m.memoNo === draft.memoNo), undefined);
+});
+
+test('a soft-deleted draft stays hidden after a simulated reload (loadMemosAsync re-fetch)', async () => {
+  const { context } = createAppContext();
+  const draft = memo({ status: 'draft', memoNo: 'DRAFT-003', deleted: true, deletedAt: 'x', deletedBy: 'y' });
+  // Simulate what a fresh Supabase row would look like after dbToMemo mapping —
+  // deleted is already true, exactly as it would be after a real reload.
+  vm.runInContext(`_memCache = null`, context);
+  vm.runInContext(`_memMemos = [${JSON.stringify(draft)}]`, context);
+  const reloaded = await context.loadMemosAsync();
+  assert.equal(reloaded.find(m => m.memoNo === 'DRAFT-003'), undefined);
+});
+
+test('deleteDraft (views/history.js) performs a soft delete, not a hard removal', () => {
+  const historyCode = fs.readFileSync(path.join(root, 'views/history.js'), 'utf8');
+  assert.match(historyCode, /deleted:\s*true/);
+  assert.match(historyCode, /memo\.status !== 'draft'/, 'must guard: only Draft is user-deletable');
+  assert.doesNotMatch(historyCode, /loadMemos\(\)\.filter\(m => m\.memoNo !== memoNo\)/);
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Milestone 1B — Memo number reuse
+// ══════════════════════════════════════════════════════════════════
+
+test('memo number reuse blocks draft/pending/completed/voided but allows rejected/cancelled', () => {
+  const createCode = fs.readFileSync(path.join(root, 'views/create.js'), 'utf8');
+  assert.match(
+    createCode,
+    /MEMO_NO_BLOCKING_STATUSES = new Set\(\['draft', 'pending', 'pending_a2', 'pending_a3', 'completed', 'voided'\]\)/
+  );
+  assert.doesNotMatch(createCode, /MEMO_NO_BLOCKING_STATUSES[\s\S]{0,80}'rejected'/);
+  assert.doesNotMatch(createCode, /MEMO_NO_BLOCKING_STATUSES[\s\S]{0,80}'cancelled'/);
+});
+
+test('a soft-deleted Draft does not block memo number reuse (business rule correction)', () => {
+  const createCode = fs.readFileSync(path.join(root, 'views/create.js'), 'utf8');
+  // The uniqueness pre-check must fetch `deleted` and exclude deleted rows from blocking,
+  // even though `deleted:true` rows are still literally status 'draft'.
+  assert.match(createCode, /select=memo_no,status,deleted/);
+  assert.match(createCode, /conflict && !conflict\.deleted && MEMO_NO_BLOCKING_STATUSES\.has\(conflict\.status\)/);
+});

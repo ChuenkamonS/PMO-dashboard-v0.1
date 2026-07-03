@@ -735,6 +735,80 @@ Exit Criteria
 - Whichever is decided, implement it before or alongside the Milestone 1 Void feature (Task 1.5 in the
   roadmap), since that is the next milestone to introduce a new memo status value.
 
+Milestone 1B Update
+
+Void shipped in Milestone 1B without touching this pill, and that turned out to be safe: Pending's
+card view only ever renders memos whose status is `pending`/`pending_a2`/`pending_a3`
+(`isMemoVisibleInPending()`, app.js). A Voided memo can only exist once a memo has already left
+Pending (Approved → Voided), so it structurally never reaches this inline ternary. This entry remains
+open only for the pre-existing Draft/Approved/Rejected duplication risk described above, not as a
+Void-specific blocker.
+
+---
+
+# TD-M1-03
+
+Title
+
+Milestone 1B Deployment Prerequisite + Two Narrow Edge Cases Found During Implementation
+
+Status
+
+OPEN
+
+Priority
+
+Medium
+
+Introduced
+
+Milestone 1B (Void memo-side lifecycle, Draft soft delete)
+
+Owner Phase
+
+Core Lifecycle Foundation
+
+Current Situation
+
+1. **Migration not yet applied.** `supabase/migrations/20260703140000_memo_void_and_soft_delete.sql`
+   adds the eight new `memos` columns (`voided_at`, `voided_by`, `void_reason`, `void_evidence_url`,
+   `deleted`, `deleted_at`, `deleted_by`, `delete_reason`) that `voidMemoAsync()` and the soft-deleted
+   Draft path write via `updateMemoStatusAsync()`'s dynamic Supabase patch. This file has not been
+   applied to the live Supabase project (no live DB access available during this milestone, consistent
+   with TD-M1-01). Until it is applied, a Void or Draft-delete action's Supabase `PATCH` will fail for
+   the new columns; the existing catch-and-continue behavior in `updateMemoStatusAsync()` means the
+   action still succeeds locally (in-memory cache + localStorage) but silently does not persist the
+   new fields to Supabase, so they would not survive a real reload once Supabase is reachable again.
+2. **Local-cache-only edge case for soft delete.** `loadMemos()`/`loadMemosAsync()` (app.js) now filter
+   out `deleted: true` records so every view is covered by one change. Several existing functions
+   (`confirmReject`, `cancelMemo`, `confirmPmoOverride`, `confirmPmoEditApprovers`) follow a
+   `const memos = loadMemos(); ...; storeMemos(memos)` pattern — since `loadMemos()` now returns a
+   filtered copy, an unrelated action's `storeMemos()` call can overwrite the local
+   cache/`localStorage` backup without the just-soft-deleted draft in it. Supabase itself is
+   unaffected (it was already updated by the explicit `voidMemoAsync`/`updateMemoStatusAsync` `PATCH`
+   with a `memo_no` filter, not by `storeMemos`), and the next successful `loadMemosAsync()` refetch
+   restores the correct filtered view either way. The only exposure is the same one every other
+   feature in this app already accepts: local-only persistence in the narrow window where Supabase is
+   fully unreachable.
+3. ~~**Deleted Drafts still block memo-number reuse.**~~ **RESOLVED** (same-day correction,
+   2026-07-03): confirmed business rule is that a soft-deleted Draft is deleted from the user's
+   perspective and must not block reuse. `submitMemo()`'s uniqueness check (`views/create.js`) now
+   selects `deleted` alongside `memo_no`/`status` and excludes `deleted: true` rows from
+   `MEMO_NO_BLOCKING_STATUSES` blocking, regardless of the row's `status`.
+
+Risk
+
+Item 1 is the one that matters operationally: Void/Delete will appear to work in every environment
+this milestone was tested in (offline/local fallback), but won't durably persist to Supabase until the
+migration is run. Item 2 is a narrow, already-consistent-with-existing-behavior edge case, not a
+regression. Item 3 is resolved.
+
+Exit Criteria
+
+- Apply `20260703140000_memo_void_and_soft_delete.sql` to the live Supabase project, then confirm a
+  Void and a Draft soft-delete both survive a real `loadMemosAsync()` refetch (not just local cache).
+- ~~PMO/BA decision on deleted-Draft memo number reuse~~ — resolved, see item 3 above.
+
 ---
 
 # Before Release Checklist

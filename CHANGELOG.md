@@ -1,5 +1,110 @@
 # CHANGELOG
 
+## Milestone 1B correction — soft-deleted Drafts no longer block memo number reuse (2026-07-03)
+
+Business rule correction to Milestone 1B: a soft-deleted Draft is deleted from the user's
+perspective, so it must not block reuse of its memo number, even though its `status` is still
+literally `'draft'`. No other lifecycle behavior changed.
+
+### Changed
+- `submitMemo()`'s uniqueness pre-check (`views/create.js`) now fetches `deleted` alongside
+  `memo_no`/`status` and excludes any row with `deleted: true` from `MEMO_NO_BLOCKING_STATUSES`
+  blocking — a soft-deleted Draft's memo number is now reusable, same as Rejected/Cancelled.
+
+### Tests
+- `tests/workflow.test.js`: added a test confirming the uniqueness check selects `deleted` and
+  excludes deleted rows from blocking. Full suite: **291/291 passing** (was 290).
+
+### Technical debt
+- `docs/TECHNICAL_DEBT.md` TD-M1-03 item 3 ("Deleted Drafts still block memo-number reuse") is
+  resolved by this change.
+
+## Milestone 1B — Memo-side Void lifecycle + Draft soft delete (2026-07-03)
+
+Source: `docs/IMPLEMENTATION_ROADMAP.md` Milestone 1, continuing from Milestone 1A. Scope locked by
+the business decisions in this session: Void (reason required, evidence optional), Draft soft delete,
+memo-number reuse allowed only for Rejected/Cancelled, and no blind baseline-schema migration.
+Currency, Timezone, cross-module Created/Updated metadata, License Review Queue, Software Master,
+Device Type Master, Approved-PDF proof-of-approval, and soft delete for devices/licenses/budget pools
+are explicitly out of scope and untouched.
+
+### Void (memo-side lifecycle)
+- New `voidMemoAsync(memoNo, reason, evidenceUrl)` (`app.js`): PMO/Admin-only, only from `completed`,
+  reason required, evidence optional. Blocked with the exact MEMO_LIFECYCLE.md §12 warning text when
+  a Device Registry record already exists for the memo (`memoHasIrreversibleDownstreamRecords()` —
+  checks `loadDevices()` for any row whose `memoNo` matches; a Purchase Order alone does not block,
+  matching the doc's allowed/not-allowed examples). Writes an audit log entry via the shared
+  `appendAuditLog()` helper, then transitions status to the new `'voided'` literal, storing
+  `voidedAt`/`voidedBy`/`voidReason`/`voidEvidenceUrl`.
+- `updateMemoStatusAsync()`'s terminal-state guard now explicitly allows `completed → voided` as its
+  own guarded transition (`isVoiding`), separate from the PMO Override bypass — Void does not trigger
+  Milestone 1A's override-specific approver-marking logic, since Void doesn't touch approver steps.
+- `syncMemoToActualSpend()` (unchanged code) already treats any non-`completed` status as
+  "remove the Actual Spend record" — Voided is automatically excluded from Budget & Spend Actual
+  totals with zero new code.
+- `parseLicenseFromMemo()`/`getAllLicenses()` (`views/license.js`, unchanged code) already gate on
+  `status === 'completed'` — memo-derived license rows from a Voided memo are automatically excluded,
+  with zero new code. Regression-pinned with a test so this can't silently drift.
+- `views/history.js`: `openHistoryDetail()` now shows a PMO-only "⊘ Void" action for `completed`
+  memos (opens a new lightweight `openVoidModal()`/`confirmVoidMemo()` pair — reason textarea
+  required, evidence URL input optional, no approver editing). The existing Duplicate action now also
+  covers Voided memos. A Voided memo remains visible in All Memo/History (only the `deleted` flag,
+  not `voided` status, is filtered from views).
+- `histStatusLabel`/`histStatusBadgeClass` (`app.js`) gained a `voided` entry (`'Voided'` /
+  `badge-gray`). The existing `completed` ⇄ Approved internal mapping is unchanged.
+- `draftFromMemo()` (`app.js`) now clears `voidedAt`/`voidedBy`/`voidReason`/`voidEvidenceUrl` (and
+  `deleted`/`deletedAt`/`deletedBy`/`deleteReason`) so a duplicated memo never inherits its source's
+  Void or soft-delete metadata.
+
+### Draft soft delete
+- `deleteDraft()` (`views/history.js`) no longer filters the local array. It now writes an audit log
+  entry (`Deleted Draft by <user>`) and calls `updateMemoStatusAsync(memoNo, 'draft', {deleted:true,
+  deletedAt, deletedBy})` — status stays `'draft'` (deletion is a flag, not a status transition, per
+  SYSTEM_OVERVIEW.md §6), reusing the existing Supabase-sync/cache-update pipeline instead of a
+  parallel implementation. Guarded to only ever act on `status === 'draft'`.
+- `loadMemos()`/`loadMemosAsync()` (`app.js`) now filter out `deleted: true` records at the single
+  shared read path — this covers Pending/History/Budget/License/Device/Dashboard at once, no
+  per-view changes needed. No recycle bin; a soft-deleted Draft is retained in Supabase/localStorage
+  with its deleted metadata but excluded from every normal read.
+
+### Memo number reuse
+- `submitMemo()`'s uniqueness pre-check (`views/create.js`) now blocks on an explicit
+  `MEMO_NO_BLOCKING_STATUSES` set (`draft`, `pending`, `pending_a2`, `pending_a3`, `completed`,
+  `voided`) instead of the old `status !== 'rejected'` check — Cancelled now also allows reuse (it
+  didn't before), matching the locked decision. No new warning/confirmation dialog was added for the
+  Rejected/Cancelled reuse case, per the explicit instruction not to add one.
+
+### Schema
+- New migration `supabase/migrations/20260703140000_memo_void_and_soft_delete.sql`: additive
+  `alter table public.memos add column if not exists ...` for the eight new fields above. Per the
+  locked decision, no blind baseline-schema migration was attempted (see `docs/TECHNICAL_DEBT.md`
+  TD-M1-01, still open, unchanged this milestone).
+
+### Tests
+- `tests/workflow.test.js`: added 17 new tests covering Void (success with/without evidence, reason
+  required, PMO-only, invalid-status rejection for every non-completed status, remains visible after
+  voiding, duplicable with cleared metadata, excluded from Actual Spend, audit log shape), the Device
+  downstream guard (blocked when a device row exists, allowed when only a PO exists), a pinning test
+  confirming License exclusion still works via unchanged `status==='completed'` gates, Draft soft
+  delete (metadata stored, disappears from `loadMemos()`, stays hidden after a simulated
+  `loadMemosAsync()` refetch), and the memo-number reuse blocking-set contents. Several of the
+  History/create.js-side checks are static source-regex assertions (matching this test suite's
+  existing convention for DOM-heavy view code) rather than full DOM-driven runs.
+- Full suite: `node --test tests/*.test.js` — **290/290 passing** (was 273; net +17 new tests).
+- `node --check` on `app.js`, `views/history.js`, `views/create.js`, `tests/workflow.test.js` — all
+  clean.
+- Manual verification (real browser, static server, real seeded data): voided an Approved SL memo
+  end-to-end (`voidMemoAsync` called directly and via the UI modal) — confirmed `status`→`voided`,
+  audit log entry recorded, still visible in All Memo with a "Voided" gray badge, excluded from
+  `loadActualSpendRecords()` and `getAllLicenses()`. Soft-deleted a real Draft — confirmed it
+  disappears from `loadMemos()` immediately. No console errors in either flow.
+
+### Not changed (explicitly out of scope for Milestone 1B)
+- Currency, Timezone, cross-module Created/Updated metadata, License Review Queue, Software Master,
+  Device Type Master, Approved-PDF proof-of-approval, and soft delete for devices/licenses/budget
+  pools — all remain TODO for later Milestone 1 sub-phases or later milestones per
+  `docs/IMPLEMENTATION_ROADMAP.md`.
+
 ## Milestone 1A — Core Lifecycle Foundation: schema review, shared audit helper, approval-step literals, status vocabulary consolidation (2026-07-03)
 
 Source: `docs/IMPLEMENTATION_ROADMAP.md` Milestone 1, Tasks 1.1–1.4. Scope explicitly excludes Void,

@@ -1129,7 +1129,8 @@ function histStatusLabel(memo) {
   const map = {
     completed: 'Completed', rejected: 'Rejected', pending: 'Pending A1',
     pending_a2: 'Pending A2', pending_a3: 'Pending A3',
-    draft: 'Draft', cancelled: 'Cancelled', expired: 'Expired'
+    draft: 'Draft', cancelled: 'Cancelled', expired: 'Expired',
+    voided: 'Voided', // Milestone 1B
   };
   return map[key] || key;
 }
@@ -1138,7 +1139,8 @@ function histStatusBadgeClass(memo) {
   const map = {
     completed: 'badge-green', rejected: 'badge-red', pending: 'badge-amber',
     pending_a2: 'badge-amber', pending_a3: 'badge-amber',
-    draft: 'badge-gray', cancelled: 'badge-gray', expired: 'badge-red'
+    draft: 'badge-gray', cancelled: 'badge-gray', expired: 'badge-red',
+    voided: 'badge-gray', // Milestone 1B — distinct from Approved, matches Cancelled/Draft's neutral tone
   };
   return map[key] || 'badge-gray';
 }
@@ -1231,6 +1233,10 @@ function draftFromMemo(memo, sourceMemoNo = memo?.memoNo) {
     approvalNote: undefined,
     rejectionReason: undefined,
     cancellationReason: undefined,
+    // Milestone 1B — a duplicated memo must not inherit its source's Void or
+    // soft-delete metadata.
+    voidedAt: undefined, voidedBy: undefined, voidReason: undefined, voidEvidenceUrl: undefined,
+    deleted: false, deletedAt: undefined, deletedBy: undefined, deleteReason: undefined,
     currentApproverProfileId: null,
     auditLog: [],
     approvers: (memo?.approvers || []).map(a => ({
@@ -1295,6 +1301,12 @@ function memoToDb(m) {
     submitted_at: m.submittedAt || null,
     approved_at: m.approvedAt || null, rejected_at: m.rejectedAt || null,
     cancelled_at: m.cancelledAt || null,
+    // Milestone 1B — Void (memo-side)
+    voided_at: m.voidedAt || null, voided_by: m.voidedBy || null,
+    void_reason: m.voidReason || null, void_evidence_url: m.voidEvidenceUrl || null,
+    // Milestone 1B — Draft soft delete
+    deleted: m.deleted || false, deleted_at: m.deletedAt || null,
+    deleted_by: m.deletedBy || null, delete_reason: m.deleteReason || null,
     created_at: m.createdAt || new Date().toISOString(),
     updated_at: m.updatedAt || new Date().toISOString(),
   };
@@ -1335,6 +1347,12 @@ function dbToMemo(r) {
     approvalEvidenceUrl: r.approval_evidence_url || null,   // available after ALTER TABLE
     submittedAt: r.submitted_at, approvedAt: r.approved_at, rejectedAt: r.rejected_at,
     cancelledAt: r.cancelled_at || null,
+    // Milestone 1B — Void (memo-side), available after ALTER TABLE
+    voidedAt: r.voided_at || null, voidedBy: r.voided_by || null,
+    voidReason: r.void_reason || null, voidEvidenceUrl: r.void_evidence_url || null,
+    // Milestone 1B — Draft soft delete, available after ALTER TABLE
+    deleted: r.deleted || false, deletedAt: r.deleted_at || null,
+    deletedBy: r.deleted_by || null, deleteReason: r.delete_reason || null,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
@@ -1356,19 +1374,26 @@ async function checkSupa() {
   return _supaAvailable;
 }
 
+// Milestone 1B — a soft-deleted Draft must disappear from every normal view.
+// Filtering here (the single shared read path) covers Pending/History/Budget/
+// License/Device/Dashboard at once instead of touching each view.
+function _excludeDeletedMemos(memos) {
+  return (memos || []).filter(m => !m.deleted);
+}
+
 async function loadMemosAsync() {
   if(await checkSupa()) {
     try {
       const rows = await supaFetch('memos', 'GET', null, '?order=created_at.desc&limit=500');
       _memCache = (rows||[]).map(dbToMemo);
-      return _memCache;
+      return _excludeDeletedMemos(_memCache);
     } catch(e) {
       console.warn('Supabase read failed, using cache');
-      if (_memCache) return _memCache;
+      if (_memCache) return _excludeDeletedMemos(_memCache);
     }
   }
   // Offline fallback: localStorage
-  try { const p = JSON.parse(localStorage.getItem(MEMO_KEY)||'[]'); return Array.isArray(p)?p:[]; }
+  try { const p = JSON.parse(localStorage.getItem(MEMO_KEY)||'[]'); return _excludeDeletedMemos(Array.isArray(p)?p:[]); }
   catch(e) { return []; }
 }
 
@@ -1429,10 +1454,13 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   if (!memo) return null;
 
   // ── Terminal state guard ──
-  // completed and rejected memos cannot be changed except by PMO override
+  // completed and rejected memos cannot be changed except by PMO override or Void
+  // (Milestone 1B: Void is its own guarded transition, not a PMO Override — it
+  // must not trigger the override-specific approver-marking logic below).
   const isPmoOverride = extra.pmoOverrideNote || extra.pmoOverrideBy;
+  const isVoiding      = memo.status === 'completed' && status === 'voided';
   const isTerminal    = memo.status === 'completed' || memo.status === 'rejected' || memo.status === 'cancelled';
-  if (isTerminal && !isPmoOverride) return memo;
+  if (isTerminal && !isPmoOverride && !isVoiding) return memo;
 
   // ── Approver order enforcement ──
   // Prevent A2 from approving if A1 hasn't approved yet
@@ -1587,6 +1615,59 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
   return updated;
 }
 
+// ══════════════════════════════════════════════════════════════════
+// Milestone 1B — Void (memo-side lifecycle only)
+// ══════════════════════════════════════════════════════════════════
+const VOID_DOWNSTREAM_WARNING = 'This memo has already created downstream records. Please resolve downstream records before voiding.';
+
+// Safest available guard given the current data model: a Device Registry
+// record is created once devices have "arrived" for a Hardware memo (see
+// views/device.js's markArrived-style flow, which stamps memoNo onto each
+// device row). A Purchase Order alone (no arrived devices yet) does not
+// block — matching the allowed/not-allowed examples in MEMO_LIFECYCLE.md §12.
+// Limitation: this only detects the one downstream record type named in the
+// requirement (Device Registry); see docs/TECHNICAL_DEBT.md for scope notes.
+function memoHasIrreversibleDownstreamRecords(memo) {
+  const devices = typeof loadDevices === 'function' ? loadDevices() : [];
+  return devices.some(d => d.memoNo === memo.memoNo);
+}
+
+async function voidMemoAsync(memoNo, reason, evidenceUrl = '') {
+  let memo = loadMemos().find(m => m.memoNo === memoNo);
+  if (!memo) {
+    const fresh = await loadMemosAsync();
+    memo = fresh.find(m => m.memoNo === memoNo);
+  }
+  if (!memo) return { ok: false, error: 'not_found' };
+  if (typeof isPMO !== 'function' || !isPMO()) return { ok: false, error: 'forbidden' };
+  if (memo.status !== 'completed') return { ok: false, error: 'invalid_status' };
+  if (!reason || !reason.trim()) return { ok: false, error: 'reason_required' };
+  if (memoHasIrreversibleDownstreamRecords(memo)) {
+    return { ok: false, error: 'downstream_blocked', message: VOID_DOWNSTREAM_WARNING };
+  }
+
+  const now = new Date().toISOString();
+  const user = currentUser();
+  const trimmedReason = reason.trim();
+  const memos = loadMemos();
+  appendAuditLog(memos, memoNo, `Voided by ${user}`, trimmedReason, {
+    statusBefore: memo.status,
+    statusAfter: 'voided',
+    evidenceUrl: evidenceUrl || null,
+  });
+  storeMemos(memos);
+  const updatedAuditLog = memos.find(m => m.memoNo === memoNo)?.auditLog || [];
+
+  const updated = await updateMemoStatusAsync(memoNo, 'voided', {
+    voidedAt: now,
+    voidedBy: user,
+    voidReason: trimmedReason,
+    voidEvidenceUrl: evidenceUrl || null,
+    auditLog: updatedAuditLog,
+  });
+  return { ok: true, memo: updated };
+}
+
 // ── Sync: push all localStorage memos to Supabase ──
 async function syncLocalToSupabase() {
   if(!(await checkSupa())) return { ok:false, msg:'Supabase unavailable' };
@@ -1663,11 +1744,11 @@ const HAS_LS = canUseLocalStorage();
 function loadMemos() {
   // Prefer in-memory cache (populated from Supabase by loadMemosAsync on app init)
   // An empty array is a valid, authoritative result from Supabase.
-  if (_memCache !== null) return _memCache;
+  if (_memCache !== null) return _excludeDeletedMemos(_memCache);
   // Offline fallback: localStorage
-  if (!HAS_LS) return _memMemos;
-  try { const p = JSON.parse(localStorage.getItem(MEMO_KEY)||'[]'); return Array.isArray(p)?p:[]; }
-  catch(e) { return _memMemos; }
+  if (!HAS_LS) return _excludeDeletedMemos(_memMemos);
+  try { const p = JSON.parse(localStorage.getItem(MEMO_KEY)||'[]'); return _excludeDeletedMemos(Array.isArray(p)?p:[]); }
+  catch(e) { return _excludeDeletedMemos(_memMemos); }
 }
 
 function storeMemos(memos) {
