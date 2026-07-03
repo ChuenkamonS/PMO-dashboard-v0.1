@@ -1060,6 +1060,63 @@ Exit Criteria
 
 ---
 
+# TD-M3A-01
+
+Title
+
+License User Manual Override Edits Have No Audit Trail
+
+Status
+
+OPEN
+
+Priority
+
+Low
+
+Introduced
+
+Milestone 3A — License Logic (PMO Review Queue)
+
+Owner Phase
+
+License Logic
+
+Current Situation
+
+Milestone 3A added audit logging for the new PMO Review Queue's Approve/Reject actions
+(`_setLicReviewStatus()`, `views/license.js`), written into the review-status record itself
+(`orbit-lic-user-review-status-v1`, mirrored to Supabase `settings` id=`lic-user-review-status`).
+
+The separate, pre-existing manual override editor (`_saveLicUserEditor()`, "Edit licenses" on a row
+in License Management > User) still writes silently to `_LIC_USR_OV_KEY`
+(`orbit-lic-user-overrides-v1`) with no audit entry, same as before this milestone.
+
+Reason Deferred
+
+The overrides store's shape is a flat map (`{ "email|project|license": true|false }`) with no
+per-entry metadata slot. Adding audit tracking would require either restructuring that shape (every
+existing `overrides[ovKey]` read site in `views/license.js` would need updating) or bolting on a
+parallel audit-only store keyed loosely to the same edits — neither is a small, low-risk change, so
+it was scoped out of this milestone per explicit instruction ("if not low-risk, leave it deferred and
+document").
+
+Risk
+
+Manual per-user license corrections made outside the Review Queue remain untraceable — who toggled a
+given user's license flag and when. Business impact is low: this only affects manual corrections
+layered on top of already-approved (or grandfathered) memo data, not the approval gate itself.
+
+Exit Criteria
+
+- Decide on a per-entry override shape (e.g. `{ovKey: {value, actor, timestamp}}`) that preserves
+  backward compatibility with `_getLicUserOverrides()`'s existing flat-boolean read sites, or a
+  parallel audit-log store keyed by the same `ovKey`.
+- Add an audit entry on every override save, mirroring the Review Queue's audit shape
+  (action/actor/timestamp/previous/new).
+
+---
+
 # Before Release Checklist
 
 Review every OPEN Technical Debt.

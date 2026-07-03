@@ -1,5 +1,83 @@
 # CHANGELOG
 
+## Milestone 3A — License Logic: PMO Review Queue for account lists (2026-07-03)
+
+Source: `docs/IMPLEMENTATION_ROADMAP.md` Milestone 3A, following the locked business decisions
+(memo-level queue granularity, grandfather cutoff, reject excludes but doesn't block manual
+override). Scope: License Review Queue, memo-level approve/reject, User Mapping gate, audit
+logging for review actions, and regression tests — nothing else. Manual License CRUD soft
+delete/audit timeline, License materialization, Software Master, FX/currency changes, and the
+Settings page are explicitly out of scope and untouched, per instruction. License Index and
+License Summary tabs are unchanged.
+
+### License Review Queue (`views/license.js`)
+- An approved SL memo's account list ("ตาราง Account") is now gated before it reaches the live
+  User Mapping table (`License Management > Users`), closing audit finding G-10. Gate is
+  **memo-level**: a memo's whole account list is approved or rejected as one set, not per row.
+- New review-state store, `_LIC_REVIEW_KEY` (`orbit-lic-user-review-status-v1`), following the
+  exact same generic-`settings`-table pattern already used for `_LIC_USR_OV_KEY`/`_LIC_SETTINGS_KEY`
+  — no new Supabase table. Shape: `{ [memoNo]: { status, reviewedBy, reviewedAt, reason, auditLog } }`.
+- **Grandfather rule**: `licReviewDefaultStatus(memo)` compares the memo's `approvedAt` (falling
+  back to `updatedAt`/`createdAt`) against a fixed rollout cutoff, `LIC_REVIEW_ROLLOUT_AT =
+  '2026-07-03T00:00:00.000Z'`. Any memo approved before that instant — i.e. every real memo that
+  existed prior to this feature — defaults to `approved` with no review record needed, so PMO
+  never loses visibility into user-license data already live. Only memos approved at/after that
+  instant default to `pending` when no explicit review record exists.
+- New pure function `computeLicUserMappingData(memos, reviewState, parseAcctFn)` (no DOM access,
+  directly unit-testable) replaces the un-gated loop inside `_renderLicUsers()`: `pending` memos'
+  rows go to a queue list instead of the mapping table; `rejected` memos' rows are simply omitted
+  from both.
+- New Review Queue UI block (`_renderLicReviewQueueHtml()`) rendered above the existing Users
+  table — memo no., project, account count, software count, and **View Memo / Approve / Reject**
+  actions. Uses the existing card/table/button styles already in `views/license.js`; no new
+  components, no layout change elsewhere. Renders nothing when the queue is empty.
+- **View Memo** reuses the existing `openMemoReadOnly()` (`views/history.js`) via the same guarded
+  `typeof openMemoReadOnly==='function'` call already used elsewhere in this file for the Memo No.
+  link on the License Index tab — no new memo viewer was built.
+- **Reject** behavior: rejected rows are excluded from User Mapping, but the pre-existing manual
+  override editor (`_openLicUserEditor`/`_saveLicUserEditor`, "Edit licenses") and its store
+  (`_LIC_USR_OV_KEY`) are completely untouched by review status — PMO can still manually assign a
+  user via the existing mechanism for any row that is otherwise visible.
+- **Audit**: every Approve/Reject writes a structured entry
+  (`action, actor, timestamp, previousStatus, newStatus, memoNo, reason`) into the review-status
+  record itself, not into the memo's own `auditLog`. Deliberate choice: License review
+  approve/reject on a completed memo is not one of the actions MEMO_LIFECYCLE §4 lists as allowed
+  on an Approved memo (unlike Budget Tag, which explicitly is and already uses the shared
+  `appendAuditLog()` on the memo) — keeping the audit trail inside the review-status record avoids
+  writing to an otherwise-immutable Approved memo. Reject requires a reason (`prompt()`, matching
+  the existing minimal-UI pattern already used for `deleteLicense()`'s `confirm()`); Approve does
+  not.
+- `renderLicense()` now also loads review state (`_loadLicReviewStateAsync()`) in its startup
+  `Promise.all`, alongside the existing manual-license/settings/overrides loads.
+- License Index and License Summary tabs, `getAllLicenses()`, `parseLicenseFromMemo()`, and Void's
+  existing exclusion behavior (gates on `status==='completed'`) are all unchanged — Voided memos
+  remain excluded from both the queue and User Mapping with zero new code, same as before.
+
+### Tests
+- New `tests/license.test.js` (15 tests): grandfather default for pre-cutoff memos, pending queue
+  entry for post-cutoff memos, pending/rejected exclusion from User Mapping, approve moves a row
+  into User Mapping, reject leaves User Mapping unaffected without disabling the manual override
+  store, View Memo's guarded `openMemoReadOnly()` call (and a static check that no new memo viewer
+  function was added), empty-queue rendering, audit entry shape and reason capture for
+  approve/reject, cancelling the reject prompt leaves status unchanged, Voided memo exclusion,
+  explicit review record always overriding the default, memos with no account list never entering
+  the queue, and review-state localStorage round-trip.
+- Full suite: `node --test tests/*.test.js` — **359/359 passing** (was 344, net +15). `node --check`
+  clean on `app.js`, `views/license.js`, and `tests/license.test.js`.
+- Manually verified in-browser (static server, live Supabase data): existing production account-list
+  data (pre-cutoff) renders in User Mapping exactly as before, with no Review Queue shown. Injected
+  a synthetic post-cutoff SL memo with an account-table section directly into the local memo cache
+  (never written to Supabase) — confirmed it appeared in the Review Queue (not User Mapping), and
+  that clicking Approve moved its user into the User Mapping table live with no page reload and no
+  console errors. Cleaned up the injected local-only test data afterward.
+
+### Technical debt
+- New `docs/TECHNICAL_DEBT.md` TD-M3A-01 (OPEN): the pre-existing manual override editor
+  (`_saveLicUserEditor()`) still has no audit trail — deferred because its store's flat-boolean
+  shape would need restructuring to add audit metadata without touching every existing read site,
+  which is not a small, low-risk change. Review Queue's own audit logging (in scope for this
+  milestone) is unaffected.
+
 ## Milestone 2 follow-up — Currency revert, Budget Pool loading fix, Manual Entry audit timeline (2026-07-03)
 
 Three confirmed follow-up fixes before Milestone 3, per explicit instruction: revert currency to

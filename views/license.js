@@ -254,6 +254,7 @@ function renderLicense() {
       if (d.fxRate) try { localStorage.setItem('orbit-lic-fx-rate', String(d.fxRate)); } catch(e) {}
     }).catch(() => {}),
     _loadLicUserOverridesAsync().catch(() => {}),
+    _loadLicReviewStateAsync().catch(() => {}),
   ])
     .then(() => _renderLicTab(_licCurrentTab))
     .catch(() => _renderLicTab(_licCurrentTab));
@@ -590,32 +591,172 @@ function _bpRenderMatrix() {
   </div>`;
 }
 
+// ── TAB 3: USERS — PMO Review Queue (Milestone 3A) ────────
+// Memo-level gate: an approved SL memo's account list ("ตาราง Account") must be
+// PMO-approved before its rows reach the live User Mapping table. Review state is
+// keyed by memoNo and stored via the same generic `settings` table pattern already
+// used for _LIC_USR_OV_KEY / _LIC_SETTINGS_KEY — no new Supabase table.
+const _LIC_REVIEW_KEY = 'orbit-lic-user-review-status-v1';
+
+// Grandfather cutoff — memos approved before this instant (i.e. every real memo
+// that existed prior to this feature shipping) are treated as already approved,
+// per the locked business decision, so PMO never loses visibility into user-license
+// data that was already live. Only memos approved at/after this instant default to
+// 'pending' when no explicit review record exists yet.
+const LIC_REVIEW_ROLLOUT_AT = '2026-07-03T00:00:00.000Z';
+
+function licReviewDefaultStatus(memo) {
+  const approvedAt = memo.approvedAt || memo.updatedAt || memo.createdAt;
+  return (approvedAt && String(approvedAt) < LIC_REVIEW_ROLLOUT_AT) ? 'approved' : 'pending';
+}
+
+function licReviewStatusForMemo(memo, reviewState) {
+  const rec = reviewState && reviewState[memo.memoNo];
+  if (rec && rec.status) return rec.status;
+  return licReviewDefaultStatus(memo);
+}
+
+async function _loadLicReviewStateAsync() {
+  if (await checkSupa()) {
+    try {
+      const rows = await supaFetch('settings', 'GET', null, '?id=eq.lic-user-review-status');
+      if (rows && rows[0]?.data) {
+        const d = rows[0].data;
+        try { localStorage.setItem(_LIC_REVIEW_KEY, JSON.stringify(d)); } catch(e) {}
+        return d;
+      }
+    } catch(e) { console.warn('_loadLicReviewStateAsync failed', e.message); }
+  }
+  return _getLicReviewState();
+}
+async function _saveLicReviewStateAsync(data) {
+  try { localStorage.setItem(_LIC_REVIEW_KEY, JSON.stringify(data)); } catch(e) {}
+  if (await checkSupa()) {
+    try {
+      await supaFetch('settings', 'POST', { id: 'lic-user-review-status', data }, '?on_conflict=id');
+    } catch(e) { console.warn('_saveLicReviewStateAsync failed', e.message); }
+  }
+}
+function _getLicReviewState() {
+  try { return JSON.parse(localStorage.getItem(_LIC_REVIEW_KEY) || '{}'); } catch(e) { return {}; }
+}
+function _saveLicReviewState(data) {
+  try { localStorage.setItem(_LIC_REVIEW_KEY, JSON.stringify(data)); } catch(e) {}
+  _saveLicReviewStateAsync(data).catch(e => console.warn('License review status sync failed', e));
+}
+
+// Pure computation, no DOM access — takes memos + review state (and an optional
+// injected account-table parser, for testing without DOMParser) and returns which
+// account-list rows are visible in User Mapping vs. sitting in the Review Queue.
+// Rejected memos' rows are simply omitted (per locked decision #4): PMO can still
+// add the same users via the existing manual override editor below.
+function computeLicUserMappingData(memos, reviewState, parseAcctFn) {
+  parseAcctFn = parseAcctFn || parseAccountTableFromMemo;
+  reviewState = reviewState || {};
+  const allUserRows = [];
+  const allLicColsSet = new Set();
+  const queueItems = [];
+
+  memos
+    .filter(m => m.type === 'sl' && m.status === 'completed')
+    .forEach(memo => {
+      const acct = parseAcctFn(memo);
+      if (!acct || !acct.rows.length) return;
+      const status = licReviewStatusForMemo(memo, reviewState);
+      if (status === 'pending') { queueItems.push({ memo, acct }); return; }
+      if (status === 'rejected') return;
+      acct.cols.forEach(c => allLicColsSet.add(c));
+      acct.rows.forEach(r => allUserRows.push({
+        email: r.email,
+        project: memo.project || '',
+        memoNo: memo.memoNo,
+        licenses: r.licenses,
+      }));
+    });
+
+  return { allUserRows, allLicCols: [...allLicColsSet].sort(), queueItems };
+}
+
+function _renderLicReviewQueueHtml(queueItems) {
+  if (!queueItems || !queueItems.length) return '';
+  const rows = queueItems.map(({ memo, acct }) => `<tr>
+      <td style="padding-left:14px;font-weight:600;color:var(--blue);cursor:pointer" onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly('${esc(memo.memoNo)}')">${esc(memo.memoNo)}</td>
+      <td style="font-size:12px">${esc(memo.project || '—')}</td>
+      <td style="text-align:center">${acct.rows.length}</td>
+      <td style="text-align:center">${acct.cols.length}</td>
+      <td style="text-align:center;white-space:nowrap">
+        <button class="btn-sm" onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly('${esc(memo.memoNo)}')">View Memo</button>
+        <button class="btn-sm" style="color:var(--green,#27500A)" onclick="_approveLicReview('${esc(memo.memoNo)}')">✓ Approve</button>
+        <button class="btn-sm" style="color:var(--red)" onclick="_rejectLicReview('${esc(memo.memoNo)}')">✕ Reject</button>
+      </td>
+    </tr>`).join('');
+  return `
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:14px;border:1px solid var(--amber,#C9821A)">
+      <div style="padding:10px 14px;font-size:12px;font-weight:600;background:var(--bg-2,#F8F8F6);border-bottom:1px solid var(--border)">
+        ⏳ PMO Review Queue — บัญชี Software รอตรวจสอบ (${queueItems.length})
+      </div>
+      <div class="card" style="padding:0;overflow:hidden;overflow-x:auto;box-shadow:none;border:none;border-radius:0">
+        <table class="hist-table">
+          <thead><tr>
+            <th style="padding-left:14px">Memo No</th>
+            <th>โครงการ</th>
+            <th style="text-align:center">Account</th>
+            <th style="text-align:center">Software</th>
+            <th style="text-align:center">Actions</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function _setLicReviewStatus(memoNo, newStatus, reason) {
+  const memo = loadMemos().find(m => m.memoNo === memoNo) || { memoNo };
+  const state = _getLicReviewState();
+  const prevStatus = licReviewStatusForMemo(memo, state);
+  const actor = typeof currentUser === 'function' ? currentUser() : '';
+  const now = new Date().toISOString();
+  const auditEntry = {
+    action: newStatus === 'approved' ? 'License review approved' : 'License review rejected',
+    actor, timestamp: now,
+    previousStatus: prevStatus, newStatus,
+    memoNo, reason: reason || '',
+  };
+  state[memoNo] = {
+    status: newStatus,
+    reviewedBy: actor,
+    reviewedAt: now,
+    reason: reason || '',
+    auditLog: [...(state[memoNo]?.auditLog || []), auditEntry],
+  };
+  _saveLicReviewState(state);
+  _renderLicUsers();
+}
+
+function _approveLicReview(memoNo) {
+  _setLicReviewStatus(memoNo, 'approved', '');
+}
+
+function _rejectLicReview(memoNo) {
+  const reason = prompt('เหตุผลที่ปฏิเสธรายการนี้ (Reject reason):');
+  if (reason === null) return; // cancelled
+  _setLicReviewStatus(memoNo, 'rejected', (reason || '').trim());
+}
+
 // ── TAB 3: USERS ─────────────────────────────────────────
 function _renderLicUsers() {
-  const memos = loadMemos().filter(m => m.type === 'sl' && m.status === 'completed');
+  const memos = loadMemos();
+  const reviewState = _getLicReviewState();
+  const { allUserRows, allLicCols, queueItems } = computeLicUserMappingData(memos, reviewState);
 
-  // Parse all account tables
-  const allUserRows = []; // { email, project, memoNo, licenses:{name:bool} }
-  const allLicColsSet = new Set();
-  memos.forEach(memo => {
-    const acct = parseAccountTableFromMemo(memo);
-    if (!acct || !acct.rows.length) return;
-    acct.cols.forEach(c => allLicColsSet.add(c));
-    acct.rows.forEach(r => allUserRows.push({
-      email: r.email,
-      project: memo.project || '',
-      memoNo: memo.memoNo,
-      licenses: r.licenses,
-    }));
-  });
-
-  const allLicCols = [...allLicColsSet].sort();
-  const projects   = [...new Set(allUserRows.map(r=>r.project).filter(Boolean))].sort();
+  const projects = [...new Set(allUserRows.map(r=>r.project).filter(Boolean))].sort();
 
   const el = document.getElementById('lic-content');
   if (!el) return;
 
-  if (!allUserRows.length) {
+  window._licReviewQueue = queueItems;
+
+  if (!allUserRows.length && !queueItems.length) {
     el.innerHTML = `<div style="text-align:center;padding:48px;color:var(--text-3)">
       ยังไม่มีข้อมูลผู้ใช้ — กรอก "ตาราง Account" ใน SL Memo เพื่อให้ข้อมูลปรากฎที่นี่
     </div>`;
@@ -627,8 +768,9 @@ function _renderLicUsers() {
   window._licUsrCols = allLicCols;
 
   el.innerHTML = `
+    ${_renderLicReviewQueueHtml(queueItems)}
     <div style="background:var(--bg-2,#F8F8F6);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:12px;font-size:11px;color:var(--text-2)">
-      ℹ ข้อมูลมาจาก "ตาราง Account" ใน SL Memo — email + ✓/- ต่อโปรแกรม
+      ℹ ข้อมูลมาจาก "ตาราง Account" ใน SL Memo — email + ✓/- ต่อโปรแกรม (เฉพาะรายการที่ PMO อนุมัติแล้ว)
     </div>
     <div class="filter-row" style="margin-bottom:12px">
       <input id="lic-usr-search" type="text" placeholder="ค้นหา email..."
