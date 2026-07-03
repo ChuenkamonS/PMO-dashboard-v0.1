@@ -5,6 +5,21 @@
 let selectedType = null;
 let _editingSourceMemoNo = null;
 let _editingDraftMemoNo = null;
+
+// collectMemoData() stores dates via dateInput() as print-ready Thai Buddhist-
+// calendar text (e.g. "3 กรกฎาคม พ.ศ. 2569"), not ISO — so restoring a saved
+// memo into an <input type="date"> needs the reverse conversion.
+function thaiDateToISO(str) {
+  if (!str || typeof str !== 'string') return '';
+  const m = str.match(/^(\d{1,2})\s+(\S+)\s+พ\.ศ\.\s+(\d{4})$/);
+  if (!m) return '';
+  const monthIdx = MONTHS_TH.indexOf(m[2]);
+  if (monthIdx < 0) return '';
+  const yyyy = String(parseInt(m[3], 10) - 543).padStart(4, '0');
+  const mm = String(monthIdx + 1).padStart(2, '0');
+  const dd = String(parseInt(m[1], 10)).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
 const TYPE_LABELS = { sl:'Software License', hw:'Hardware', int:'Team Activity', ent:'Client Expense', dep:'Deployment' };
 const TYPE_CFG = {
   sl:  { title:'รายการ Software *', to:'ประธานเจ้าหน้าที่บริหาร', apprTitle:'ประธานเจ้าหน้าที่บริหาร',
@@ -484,6 +499,16 @@ function collectMemoData() {
     data.amountWords = val('#fs-sl .form-grid .fg:nth-child(2) input');
     data.sections.push({ title:'รายการ Software', html:table(['#','ชื่อ Software','Plan','฿/เดือน','เดือน','จำนวน','เริ่ม','สิ้นสุด','รวม'], rows.map(r=>[r.no,r.name,r.plan||'-',money(r.price),r.months,r.qty,r.startMonth||'-',r.endMonth||'-',money(r.subtotal)]), [3,8]) });
     const acctCols = getAcctCols();
+    // Raw structured copy (email + checkbox states) so a Draft re-edit or
+    // Duplicate can rebuild the account table exactly — the `sections` entry
+    // below is a read-only HTML render and cannot be restored into form inputs.
+    data.acctCols = acctCols;
+    data.acctRows = Array.from(document.querySelectorAll('#acct-body tr'))
+      .map(tr => ({
+        email: (val('.acct-email', tr) || '').trim(),
+        checks: Array.from(tr.querySelectorAll('.acct-val')).map(input => !!input.checked),
+      }))
+      .filter(r => r.email);
     const acctRows = Array.from(document.querySelectorAll('#acct-body tr'))
       .map(tr=>[val('.acct-email',tr).trim(),...Array.from(tr.querySelectorAll('.acct-val')).map(input=>input.checked ? '✓' : '')])
       .filter(r=>r[0]);
@@ -496,8 +521,14 @@ function collectMemoData() {
       return { no:i+1, name:inp[0]?.value.trim()||'-', price, qty, subtotal:price*qty };
     });
     data.total = rows.reduce((s,r)=>s+r.subtotal,0);
+    // Raw structured copy — `sections` below is a read-only HTML render.
+    data.hwItems = Array.from(document.querySelectorAll('#hw-rows .item-row')).map(row => {
+      const inp = row.querySelectorAll('input');
+      return { name: inp[0]?.value.trim()||'', price: Number(inp[1]?.value)||0, qty: Number(inp[2]?.value)||0 };
+    });
     data.amountWords = val('#fs-hw .form-grid .fg:nth-child(1) input');
     const owner = val('#fs-hw .form-grid .fg:nth-child(2) input');
+    data.hwOwner = owner || '';
     data.sections.push({ title:'รายการ Hardware', html:table(['#','ชื่ออุปกรณ์','ราคา/ชิ้น','จำนวน','รวม'], rows.map(r=>[r.no,r.name,money(r.price),r.qty,money(r.subtotal)]), [2,4]) });
     if(owner) data.sections.push({ title:'ผู้รับผิดชอบดูแลอุปกรณ์', html:`<p>${esc(owner)}</p>` });
   }
@@ -506,7 +537,10 @@ function collectMemoData() {
     const activity  = document.getElementById('int-activity')?.value.trim() || '';
     const dateVal   = document.getElementById('int-date')?.value || '';
     const headcount = parseInt(document.getElementById('int-headcount')?.value) || 0;
-    const names     = Array.from(document.querySelectorAll('.int-name')).map((i,idx) => [idx+1, i.value.trim()||'-']);
+    // Raw participant names (untouched by the '-' display fallback used below)
+    // so a Draft re-edit or Duplicate can rebuild the name rows exactly.
+    data.intNames   = Array.from(document.querySelectorAll('.int-name')).map(i => i.value.trim());
+    const names     = data.intNames.map((v, idx) => [idx+1, v || '-']);
     data.total       = pp * names.length;
     data.amountWords = document.getElementById('int-amount-words')?.value.trim() || '';
     data.intActivity  = activity;
@@ -539,6 +573,9 @@ function collectMemoData() {
     // Collect both item types
     let grandTotal = 0;
     const itemsHtml = [];
+    // Raw structured copy — `sections` below is a read-only HTML render and
+    // only includes filled-in rows, so it cannot rebuild the exact form state.
+    data.depItems = [];
 
     document.querySelectorAll('#dep-items .dep-row').forEach((row, idx) => {
       const n = idx + 1;
@@ -547,12 +584,14 @@ function collectMemoData() {
         const price = parseFloat(row.querySelector('.dep-item-price')?.value) || 0;
         const qty   = parseInt(row.querySelector('.dep-item-qty')?.value)   || 0;
         const total = price * qty;
+        data.depItems.push({ kind:'calc', name, price, qty });
         if (name) {
           grandTotal += total;
           itemsHtml.push(`<li>${esc(name)} ราคา ${price.toLocaleString()} บาท × ${qty} คน = ${total.toLocaleString()} บาท (รวมภาษีมูลค่าเพิ่ม)</li>`);
         }
       } else if (row.classList.contains('dep-text-row')) {
         const text = row.querySelector('.dep-item-text')?.value.trim() || '';
+        data.depItems.push({ kind:'text', text });
         if (text) itemsHtml.push(`<li>${esc(text)}</li>`);
       }
     });
@@ -696,8 +735,11 @@ function saveDraft() {
   renderPendingMemos();
   alert(`✓ บันทึก Draft แล้ว — ${data.memoNo}`);
   resetMemoForm();
-  swView('pending', document.querySelector('.sb-sub-item[onclick*="pending"]'), 'Pending Approval');
-  switchPendingTab('drafts');
+  // Drafts live in All Memos (views/history.js), not Pending — see the
+  // "Draft management is handled in All Memos" note in views/pending.js.
+  // Navigate to History's Draft tab instead of the old (undefined) call.
+  swView('history', document.querySelector('.sb-sub-item[onclick*="history"]'), 'All Memos');
+  if (typeof switchHistTab === 'function') switchHistTab('draft');
 }
 
 // Milestone 1B — memo number reuse: Rejected and Cancelled are the only
@@ -1218,12 +1260,16 @@ async function applyDraftEdit() {
       check();
     });
 
-      // Store memoNo so saveDraft/submit updates instead of creates
+      // Store memoNo so saveDraft/submit updates instead of creates. A blank
+      // memoNo means Duplicate/Re-edit-rejected (draftFromMemo strips it) —
+      // it must stay blank, not auto-fill with a preview number.
       const memoNoEl = document.getElementById('f-memo-no');
-      if(memoNoEl) {
-        memoNoEl.value = memo.memoNo || '';
-        if (!memoNoEl.value && typeof setNextMemoNo === 'function') setNextMemoNo();
-      }
+      if(memoNoEl) memoNoEl.value = memo.memoNo || '';
+
+      // Restore the memo date on Re-edit. Duplicate intentionally strips it
+      // (draftFromMemo) so it falls back to today, same as a brand-new memo.
+      const dateEl = document.getElementById('f-date');
+      if(dateEl) dateEl.value = thaiDateToISO(memo.date) || (typeof todayISO !== 'undefined' ? todayISO : '');
 
       const projSel = document.getElementById('f-project');
       if(projSel) {
@@ -1247,7 +1293,7 @@ async function applyDraftEdit() {
 
       // Sign date
       const signDate = document.getElementById('f-signdate');
-      if(signDate && memo.reviewerDate) signDate.value = memo.reviewerDate.slice(0,10);
+      if(signDate && memo.reviewerDate) signDate.value = thaiDateToISO(memo.reviewerDate);
 
       // Fill dynamic approver rows from approvers[]
       const savedApprovers = memo.approvers || [];
@@ -1290,5 +1336,152 @@ async function applyDraftEdit() {
         initApproverRows();
       }
 
+      // Restore memo-type-specific detail (software/hardware/account rows,
+      // internal/entertainment/deployment fields) and recalculate totals from
+      // the restored source data — see HOTFIX: Memo Detail Restore.
+      populateMemoTypeDetail(memo);
+
   } catch(e) { console.error('applyDraftEdit error', e); }
+}
+
+// ── Restore memo-type-specific detail sections from a saved/duplicated memo ──
+// Runs after the type button + header/approver fields are populated above.
+function populateMemoTypeDetail(memo) {
+  if (memo.type === 'sl') {
+    const slRowsC = document.getElementById('sl-rows');
+    if (slRowsC && (memo.slItems||[]).length) {
+      slRowsC.innerHTML = '';
+      memo.slItems.forEach(() => addSLRow());
+      const rowEls = slRowsC.querySelectorAll('.item-row');
+      memo.slItems.forEach((item, i) => {
+        const row = rowEls[i];
+        if (!row) return;
+        if (row.querySelector('.sl-name'))  row.querySelector('.sl-name').value  = (item.name && item.name !== '-') ? item.name : '';
+        if (row.querySelector('.sl-plan'))  row.querySelector('.sl-plan').value  = item.plan || '';
+        if (row.querySelector('.sl-price')) row.querySelector('.sl-price').value = item.price || '';
+        if (row.querySelector('.sl-mo'))    row.querySelector('.sl-mo').value    = item.months || '';
+        if (row.querySelector('.sl-qty'))   row.querySelector('.sl-qty').value   = item.qty || '';
+        if (row.querySelector('.sl-start')) row.querySelector('.sl-start').value = item.startMonth || '';
+        if (row.querySelector('.sl-end'))   row.querySelector('.sl-end').value   = item.endMonth || '';
+      });
+    }
+    const slAmt = document.querySelector('#fs-sl .form-grid .fg:nth-child(2) input');
+    if (slAmt) slAmt.value = memo.amountWords || '';
+    if (typeof calcSL === 'function') calcSL();
+    if (typeof syncAcctColsFromSoftware === 'function') syncAcctColsFromSoftware();
+
+    if ((memo.acctCols||[]).length) {
+      const colInputs = document.querySelectorAll('#acct-cols .acct-col');
+      memo.acctCols.forEach((name, i) => {
+        if (colInputs[i]) { colInputs[i].value = name; colInputs[i].dataset.manual = 'true'; }
+      });
+    }
+    const acctBody = document.getElementById('acct-body');
+    if (acctBody && (memo.acctRows||[]).length) {
+      acctBody.innerHTML = '';
+      memo.acctRows.forEach(r => addAcctRow(r.email));
+      const trs = acctBody.querySelectorAll('tr');
+      memo.acctRows.forEach((r, i) => {
+        const tr = trs[i];
+        if (!tr) return;
+        const checks = tr.querySelectorAll('.acct-val');
+        (r.checks||[]).forEach((checked, ci) => { if (checks[ci]) checks[ci].checked = !!checked; });
+      });
+    }
+  }
+
+  if (memo.type === 'hw') {
+    const hwRowsC = document.getElementById('hw-rows');
+    if (hwRowsC && (memo.hwItems||[]).length) {
+      hwRowsC.innerHTML = '';
+      memo.hwItems.forEach(() => addHWRow());
+      const rowEls = hwRowsC.querySelectorAll('.item-row');
+      memo.hwItems.forEach((item, i) => {
+        const row = rowEls[i];
+        if (!row) return;
+        const inputs = row.querySelectorAll('input');
+        if (inputs[0]) inputs[0].value = item.name || '';
+        if (inputs[1]) inputs[1].value = item.price || '';
+        if (inputs[2]) inputs[2].value = item.qty || '';
+      });
+    }
+    const hwAmt = document.querySelector('#fs-hw .form-grid .fg:nth-child(1) input');
+    if (hwAmt) hwAmt.value = memo.amountWords || '';
+    const hwOwnerEl = document.querySelector('#fs-hw .form-grid .fg:nth-child(2) input');
+    if (hwOwnerEl) hwOwnerEl.value = memo.hwOwner || '';
+    if (typeof calcHW === 'function') calcHW();
+  }
+
+  if (memo.type === 'int') {
+    const actEl = document.getElementById('int-activity');
+    if (actEl) actEl.value = memo.intActivity || '';
+    const dateEl = document.getElementById('int-date');
+    if (dateEl) dateEl.value = thaiDateToISO(memo.intDate);
+    const hcEl = document.getElementById('int-headcount');
+    if (hcEl) hcEl.value = memo.intHeadcount || '';
+    const ppEl = document.getElementById('int-pp');
+    if (ppEl) ppEl.value = memo.intPP || '';
+    const amtEl = document.getElementById('int-amount-words');
+    if (amtEl) amtEl.value = memo.amountWords || '';
+    const namesC = document.getElementById('int-names');
+    if (namesC && (memo.intNames||[]).length) {
+      namesC.innerHTML = '';
+      memo.intNames.forEach(() => addName('int-names', 'int-name', true));
+      const rowInputs = namesC.querySelectorAll('.int-name');
+      memo.intNames.forEach((name, i) => { if (rowInputs[i]) rowInputs[i].value = name || ''; });
+    }
+    if (typeof calcINT === 'function') calcINT();
+    if (typeof checkIntHeadcount === 'function') checkIntHeadcount();
+  }
+
+  if (memo.type === 'ent') {
+    const entInp = document.querySelectorAll('#fs-ent input');
+    if (entInp[0]) entInp[0].value = memo.entClient || '';
+    if (entInp[1]) entInp[1].value = thaiDateToISO(memo.entDate);
+    if (entInp[2]) entInp[2].value = memo.entPlace || '';
+    if (entInp[3]) entInp[3].value = memo.entPeople || '';
+    if (entInp[4]) entInp[4].value = memo.total || '';
+    if (entInp[5]) entInp[5].value = memo.amountWords || '';
+  }
+
+  if (memo.type === 'dep') {
+    const startEl = document.getElementById('dep-start');
+    if (startEl) startEl.value = thaiDateToISO(memo.depStart);
+    const endEl = document.getElementById('dep-end');
+    if (endEl) endEl.value = thaiDateToISO(memo.depEnd);
+    const locEl = document.getElementById('dep-location');
+    if (locEl) locEl.value = memo.depLocation || '';
+    const empEl = document.getElementById('dep-emp-count');
+    if (empEl) empEl.value = memo.depEmpCount || '';
+    const amtEl = document.getElementById('dep-amount-words');
+    if (amtEl) amtEl.value = memo.amountWords || '';
+    const itemsC = document.getElementById('dep-items');
+    if (itemsC && (memo.depItems||[]).length) {
+      itemsC.innerHTML = '';
+      memo.depItems.forEach(it => { if (it.kind === 'text') addDepTextItem(); else addDepCalcItem(); });
+      const rowEls = itemsC.querySelectorAll('.dep-row');
+      memo.depItems.forEach((it, i) => {
+        const row = rowEls[i];
+        if (!row) return;
+        if (it.kind === 'text') {
+          const t = row.querySelector('.dep-item-text');
+          if (t) t.value = it.text || '';
+        } else {
+          const n = row.querySelector('.dep-item-name');
+          const p = row.querySelector('.dep-item-price');
+          const q = row.querySelector('.dep-item-qty');
+          if (n) n.value = it.name || '';
+          if (p) p.value = it.price || '';
+          if (q) q.value = it.qty || '';
+        }
+      });
+    }
+    if (typeof calcDepGrand === 'function') calcDepGrand();
+    if (itemsC) {
+      itemsC.querySelectorAll('.dep-calc-row').forEach(row => {
+        const priceInp = row.querySelector('.dep-item-price');
+        if (priceInp && typeof calcDepRow === 'function') calcDepRow(priceInp);
+      });
+    }
+  }
 }

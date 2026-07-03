@@ -1,5 +1,85 @@
 # CHANGELOG
 
+## Hotfix follow-up — saveDraft() console error on navigation (2026-07-03)
+
+Small regression found immediately after the Memo Detail Restore hotfix below: every Save Draft threw
+`ReferenceError: Can't find variable: switchPendingTab` in the console, because that function was
+called but never existed anywhere in the codebase. Drafts have lived in All Memos (`views/history.js`)
+since an earlier milestone (per the existing "Draft management is handled in All Memos" note in
+`views/pending.js`), and the real tab-switch function there is `switchHistTab(status)`, not
+`switchPendingTab`.
+
+### Fixed
+- `views/create.js` — `saveDraft()` now navigates to the History view (`swView('history', ...,
+  'All Memos')`) and calls `switchHistTab('draft')` (guarded with a `typeof` check) instead of the
+  undefined `switchPendingTab('drafts')`. Draft persistence and Memo Detail Restore logic are
+  untouched.
+
+### Tests
+- `tests/workflow.test.js`: added a test asserting `switchPendingTab` does not appear anywhere in the
+  codebase and that `saveDraft()` calls `swView('history', ...)` + `switchHistTab('draft')`. Full
+  suite: **309/309 passing** (was 308).
+- Manually verified in-browser: Save Draft no longer logs any console error, lands on All Memos with
+  the Draft tab active, and the just-saved draft is visible there.
+
+## Hotfix — Memo Detail Restore (Save Draft → Re-edit / Duplicate lost detail rows) (2026-07-03)
+
+Critical hotfix, out of milestone sequence, per explicit instruction: pause before Milestone 2 and
+fix confirmed data loss on Save Draft → Re-edit and Duplicate. No Milestone 2 work started; Void,
+Draft soft delete, Currency, and License Review Queue are untouched; no data model redesign.
+
+### Root cause
+`applyDraftEdit()` (`views/create.js`) — the function that repopulates the Create form for both
+"Save Draft → Re-edit" (`editDraft()`) and "Duplicate" (`duplicateMemo()`/`reeditRejectedMemo()`) —
+only ever restored header fields and approvers. It never restored any memo-type-specific detail
+(SL/HW rows, the SL account table, INT participant names, DEP line items, dates), so those sections
+rendered empty and a subsequent Save/Submit collected blank data over the original, silently
+overwriting it. Two contributing gaps made this worse:
+- Hardware rows, the SL account table, INT participant names, and DEP line items were only ever
+  rendered into the read-only `sections` HTML blob (for print/history), never captured as structured
+  data — so they could not have been restored even with populate code in place.
+- `collectMemoData()` stores every date field via `dateInput()`, which renders a print-ready Thai
+  Buddhist-calendar string (e.g. `"3 กรกฎาคม พ.ศ. 2569"`), not ISO. Assigning that string directly to
+  an `<input type="date">` is silently rejected by the browser, so even the one date field
+  `applyDraftEdit()` did attempt to restore (`f-signdate`) rendered blank.
+- Separately, `applyDraftEdit()` auto-generated a preview Memo Number (`setNextMemoNo()`) whenever the
+  restored Memo Number was blank — which is every Duplicate, since `draftFromMemo()` intentionally
+  blanks it — violating "Do not auto-fill or generate a preview memo number."
+
+### Fixed
+- `views/create.js` — `collectMemoData()` now also captures raw structured copies of Hardware rows
+  (`hwItems`, `hwOwner`), the SL account table (`acctCols`, `acctRows`), INT participant names
+  (`intNames`), and DEP line items (`depItems`), alongside the existing HTML `sections` render.
+- `views/create.js` — new `populateMemoTypeDetail(memo)`, called from `applyDraftEdit()`, rebuilds
+  the Software/Hardware/Internal/Entertainment/Deployment sections (rows, account table, per-type
+  fields, amount-in-words) from the restored memo object and re-triggers the existing
+  `calcSL()`/`calcHW()`/`calcINT()`/`calcDepGrand()`/`calcDepRow()` functions so totals recalculate
+  from source data — no total is ever patched directly.
+- `views/create.js` — new `thaiDateToISO()` reverses `dateInput()`/`thaiDate()` so a saved date can be
+  written back into an `<input type="date">`. Applied to the memo date, sign date, INT activity date,
+  ENT event date, and DEP start/end dates on Re-edit/Duplicate.
+- `views/create.js` — `applyDraftEdit()` no longer calls `setNextMemoNo()`; a blank Memo Number
+  (Duplicate/Re-edit-rejected) now stays blank as required. `setNextMemoNo()` is still used for a
+  genuinely brand-new memo (`resetMemoForm()`), which is unaffected.
+- `app.js` — `memoToDb()`/`dbToMemo()` map the new fields to/from snake_case DB columns
+  (`hw_items`, `hw_owner`, `acct_cols`, `acct_rows`, `int_names`, `dep_items`).
+- `supabase/migrations/20260703150000_memo_detail_restore.sql` — additive-only migration adding the
+  six new `jsonb`/`text` columns above.
+
+### Tests
+- `tests/workflow.test.js`: 17 new tests — memoToDb/dbToMemo round-trip for Software (slItems,
+  account table), Internal (activity/date/headcount/per-person amount/names), Hardware
+  (hwItems/owner), and Deployment (line items) detail; Save Draft → Re-edit and Duplicate preserve
+  that detail through `draftFromMemo()`; Duplicate leaves Memo Number blank and clears every
+  lifecycle/audit field while keeping business detail; existing approved/completed duplicate behavior
+  remains valid; `populateMemoTypeDetail()`/`collectMemoData()` structural checks (including the
+  no-direct-total-patch guarantee); `thaiDateToISO()` round-trip and its four call sites;
+  `setNextMemoNo()` no longer reachable from `applyDraftEdit()`. Full suite: **308/308 passing**
+  (was 291).
+- Manually verified in-browser for Software (rows + account table + totals), Internal (fields +
+  participant names + dates), Hardware (rows + owner), and Duplicate (Memo Number blank, detail
+  restored) — see report for detail.
+
 ## Milestone 1B correction — soft-deleted Drafts no longer block memo number reuse (2026-07-03)
 
 Business rule correction to Milestone 1B: a soft-deleted Draft is deleted from the user's

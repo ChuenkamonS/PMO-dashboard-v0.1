@@ -560,3 +560,334 @@ test('a soft-deleted Draft does not block memo number reuse (business rule corre
   assert.match(createCode, /select=memo_no,status,deleted/);
   assert.match(createCode, /conflict && !conflict\.deleted && MEMO_NO_BLOCKING_STATUSES\.has\(conflict\.status\)/);
 });
+
+// ══════════════════════════════════════════════════════════════════
+// Hotfix: Memo Detail Restore
+//
+// Root cause: applyDraftEdit() (views/create.js) — the function that
+// populates the Create form after "Save Draft -> Re-edit" or "Duplicate" —
+// only ever restored header fields and approvers. It never restored any
+// memo-type-specific detail (SL/HW rows, the SL account table, INT
+// participant names, DEP line items), so those sections rendered empty and
+// any subsequent Save/Submit collected blank data over the original. Some of
+// that detail (hardware rows, the account table, INT names, DEP line items)
+// also had no structured storage at all — only a read-only HTML render in
+// `sections` — so it could not have been restored even if the form-population
+// code had existed. Fixed by (1) capturing raw structured copies of that
+// detail in collectMemoData()/memoToDb()/dbToMemo(), and (2) adding
+// populateMemoTypeDetail(), called from applyDraftEdit(), which rebuilds each
+// section from the restored memo object and re-triggers the existing
+// calc*() functions so totals recalculate from source data instead of being
+// patched directly.
+// ══════════════════════════════════════════════════════════════════
+
+function softwareMemo(overrides = {}) {
+  return memo({
+    type: 'sl',
+    slItems: [
+      { name: 'GitHub Copilot', plan: 'Business', price: 600, months: 12, qty: 15, startMonth: '2026-01', endMonth: '2026-12' },
+      { name: 'Figma', plan: 'Pro', price: 450, months: 12, qty: 5, startMonth: '2026-01', endMonth: '2026-12' },
+    ],
+    acctCols: ['GitHub Copilot', 'Figma'],
+    acctRows: [
+      { email: 'a@orbitdigital.co.th', checks: [true, false] },
+      { email: 'b@orbitdigital.co.th', checks: [true, true] },
+    ],
+    amountWords: 'หนึ่งแสนสามหมื่นห้าพันบาทถ้วน',
+    ...overrides,
+  });
+}
+
+function internalMemo(overrides = {}) {
+  return memo({
+    type: 'int',
+    intActivity: 'งานเลี้ยงสังสรรค์ประจำปี Q2/2569',
+    intDate: '2026-07-15',
+    intHeadcount: 3,
+    intPP: 1500,
+    intNames: ['สมชาย ใจดี', 'สมหญิง รักงาน', 'วิชัย มั่นคง'],
+    amountWords: 'สี่พันห้าร้อยบาทถ้วน',
+    ...overrides,
+  });
+}
+
+test('Hotfix: memoToDb/dbToMemo round-trip preserves Software detail (slItems + account table)', () => {
+  const { context } = createAppContext();
+  const original = softwareMemo();
+  const restored = context.dbToMemo(context.memoToDb(original));
+  assert.deepEqual(restored.slItems, original.slItems);
+  assert.deepEqual(restored.acctCols, original.acctCols);
+  assert.deepEqual(restored.acctRows, original.acctRows);
+  assert.equal(restored.amountWords, original.amountWords);
+});
+
+test('Hotfix: memoToDb/dbToMemo round-trip preserves Internal detail (activity, headcount, per-person amount, participant names)', () => {
+  const { context } = createAppContext();
+  const original = internalMemo();
+  const restored = context.dbToMemo(context.memoToDb(original));
+  assert.equal(restored.intActivity, original.intActivity);
+  assert.equal(restored.intDate, original.intDate);
+  assert.equal(restored.intHeadcount, original.intHeadcount);
+  assert.equal(restored.intPP, original.intPP);
+  assert.deepEqual(restored.intNames, original.intNames);
+  assert.equal(restored.amountWords, original.amountWords);
+});
+
+test('Hotfix: memoToDb/dbToMemo round-trip preserves Hardware detail (hwItems + owner) and Deployment line items', () => {
+  const { context } = createAppContext();
+  const hw = memo({
+    type: 'hw',
+    hwItems: [{ name: 'MacBook Pro 14', price: 79000, qty: 2 }],
+    hwOwner: 'สมชาย ใจดี',
+    amountWords: 'หนึ่งแสนห้าหมื่นแปดพันบาทถ้วน',
+  });
+  const restoredHw = context.dbToMemo(context.memoToDb(hw));
+  assert.deepEqual(restoredHw.hwItems, hw.hwItems);
+  assert.equal(restoredHw.hwOwner, hw.hwOwner);
+
+  const dep = memo({
+    type: 'dep',
+    depLocation: 'สาขาวิชาการตรีสิ 62',
+    depStart: '2026-08-01', depEnd: '2026-08-05', depEmpCount: 4,
+    depItems: [
+      { kind: 'calc', name: 'ค่าอาหาร', price: 300, qty: 4 },
+      { kind: 'text', text: 'ขอสนับสนุนอุปกรณ์อิเล็กทรอนิกส์' },
+    ],
+  });
+  const restoredDep = context.dbToMemo(context.memoToDb(dep));
+  assert.deepEqual(restoredDep.depItems, dep.depItems);
+});
+
+test('Save Draft -> Re-edit: draftFromMemo keeps Software detail rows and account rows intact when re-opening a Draft', () => {
+  // editDraft() (views/history.js) loads the Draft as-is (no draftFromMemo
+  // transform) — Re-edit must see exactly what was last saved.
+  const { context } = createAppContext();
+  const draft = softwareMemo({ status: 'draft', memoNo: 'DRAFT-ABC123' });
+  const roundTripped = context.dbToMemo(context.memoToDb(draft));
+  assert.deepEqual(roundTripped.slItems, draft.slItems, 'software rows must survive the save/load cycle');
+  assert.deepEqual(roundTripped.acctRows, draft.acctRows, 'account rows must survive the save/load cycle');
+  assert.equal(roundTripped.status, 'draft');
+  assert.equal(roundTripped.memoNo, draft.memoNo);
+});
+
+test('Save Draft -> Re-edit: draftFromMemo keeps Internal memo detail fields intact when re-opening a Draft', () => {
+  const { context } = createAppContext();
+  const draft = internalMemo({ status: 'draft', memoNo: 'DRAFT-XYZ789' });
+  const roundTripped = context.dbToMemo(context.memoToDb(draft));
+  assert.equal(roundTripped.intActivity, draft.intActivity);
+  assert.equal(roundTripped.intHeadcount, draft.intHeadcount);
+  assert.equal(roundTripped.intPP, draft.intPP);
+  assert.deepEqual(roundTripped.intNames, draft.intNames);
+});
+
+test('Duplicate restores Software detail rows (slItems survive draftFromMemo)', () => {
+  const { context } = createAppContext();
+  const source = softwareMemo({ status: 'completed', approvedAt: '2026-06-30T00:00:00.000Z' });
+  const draft = context.draftFromMemo(source);
+  assert.deepEqual(draft.slItems, source.slItems);
+});
+
+test('Duplicate restores account rows (acctCols/acctRows survive draftFromMemo)', () => {
+  const { context } = createAppContext();
+  const source = softwareMemo({ status: 'completed' });
+  const draft = context.draftFromMemo(source);
+  assert.deepEqual(draft.acctCols, source.acctCols);
+  assert.deepEqual(draft.acctRows, source.acctRows);
+});
+
+test('Duplicate restores Hardware rows and owner (hwItems/hwOwner survive draftFromMemo)', () => {
+  const { context } = createAppContext();
+  const source = memo({
+    type: 'hw', status: 'completed',
+    hwItems: [{ name: 'Dell Monitor 27"', price: 12000, qty: 3 }],
+    hwOwner: 'IT Support',
+  });
+  const draft = context.draftFromMemo(source);
+  assert.deepEqual(draft.hwItems, source.hwItems);
+  assert.equal(draft.hwOwner, source.hwOwner);
+});
+
+test('Duplicate leaves Memo Number blank (no auto-fill or preview number)', () => {
+  const { context } = createAppContext();
+  const source = softwareMemo({ status: 'completed', memoNo: 'ORB-2606-042' });
+  const draft = context.draftFromMemo(source);
+  assert.equal(draft.memoNo, undefined, 'Memo Number must be blank, not copied and not pre-generated');
+});
+
+test('Hotfix: applyDraftEdit no longer calls setNextMemoNo() to fill a blank Memo Number (regression: Duplicate previously showed a preview memo number)', () => {
+  // Found via manual browser verification of this hotfix: applyDraftEdit()
+  // used to run `if (!memoNoEl.value) setNextMemoNo()`, which fires on every
+  // Duplicate (draftFromMemo always leaves memoNo blank) and silently
+  // violated "Do not auto-fill or generate a preview memo number."
+  // setNextMemoNo() is still legitimate elsewhere (resetMemoForm(), for a
+  // genuinely brand-new memo), so this must assert absence scoped to
+  // applyDraftEdit specifically, not repo-wide.
+  const createCode = fs.readFileSync(path.join(root, 'views/create.js'), 'utf8');
+  const fn = createCode.match(/async function applyDraftEdit\(\) \{([\s\S]*?)\n\}\n/)?.[0] || '';
+  assert.ok(fn, 'applyDraftEdit must be defined');
+  assert.doesNotMatch(fn, /setNextMemoNo/, 'a blank Memo Number from Duplicate must stay blank, never auto-filled');
+  assert.match(fn, /memoNoEl\.value = memo\.memoNo \|\| ''/);
+});
+
+test('Duplicate clears lifecycle metadata while keeping business detail (status/audit/approval/reject/cancel/void/delete)', () => {
+  const { context } = createAppContext();
+  const source = softwareMemo({
+    status: 'rejected',
+    createdAt: '2026-06-01T00:00:00.000Z', updatedAt: '2026-06-02T00:00:00.000Z',
+    submittedAt: '2026-06-01T01:00:00.000Z', approvedAt: '2026-06-02T00:00:00.000Z',
+    rejectedAt: '2026-06-03T00:00:00.000Z', rejectedBy: 'นาย ปกรณ์ เจียมสกุลทิพย์',
+    rejectionReason: 'Budget issue', cancelledAt: '2026-06-04T00:00:00.000Z', cancelledBy: 'x',
+    cancellationReason: 'y', voidedAt: '2026-06-05T00:00:00.000Z', voidedBy: 'z', voidReason: 'w',
+    deleted: true, deletedAt: '2026-06-06T00:00:00.000Z', deletedBy: 'q', deleteReason: 'r',
+    auditLog: [{ action: 'Rejected' }],
+  });
+  const draft = context.draftFromMemo(source);
+
+  // Business/detail fields survive.
+  assert.deepEqual(draft.slItems, source.slItems);
+  assert.deepEqual(draft.acctCols, source.acctCols);
+  assert.deepEqual(draft.acctRows, source.acctRows);
+  assert.equal(draft.project, source.project);
+
+  // Every lifecycle/audit field is cleared.
+  assert.equal(draft.status, 'draft');
+  assert.equal(draft.createdAt, undefined);
+  assert.equal(draft.updatedAt, undefined);
+  assert.equal(draft.submittedAt, undefined);
+  assert.equal(draft.approvedAt, undefined);
+  assert.equal(draft.rejectedAt, undefined);
+  assert.equal(draft.rejectedBy, undefined);
+  assert.equal(draft.rejectionReason, undefined);
+  assert.equal(draft.cancelledAt, undefined);
+  assert.equal(draft.cancellationReason, undefined);
+  assert.equal(draft.voidedAt, undefined);
+  assert.equal(draft.voidedBy, undefined);
+  assert.equal(draft.voidReason, undefined);
+  assert.equal(draft.deleted, false);
+  assert.equal(draft.deletedAt, undefined);
+  assert.equal(draft.deleteReason, undefined);
+  assert.deepEqual(Array.from(draft.auditLog), []);
+});
+
+test('Duplicate of an approved/completed memo still restores its detail rows (existing statuses remain valid)', () => {
+  const { context } = createAppContext();
+  const completed = softwareMemo({ status: 'completed', approvedAt: '2026-06-30T00:00:00.000Z' });
+  const draft = context.draftFromMemo(completed);
+  assert.equal(draft.status, 'draft');
+  assert.deepEqual(draft.slItems, completed.slItems);
+  assert.equal(completed.status, 'completed', 'original remains unchanged');
+});
+
+test('populateMemoTypeDetail restores Software/HW/INT/ENT/DEP sections from the memo object and recalculates via the existing calc*() functions (no direct total patch)', () => {
+  const createCode = fs.readFileSync(path.join(root, 'views/create.js'), 'utf8');
+  const fn = createCode.match(/function populateMemoTypeDetail\(memo\) \{([\s\S]*)\n\}\n/)?.[0] || '';
+  assert.ok(fn, 'populateMemoTypeDetail must be defined');
+
+  // Wired into the Re-edit/Duplicate entry point.
+  assert.match(createCode, /populateMemoTypeDetail\(memo\);[\s\S]{0,40}\} catch\(e\) \{ console\.error\('applyDraftEdit error'/);
+
+  // Software: rebuilt from slItems + account table, then recalculated.
+  assert.match(fn, /memo\.slItems/);
+  assert.match(fn, /addSLRow\(\)/);
+  assert.match(fn, /calcSL\(\)/);
+  assert.match(fn, /memo\.acctCols/);
+  assert.match(fn, /memo\.acctRows/);
+
+  // Hardware.
+  assert.match(fn, /memo\.hwItems/);
+  assert.match(fn, /memo\.hwOwner/);
+  assert.match(fn, /calcHW\(\)/);
+
+  // Internal.
+  assert.match(fn, /memo\.intActivity/);
+  assert.match(fn, /memo\.intNames/);
+  assert.match(fn, /calcINT\(\)/);
+  assert.match(fn, /checkIntHeadcount\(\)/);
+
+  // Entertainment.
+  assert.match(fn, /memo\.entClient/);
+
+  // Deployment.
+  assert.match(fn, /memo\.depItems/);
+  assert.match(fn, /calcDepGrand\(\)/);
+
+  // Totals must come from recalculation, never a direct patch of the total.
+  assert.doesNotMatch(fn, /\.total\s*=/, 'must restore source data and let calc*() recompute totals, not patch totals directly');
+});
+
+test('collectMemoData captures raw structured detail (hwItems, hwOwner, acctCols, acctRows, intNames, depItems) alongside the existing HTML sections', () => {
+  const createCode = fs.readFileSync(path.join(root, 'views/create.js'), 'utf8');
+  const fn = createCode.match(/function collectMemoData\(\) \{([\s\S]*?)\nfunction validateMemo/)?.[0] || '';
+  assert.ok(fn, 'collectMemoData must be defined');
+  assert.match(fn, /data\.hwItems\s*=/);
+  assert.match(fn, /data\.hwOwner\s*=/);
+  assert.match(fn, /data\.acctCols\s*=/);
+  assert.match(fn, /data\.acctRows\s*=/);
+  assert.match(fn, /data\.intNames\s*=/);
+  assert.match(fn, /data\.depItems\s*=/);
+});
+
+test('Hotfix: thaiDateToISO reverses dateInput()/thaiDate() so a saved date can be restored into an <input type="date">', () => {
+  // collectMemoData() stores dates via dateInput(), which renders a
+  // print-ready Thai Buddhist-calendar string (e.g. "3 กรกฎาคม พ.ศ. 2569"),
+  // not ISO. Restoring that string directly into <input type="date"> is
+  // silently rejected by the browser, so Re-edit/Duplicate showed blank date
+  // fields even though the underlying memo carried a value. thaiDateToISO()
+  // is the reverse conversion used by applyDraftEdit()/populateMemoTypeDetail().
+  const { context } = createAppContext();
+  context.document.addEventListener = () => {};
+  const createCode = fs.readFileSync(path.join(root, 'views/create.js'), 'utf8');
+  vm.runInContext(createCode, context, { filename: 'views/create.js' });
+
+  assert.equal(context.thaiDateToISO(context.dateInput('2026-07-15')), '2026-07-15');
+  assert.equal(context.thaiDateToISO(context.dateInput('2026-01-05')), '2026-01-05');
+  assert.equal(context.thaiDateToISO(''), '');
+  assert.equal(context.thaiDateToISO(null), '');
+  assert.equal(context.thaiDateToISO('not a date'), '');
+});
+
+test('Hotfix: applyDraftEdit/populateMemoTypeDetail restore dates via thaiDateToISO, not the raw Thai string', () => {
+  const createCode = fs.readFileSync(path.join(root, 'views/create.js'), 'utf8');
+  assert.match(createCode, /dateEl\.value = thaiDateToISO\(memo\.date\)/, 'memo date (Re-edit)');
+  assert.match(createCode, /signDate\.value = thaiDateToISO\(memo\.reviewerDate\)/, 'sign date');
+  assert.match(createCode, /dateEl\.value = thaiDateToISO\(memo\.intDate\)/, 'INT activity date');
+  assert.match(createCode, /entInp\[1\]\.value = thaiDateToISO\(memo\.entDate\)/, 'ENT event date');
+  assert.match(createCode, /startEl\.value = thaiDateToISO\(memo\.depStart\)/, 'DEP start date');
+  assert.match(createCode, /endEl\.value = thaiDateToISO\(memo\.depEnd\)/, 'DEP end date');
+});
+
+test('memoToDb/dbToMemo map the new Hotfix detail fields to/from snake_case DB columns', () => {
+  assert.match(appCode, /hw_items:\s*m\.hwItems/);
+  assert.match(appCode, /hw_owner:\s*m\.hwOwner/);
+  assert.match(appCode, /acct_cols:\s*m\.acctCols/);
+  assert.match(appCode, /acct_rows:\s*m\.acctRows/);
+  assert.match(appCode, /int_names:\s*m\.intNames/);
+  assert.match(appCode, /dep_items:\s*m\.depItems/);
+  assert.match(appCode, /hwItems:\s*r\.hw_items/);
+  assert.match(appCode, /acctCols:\s*r\.acct_cols/);
+  assert.match(appCode, /intNames:\s*r\.int_names/);
+  assert.match(appCode, /depItems:\s*r\.dep_items/);
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Hotfix: saveDraft() navigation regression — switchPendingTab() never
+// existed (drafts moved to All Memos/history.js; see the "Draft management
+// is handled in All Memos" note in views/pending.js). Calling it threw a
+// ReferenceError right after every Save Draft, surfacing as a console error.
+// ══════════════════════════════════════════════════════════════════
+
+test("saveDraft() no longer calls the undefined switchPendingTab() and navigates to History's Draft tab instead", () => {
+  const createCode = fs.readFileSync(path.join(root, 'views/create.js'), 'utf8');
+  const historyCode = fs.readFileSync(path.join(root, 'views/history.js'), 'utf8');
+  const fn = createCode.match(/function saveDraft\(\) \{([\s\S]*?)\n\}\n/)?.[0] || '';
+  assert.ok(fn, 'saveDraft must be defined');
+
+  assert.doesNotMatch(fn, /switchPendingTab/, 'switchPendingTab does not exist anywhere in the codebase');
+  assert.doesNotMatch(createCode, /switchPendingTab/, 'no other caller should reference it either');
+
+  // Must land on the view that actually renders Drafts (All Memos/History,
+  // not Pending) and select the Draft tab there.
+  assert.match(fn, /swView\('history'/);
+  assert.match(fn, /switchHistTab\('draft'\)/);
+  assert.match(historyCode, /function switchHistTab\(status, btn\)/, 'switchHistTab must exist and be the real tab-switch function');
+});

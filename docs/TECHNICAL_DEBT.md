@@ -811,6 +811,65 @@ Exit Criteria
 
 ---
 
+# TD-M1-04
+
+Title
+
+Hotfix: Memo Detail Restore — Deployment Prerequisite + One Narrow Pre-Existing Gap Left Untouched
+
+Status
+
+OPEN
+
+Priority
+
+High
+
+Introduced
+
+Hotfix: Memo Detail Restore (2026-07-03), ahead of Milestone 2
+
+Owner Phase
+
+Core Lifecycle Foundation
+
+Current Situation
+
+1. **Migration not yet applied.** `supabase/migrations/20260703150000_memo_detail_restore.sql` adds
+   six new `memos` columns (`hw_items`, `hw_owner`, `acct_cols`, `acct_rows`, `int_names`,
+   `dep_items`) that `memoToDb()` now writes on every Save Draft / Submit, for every memo type (not
+   just the type the new columns describe — `memoToDb()` builds one flat row). This file has not been
+   applied to the live Supabase project (no live DB access available during this hotfix, same
+   constraint as TD-M1-01/TD-M1-03). Until it is applied, every Supabase `POST` in `saveMemoAsync()`
+   will be rejected for the unrecognized columns; the existing catch-and-fallback in `saveMemoAsync()`
+   means Save Draft/Submit still succeeds locally (in-memory cache + localStorage) but does not persist
+   to Supabase, so a memo saved before the migration is applied would not survive a real reload once
+   Supabase is reachable again — matching the exact risk shape already accepted in TD-M1-03 item 1.
+2. **`resetMemoForm()` clears the Memo Date without restoring today's default.** Found while fixing
+   date restoration on Re-edit/Duplicate; unrelated to this hotfix's reported symptoms (it affects a
+   brand-new memo created after using Save Draft once in the same session, not the Re-edit/Duplicate
+   path this hotfix targets) and left unfixed to keep this hotfix's diff minimal and scoped to the
+   reported bug. `initApp()` sets `#f-date` to `todayISO` once at page load; `resetMemoForm()`
+   (`views/create.js`) blanks every `#form-body input` — including `#f-date` — without re-applying
+   `todayISO`, so the date field shows blank (not today) for the next memo created in the same session.
+
+Risk
+
+Item 1 is the one that matters operationally, identical in shape to TD-M1-03 item 1: apply the
+migration before or together with deploying this code change. Item 2 is a narrow, low-severity,
+pre-existing UX gap (an empty required field the user must notice and fill before Submit already
+blocks via `validateMemo()` — no silent data loss), not a regression introduced by this hotfix.
+
+Exit Criteria
+
+- Apply `20260703150000_memo_detail_restore.sql` to the live Supabase project, then confirm a Software
+  memo's `hw_items`/`acct_cols`/`acct_rows` and an Internal memo's `int_names` both survive a real
+  `loadMemosAsync()` refetch (not just local cache).
+- Decide whether `resetMemoForm()` should re-apply `todayISO` to `#f-date` (and `#f-signdate`) after
+  clearing the form; fix in a follow-up if confirmed.
+
+---
+
 # Before Release Checklist
 
 Review every OPEN Technical Debt.

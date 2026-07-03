@@ -1280,6 +1280,13 @@ function memoToDb(m) {
     sections: m.sections || [], sl_items: m.slItems || [], audit_log: m.auditLog || [],
     budget_source:  m.budgetSource  || null,
     budget_pool_id: m.budgetPoolId  || null,
+    // Hotfix: Memo Detail Restore — structured detail data that has no other
+    // home in the schema (previously only rendered as read-only HTML in
+    // `sections`, so it could not be restored into the form on re-edit/duplicate).
+    hw_items:  m.hwItems  || [], hw_owner:  m.hwOwner  || null,
+    acct_cols: m.acctCols || [], acct_rows: m.acctRows || [],
+    int_names: m.intNames || [],
+    dep_items: m.depItems || [],
     // INT fields
     int_activity:  m.intActivity  || null,
     int_date:      m.intDate      || null,
@@ -1343,6 +1350,11 @@ function dbToMemo(r) {
     fxRate: r.fx_rate, sections: r.sections || [], slItems: r.sl_items || [], auditLog: r.audit_log || [],
     budgetSource:  r.budget_source   || null,
     budgetPoolId:  r.budget_pool_id  || null,
+    // Hotfix: Memo Detail Restore — see memoToDb() above.
+    hwItems:  r.hw_items  || [], hwOwner:  r.hw_owner  || null,
+    acctCols: r.acct_cols || [], acctRows: r.acct_rows || [],
+    intNames: r.int_names || [],
+    depItems: r.dep_items || [],
     pmoEvidenceUrl:      r.pmo_evidence_url      || null,   // available after ALTER TABLE
     approvalEvidenceUrl: r.approval_evidence_url || null,   // available after ALTER TABLE
     submittedAt: r.submitted_at, approvedAt: r.approved_at, rejectedAt: r.rejected_at,
