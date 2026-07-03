@@ -1107,6 +1107,60 @@ function canCurrentUserActOnMemo(memo) {
   return isMemoCurrentApprover(memo) || isPMO();
 }
 
+// Milestone 1A Task 1.3 — an approver step is "resolved" (locked, no longer the
+// pending one awaiting action) whether it was approved in-system, bypassed via
+// A1 self-review, or overridden by PMO. Views use this instead of checking
+// status === 'approved' alone, so bypassed/overridden steps still render as
+// locked/checked exactly like an in-system approval did before this change.
+function isApproverStepResolved(status) {
+  return status === 'approved' || status === 'bypassed' || status === 'overridden';
+}
+
+// memoStatusKey / histStatusLabel / histStatusBadgeClass — single source of truth
+// (moved from views/history.js, Milestone 1A Task 1.4). Behavior unchanged; this
+// only centralizes what was already implicitly global so budget.js and pending.js
+// can reuse it without redefining their own copy — see docs/TECHNICAL_DEBT.md
+// for the follow-up on pending.js's separately-styled inline status pill.
+function memoStatusKey(memo) {
+  return memo.status || 'pending';
+}
+function histStatusLabel(memo) {
+  const key = memoStatusKey(memo);
+  const map = {
+    completed: 'Completed', rejected: 'Rejected', pending: 'Pending A1',
+    pending_a2: 'Pending A2', pending_a3: 'Pending A3',
+    draft: 'Draft', cancelled: 'Cancelled', expired: 'Expired'
+  };
+  return map[key] || key;
+}
+function histStatusBadgeClass(memo) {
+  const key = memoStatusKey(memo);
+  const map = {
+    completed: 'badge-green', rejected: 'badge-red', pending: 'badge-amber',
+    pending_a2: 'badge-amber', pending_a3: 'badge-amber',
+    draft: 'badge-gray', cancelled: 'badge-gray', expired: 'badge-red'
+  };
+  return map[key] || 'badge-gray';
+}
+
+// appendAuditLog — single source of truth (moved from views/pending.js, Milestone 1A Task 1.2)
+function appendAuditLog(memos, memoNo, action, comment, extra = {}) {
+  const idx = memos.findIndex(m => m.memoNo === memoNo);
+  if(idx<0) return;
+  if(!memos[idx].auditLog) memos[idx].auditLog = [];
+  memos[idx].auditLog.push({
+    actor:        currentUser(),
+    actorProfileId: typeof currentUserProfileId === 'function' ? currentUserProfileId() : null,
+    action,
+    comment:      comment || '',
+    timestamp:    new Date().toISOString(),
+    statusBefore: extra.statusBefore || null,
+    statusAfter:  extra.statusAfter  || null,
+    evidenceUrl:  extra.evidenceUrl  || null,
+    channel:      extra.channel      || 'in-app',
+  });
+}
+
 function prepareMemoForSubmission(data, now = new Date().toISOString()) {
   const approvers = (data.approvers || []).map(a => ({...a}));
   const requesterProfileId = data.requesterProfileId ?? currentUserProfileId();
@@ -1119,9 +1173,11 @@ function prepareMemoForSubmission(data, now = new Date().toISOString()) {
   );
   const next = selfA1 ? approvers[1] : approvers[0];
   if (selfA1) {
+    // Milestone 1A Task 1.3: A1 self-review is a Bypassed step, not a genuine
+    // in-system Approved one — see MEMO_LIFECYCLE.md §7 / SYSTEM_STATE_MACHINE.md §5.
     approvers[0] = {
       ...approvers[0],
-      status: 'approved',
+      status: 'bypassed',
       approvedAt: now,
       approvedBy: requesterName,
       approvedByProfileId: requesterProfileId,
@@ -1428,16 +1484,30 @@ async function updateMemoStatusAsync(memoNo, status, extra={}) {
     updated.rejectedAt = now;
     updated.currentApproverProfileId = null;
     const pendingIdx = approvers.findIndex(a => !a.status || a.status === 'pending');
-    if (pendingIdx >= 0) {
-      updated.approvers = approvers.map((a, i) =>
-        i === pendingIdx ? {
-          ...a,
-          status: 'rejected',
-          rejectedAt: now,
-          rejectedBy: extra.rejectedBy || currentUser(),
-          rejectedByProfileId: currentUserProfileId(),
-        } : a
-      );
+    if (pendingIdx >= 0 && !extra.approvers) {
+      // Milestone 1A Task 1.3: a PMO override that results in 'rejected' marks the
+      // step PMO acted on as Overridden, not Rejected — the approver themselves
+      // didn't reject it, PMO did, with evidence. A genuine in-system reject
+      // (isPmoOverride false) keeps the original 'rejected' step status.
+      updated.approvers = isPmoOverride
+        ? approvers.map((a, i) =>
+            i === pendingIdx ? {
+              ...a,
+              status: 'overridden',
+              overriddenAt: now,
+              overriddenBy: extra.pmoOverrideBy || currentUser(),
+              overrideNote: extra.pmoOverrideNote || null,
+            } : a
+          )
+        : approvers.map((a, i) =>
+            i === pendingIdx ? {
+              ...a,
+              status: 'rejected',
+              rejectedAt: now,
+              rejectedBy: extra.rejectedBy || currentUser(),
+              rejectedByProfileId: currentUserProfileId(),
+            } : a
+          );
     }
   }
 
@@ -1983,7 +2053,11 @@ function renderMemoPdf(data) {
             ? '<div class="mp-appr-opt" style="font-size:12pt">&#9675; อนุมัติ, เพื่อโปรดพิจารณาดำเนินการ</div><div class="mp-appr-opt" style="font-size:12pt">&#9675; อื่นๆ ..............................………</div>'
             : '<div class="mp-appr-opt" style="font-size:12pt">&#9675; เห็นชอบ, เพื่อโปรดพิจารณาอนุมัติ</div><div class="mp-appr-opt" style="font-size:12pt">&#9675; อื่นๆ ..............................………</div>';
           const sigDate = data.date || '';
-          const isApproved = a.status === 'approved';
+          // Milestone 1A Task 1.3: a self-bypassed A1 (status 'bypassed') still shows its
+          // signature/date exactly as it did when this was recorded as 'approved'. An
+          // 'overridden' step never had its own in-system signature captured either
+          // before or after this change, so it's intentionally excluded here.
+          const isApproved = a.status === 'approved' || a.status === 'bypassed';
           const sigImgUrl  = isApproved ? getSignatureFromCache(a.name) : null;
           const sigHtml    = sigImgUrl
             ? `<div style="text-align:center;height:54px;display:flex;align-items:center;justify-content:center">` +

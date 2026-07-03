@@ -606,6 +606,137 @@ Exit Criteria
 
 ---
 
+# TD-M1-01
+
+Title
+
+Memo/Device/PO/User Profile Baseline Schema + Memo Number Uniqueness
+
+Status
+
+OPEN
+
+Priority
+
+High
+
+Introduced
+
+Milestone 1A (Implementation Roadmap, Task 1.1)
+
+Owner Phase
+
+Core Lifecycle Foundation
+
+Current Situation
+
+Repository does not contain baseline `create table` migrations for:
+
+- memos
+- user_profiles
+- devices
+- purchase_orders
+
+Every migration under `supabase/migrations/` is an `alter table` delta against these tables — the
+base schema was created outside version control (confirmed by grep: no `create table` statement for
+any of the four tables exists in any committed migration).
+
+There is also no database-level `unique` constraint on `memos.memo_no` (confirmed: no `unique` or
+`memo_no` constraint text anywhere in `supabase/migrations/*.sql`). The only enforcement today is a
+client-side pre-check in `submitMemo()` (`views/create.js:707-714`): a `GET` query for an existing
+row with the same `memo_no` before saving.
+
+Additional finding from this review, not previously documented: that same pre-check explicitly does
+**not** block when the conflicting existing row's status is `'rejected'` —
+`if (conflict && conflict.status !== 'rejected' && !editingSameDraft)`. So today, a new memo can
+reuse a memo number that belongs to a previously Rejected memo. This may or may not be intentional;
+it is flagged here as a review finding only. Per MEMO_LIFECYCLE.md §5, "Duplicate Memo Number is not
+allowed" with no stated exception for Rejected memos — this looks like an undocumented behavior gap,
+not a requirement. Not fixed as part of this review (business-rule change, out of Milestone 1A scope
+per explicit instruction to keep this task a review, not an implementation).
+
+Risk
+
+1. Environment cannot be rebuilt from source control alone (schema reproducibility).
+2. Two near-simultaneous submissions with the same memo number could both succeed (race condition —
+   client-side check only, no DB-level guard).
+3. A new memo can silently reuse a Rejected memo's number today, which may contradict the documented
+   uniqueness rule.
+
+Exit Criteria
+
+- A committed baseline migration exists for `memos`, `user_profiles`, `devices`, and
+  `purchase_orders`, generated via schema introspection against the live Supabase project (requires
+  live DB access this review did not have — not fabricated from assumptions here).
+- A `unique` constraint on `memos.memo_no` is added at the database layer once the baseline exists,
+  with a graceful client-side error path for the resulting DB-level conflict (currently
+  `submitMemo()` only handles its own pre-check failing, not a DB-level unique-violation response).
+- PMO/BA decision recorded on whether reusing a Rejected memo's number is intentional or should be
+  blocked like every other non-Draft status.
+
+Regression Tests
+
+- Pending baseline migration + constraint (no code changed yet to test).
+
+---
+
+# TD-M1-02
+
+Title
+
+Pending Memo Card Uses a Separate Inline Status Pill, Not the Shared Status Vocabulary
+
+Status
+
+OPEN
+
+Priority
+
+Low
+
+Introduced
+
+Milestone 1A (Implementation Roadmap, Task 1.4)
+
+Owner Phase
+
+Core Lifecycle Foundation
+
+Current Situation
+
+Task 1.4 moved `memoStatusKey()` / `histStatusLabel()` / `histStatusBadgeClass()` from
+`views/history.js` into `app.js` as the single canonical memo-status vocabulary (behavior-preserving
+relocation only). `views/budget.js` already consumed `memoStatusKey()` as a boolean filter and is
+unaffected.
+
+`views/pending.js`'s memo card renderer (around the `statusCls`/`statusLbl` local variables) still
+computes its own separate 3-way inline status label/color ternary
+(`completed`/`rejected`/else-show-current-stage) instead of calling the now-centralized helpers. This
+was deliberately left alone in Task 1.4 for two reasons: (1) it renders inline hex-based pill styles,
+not the `badge-*` CSS classes the shared helpers return — merging them is a visual styling change, not
+a pure data-source change; (2) its "else" case intentionally shows the dynamic current-approval-stage
+label (e.g. which approver is next), which is a different display intent than History's fixed
+`Pending A1`/`Pending A2`/`Pending A3` labels — collapsing them could change what Pending users see.
+
+Risk
+
+When a future milestone adds a new memo status (e.g. Voided), it must be added in two independently
+maintained places — `app.js`'s shared vocabulary and `views/pending.js`'s inline ternary — with no
+compiler/lint check tying them together. Missing the second one would show Voided memos in Pending
+with an incorrect fallback style (today's ternary's default `else` branch), though Voided memos should
+never actually reach Pending's list per SYSTEM_STATE_MACHINE.md §2, which limits the practical
+exposure.
+
+Exit Criteria
+
+- Decide whether Pending's card should adopt the shared `badge-*` class system (a visual change
+  requiring design sign-off) or keep its own inline-styled pill permanently, with the inline ternary
+  explicitly cross-referencing `histStatusLabel`/`histStatusBadgeClass` in a code comment either way.
+- Whichever is decided, implement it before or alongside the Milestone 1 Void feature (Task 1.5 in the
+  roadmap), since that is the next milestone to introduce a new memo status value.
+
+---
+
 # Before Release Checklist
 
 Review every OPEN Technical Debt.

@@ -1,5 +1,84 @@
 # CHANGELOG
 
+## Milestone 1A — Core Lifecycle Foundation: schema review, shared audit helper, approval-step literals, status vocabulary consolidation (2026-07-03)
+
+Source: `docs/IMPLEMENTATION_ROADMAP.md` Milestone 1, Tasks 1.1–1.4. Scope explicitly excludes Void,
+Soft Delete, Currency, and License Review Queue — those remain TODO for later Milestone 1 sub-phases.
+
+### Task 1.1 — Baseline schema / memo number uniqueness review
+- Documentation-only. No schema or migration files changed (no live Supabase access available to
+  safely generate a baseline `create table` migration blind).
+- Confirmed and documented in `docs/TECHNICAL_DEBT.md` (new entry **TD-M1-01**): no committed
+  baseline migration exists for `memos`, `user_profiles`, `devices`, or `purchase_orders`; no
+  database-level `unique` constraint on `memos.memo_no` (enforcement today is a client-side
+  pre-check in `submitMemo()` only).
+- New finding from this review: that pre-check does not block reusing a memo number belonging to a
+  previously **Rejected** memo — flagged as a possible undocumented gap against MEMO_LIFECYCLE.md
+  §5, not fixed (business-rule decision, out of this task's review-only scope).
+
+### Task 1.2 — Shared audit helper
+- Moved `appendAuditLog()` from `views/pending.js` into `app.js` as the single source of truth (no
+  behavior change — same signature, same fields). `views/pending.js`'s four existing call sites
+  (Reject, PMO Override, PMO Edit Approvers, Cancel) are unchanged and continue to work via global
+  scope now that `app.js` loads first.
+
+### Task 1.3 — Approval-step literal statuses: `bypassed` / `overridden`
+- `prepareMemoForSubmission()` (`app.js`): an A1 self-review (requester is also A1) now records
+  approver status `'bypassed'` instead of `'approved'`. `selfReviewed: true` is unchanged for
+  backward compatibility.
+- `updateMemoStatusAsync()` (`app.js`): a PMO override that results in `'rejected'` now marks the
+  step PMO acted on as `'overridden'` (with `overriddenAt`/`overriddenBy`/`overrideNote`) instead of
+  `'rejected'` — the approver didn't reject it, PMO did, with evidence. A genuine non-override reject
+  path is unchanged.
+- `confirmPmoOverride()` (`views/pending.js`): the approver-edit-row reconstruction now marks only
+  the one step whose turn it currently is as `'overridden'` (previously silently reset to
+  `'pending'` like every other not-yet-reached step, per audit finding G-12).
+- Added `isApproverStepResolved(status)` (`app.js`): treats `approved`/`bypassed`/`overridden` as
+  equivalently "resolved/locked" for display purposes. Applied to every UI site that previously
+  checked `status === 'approved'` alone (`views/pending.js`'s override-modal preview rows,
+  Edit-Approvers modal rows, and the "keep already-resolved entries intact" guards in both modals;
+  `app.js`'s PDF approval-signature loop keeps `bypassed` — but not `overridden` — eligible for a
+  signature, matching what was captured before this change) so existing approved-look rendering is
+  unchanged, and a previously-resolved step is never silently reset back to `pending` on a later edit.
+- `views/history.js`'s memo-detail approvers timeline (`_buildMemoApproversTimeline`) now renders
+  distinct "Bypassed (Self-review)" and "Overridden by PMO" labels/colors instead of collapsing them
+  into Approved or Pending.
+- Existing data already stored as `status:'approved', selfReviewed:true` (created before this change)
+  continues to render and behave exactly as before — `isApproverStepResolved` and the PDF check both
+  still include `'approved'`. No data migration needed or performed.
+
+### Task 1.4 — Shared status/badge vocabulary consolidation
+- Moved `memoStatusKey()`, `histStatusLabel()`, `histStatusBadgeClass()` from `views/history.js` into
+  `app.js` as the single source of truth (behavior-preserving relocation only — `views/budget.js`'s
+  existing `memoStatusKey()` calls are unaffected since these were already globally scoped).
+- `views/pending.js`'s separate inline status pill (different visual system — inline hex styles, not
+  `badge-*` classes — and a different display intent, showing the dynamic current-approval-stage
+  rather than a fixed label) was deliberately left as-is rather than force-merged, to avoid a visible
+  UI change outside this task's scope. Documented as **TD-M1-02** in `docs/TECHNICAL_DEBT.md`, to be
+  resolved before or alongside the Void feature (the next milestone to introduce a new memo status).
+
+### Tests
+- `tests/workflow.test.js`: updated the existing self-bypass test's expected status (`approved` →
+  `bypassed`); added coverage for `appendAuditLog`'s relocation and behavior, `isApproverStepResolved`
+  for all four literal values, PMO-override-to-rejected producing an `overridden` step (not
+  `rejected`), a non-override reject's existing short-circuit behavior confirmed unchanged, and the
+  relocated `memoStatusKey`/`histStatusLabel`/`histStatusBadgeClass` covering every known memo status.
+- Full suite: `node --test tests/*.test.js` — **273/273 passing** (was 265; net +8 new/updated tests).
+- Manual verification (real browser, static server): Create Memo, Pending Approval (37 items), and
+  History (111 items, status counts Draft 1/Pending 37/Approved 62/Rejected 9/Cancelled 2) all render
+  with no console errors. Confirmed live in-page that `isApproverStepResolved`,
+  `histStatusLabel`/`histStatusBadgeClass`, and `appendAuditLog` are correctly defined once in
+  `app.js`, and that a synthetic memo with `bypassed`/`overridden`/`pending` approver steps renders
+  the three distinct timeline labels correctly.
+
+### Not changed (explicitly out of scope for Milestone 1A)
+- Void lifecycle, Soft Delete, Currency (THB/USD), License PMO Review Queue — all remain TODO for
+  later Milestone 1 sub-phases per `docs/IMPLEMENTATION_ROADMAP.md`.
+- S-03 (Edit Approvers evidence classification): reviewed against the current decision (PMO
+  administrative correction, not Override-equivalent — reason required, evidence optional, audit
+  logged) — `confirmPmoEditApprovers()` already satisfies this exactly as written (reason required,
+  no evidence field, `appendAuditLog` called). No code change was needed.
+
 ## Phase 7A-11 — Overview Canonicalization (TD-7A-03) (2026-07-02)
 
 ### Changed

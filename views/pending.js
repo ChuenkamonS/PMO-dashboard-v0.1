@@ -44,23 +44,7 @@ function pendingAge(memo) {
   if(!iso) return 0;
   return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000));
 }
-// currentUser() defined in app.js — single source of truth
-function appendAuditLog(memos, memoNo, action, comment, extra = {}) {
-  const idx = memos.findIndex(m => m.memoNo === memoNo);
-  if(idx<0) return;
-  if(!memos[idx].auditLog) memos[idx].auditLog = [];
-  memos[idx].auditLog.push({
-    actor:        currentUser(),
-    actorProfileId: typeof currentUserProfileId === 'function' ? currentUserProfileId() : null,
-    action,
-    comment:      comment || '',
-    timestamp:    new Date().toISOString(),
-    statusBefore: extra.statusBefore || null,
-    statusAfter:  extra.statusAfter  || null,
-    evidenceUrl:  extra.evidenceUrl  || null,
-    channel:      extra.channel      || 'in-app',
-  });
-}
+// currentUser() and appendAuditLog() defined in app.js — single source of truth
 function formatDateTime(iso) {
   if(!iso) return '-';
   const d = new Date(iso);
@@ -604,9 +588,9 @@ function openPmoOverrideModal(memoNo) {
         <div id="pmo-appr-edit-rows">
           ${(memo.approvers||[]).map((a,i) => `
             <div class="approver-edit-row" style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:center;margin-bottom:6px">
-              <input class="ri appr-name" style="font-size:12px" value="${esc(a.name||'')}" placeholder="ชื่อ A${i+1}" ${a.status==='approved'?'disabled':''}>
-              <input class="ri appr-title" style="font-size:12px" value="${esc(a.title||'')}" placeholder="ตำแหน่ง" ${a.status==='approved'?'disabled':''}>
-              <span style="font-size:10px;color:${a.status==='approved'?'var(--green)':'var(--text-3)'}">A${i+1}${a.status==='approved'?' ✓':''}</span>
+              <input class="ri appr-name" style="font-size:12px" value="${esc(a.name||'')}" placeholder="ชื่อ A${i+1}" ${isApproverStepResolved(a.status)?'disabled':''}>
+              <input class="ri appr-title" style="font-size:12px" value="${esc(a.title||'')}" placeholder="ตำแหน่ง" ${isApproverStepResolved(a.status)?'disabled':''}>
+              <span style="font-size:10px;color:${isApproverStepResolved(a.status)?'var(--green)':'var(--text-3)'}">A${i+1}${isApproverStepResolved(a.status)?' ✓':''}</span>
             </div>`).join('')}
         </div>
         <button class="btn-sm" onclick="addPmoApproverRow()" style="font-size:11px;margin-top:4px">+ เพิ่ม Approver</button>
@@ -693,19 +677,34 @@ function confirmPmoOverride(memoNo) {
   // Collect updated approvers from edit rows
   const editRows = document.querySelectorAll('#pmo-appr-edit-rows .approver-edit-row');
   const memo     = loadMemos().find(m => m.memoNo === memoNo);
+  const user     = currentUser();
+  // Milestone 1A Task 1.3: the one approver step whose turn it currently is gets
+  // marked 'overridden' (PMO acted in its place) rather than reset to 'pending'
+  // like every other not-yet-reached step — see MEMO_LIFECYCLE.md §7/§8.
+  const currentPendingIdx = (memo?.approvers || []).findIndex(a => !a.status || a.status === 'pending');
   let newApprovers = null;
   if (editRows.length && memo) {
     newApprovers = Array.from(editRows).map((row, i) => {
       const name  = row.querySelector('.appr-name')?.value.trim()  || '';
       const title = row.querySelector('.appr-title')?.value.trim() || '';
       const orig  = (memo.approvers||[])[i];
-      if (orig?.status === 'approved') return orig; // keep approved entries intact
+      if (isApproverStepResolved(orig?.status)) return orig; // keep resolved entries intact
+      if (i === currentPendingIdx) {
+        return {
+          ...orig, name, title,
+          status: 'overridden',
+          overriddenAt: new Date().toISOString(),
+          overriddenBy: user,
+          overrideNote: note,
+          approvedAt: null,
+          approvedBy: null,
+        };
+      }
       return { name, title, status: 'pending', approvedAt: null, approvedBy: null };
     }).filter(a => a.name);
   }
 
   const memos = loadMemos();
-  const user  = currentUser();
   appendAuditLog(memos, memoNo, `PMO Override → ${newStatus} by ${user}`, note);
   storeMemos(memos);
   const updatedAuditLog = memos.find(m => m.memoNo === memoNo)?.auditLog || [];
@@ -764,18 +763,18 @@ function openPmoEditApproversModal(memoNo) {
   const renderApproverRow = (a, idx) => `
     <div class="approver-edit-row" style="border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:8px">
       <div style="font-size:10px;font-weight:600;color:var(--text-3);margin-bottom:6px">
-        A${idx+1} ${a.status === 'approved' ? '✅ Approved แล้ว — แก้ไขไม่ได้' : ''}
+        A${idx+1} ${isApproverStepResolved(a.status) ? '✅ Approved แล้ว — แก้ไขไม่ได้' : ''}
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end">
         <div>
           <label style="font-size:11px;color:var(--text-3)">ชื่อ</label>
-          <select class="ri appr-name" style="margin-top:3px;font-size:12px" onchange="this.closest('.approver-edit-row').querySelector('.appr-title').value=this.selectedOptions[0]?.dataset.title||''" ${a.status==='approved'?'disabled':''}>${approverOptions(a.name || '', a.status === 'approved')}</select>
+          <select class="ri appr-name" style="margin-top:3px;font-size:12px" onchange="this.closest('.approver-edit-row').querySelector('.appr-title').value=this.selectedOptions[0]?.dataset.title||''" ${isApproverStepResolved(a.status)?'disabled':''}>${approverOptions(a.name || '', isApproverStepResolved(a.status))}</select>
         </div>
         <div>
           <label style="font-size:11px;color:var(--text-3)">ตำแหน่ง</label>
           <input class="ri appr-title" style="margin-top:3px;font-size:12px;background:var(--bg)" value="${esc(a.title||'')}" readonly>
         </div>
-        ${a.status !== 'approved' && idx > 0 ? `<button class="btn-sm" onclick="this.closest('.approver-edit-row').remove()" style="color:var(--red);padding:6px 8px">✕</button>` : '<div></div>'}
+        ${!isApproverStepResolved(a.status) && idx > 0 ? `<button class="btn-sm" onclick="this.closest('.approver-edit-row').remove()" style="color:var(--red);padding:6px 8px">✕</button>` : '<div></div>'}
       </div>
     </div>`;
 
@@ -836,8 +835,8 @@ function confirmPmoEditApprovers(memoNo) {
     const name  = row.querySelector('.appr-name')?.value.trim()  || '';
     const title = row.querySelector('.appr-title')?.value.trim() || '';
     const orig  = (memo.approvers || [])[i];
-    // Keep existing status/dates for already-approved approvers
-    if (orig?.status === 'approved') return orig;
+    // Keep existing status/dates for already-resolved approvers (approved, bypassed, or overridden)
+    if (isApproverStepResolved(orig?.status)) return orig;
     return { name, title, status: 'pending', approvedAt: null, approvedBy: null };
   }).filter(a => a.name);
 

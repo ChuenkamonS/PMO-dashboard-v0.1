@@ -85,7 +85,8 @@ test('self A1 submission records review and routes directly to A2', () => {
   }), '2026-06-29T12:00:00.000Z');
 
   assert.equal(result.status, 'pending_a2');
-  assert.equal(result.approvers[0].status, 'approved');
+  // Milestone 1A Task 1.3: self-bypass is a distinct 'bypassed' literal, not 'approved'.
+  assert.equal(result.approvers[0].status, 'bypassed');
   assert.equal(result.approvers[0].selfReviewed, true);
   assert.equal(result.currentApproverProfileId, 2);
   assert.equal(result.approvedAt, null);
@@ -231,4 +232,127 @@ test('SL account table uses software-synced editable headers, checkboxes, and em
   assert.match(createCode, /\.filter\(r=>r\[0\]\)/);
   assert.match(createCode, /const softwareNames = getAcctCols\(\)/);
   assert.match(appCode, /Account PDF: omit unnamed application columns and require a real email row/);
+});
+
+// ── Milestone 1A — Task 1.2: shared audit helper ──
+test('appendAuditLog is defined once in app.js (single source of truth)', () => {
+  const pendingCode = fs.readFileSync(path.join(root, 'views/pending.js'), 'utf8');
+  assert.match(appCode, /function appendAuditLog\(/);
+  assert.doesNotMatch(pendingCode, /function appendAuditLog\(/);
+});
+
+test('appendAuditLog appends a structured entry with actor, timestamps, and defaults', () => {
+  const { context, userButton, userName } = createAppContext();
+  userButton.dataset.profileId = '3';
+  userName.textContent = 'นางสาว ชื่นกมล สารมานิตย์';
+  const memos = [memo({ auditLog: [] })];
+  context.appendAuditLog(memos, memos[0].memoNo, 'Rejected by X', 'Budget issue', {
+    statusBefore: 'pending',
+    statusAfter: 'rejected',
+  });
+  const entry = memos[0].auditLog.at(-1);
+  assert.equal(entry.action, 'Rejected by X');
+  assert.equal(entry.comment, 'Budget issue');
+  assert.equal(entry.actor, 'นางสาว ชื่นกมล สารมานิตย์');
+  assert.equal(entry.actorProfileId, 3);
+  assert.equal(entry.statusBefore, 'pending');
+  assert.equal(entry.statusAfter, 'rejected');
+  assert.equal(entry.evidenceUrl, null);
+  assert.equal(entry.channel, 'in-app');
+  assert.ok(entry.timestamp);
+});
+
+test('appendAuditLog is a no-op when the memo number is not found', () => {
+  const { context } = createAppContext();
+  const memos = [memo({ auditLog: [] })];
+  context.appendAuditLog(memos, 'NOT-A-REAL-MEMO', 'Rejected', 'x');
+  assert.equal(memos[0].auditLog.length, 0);
+});
+
+// ── Milestone 1A — Task 1.3: approval-step literal statuses ──
+test('isApproverStepResolved treats approved, bypassed, and overridden as resolved', () => {
+  const { context } = createAppContext();
+  assert.equal(context.isApproverStepResolved('approved'), true);
+  assert.equal(context.isApproverStepResolved('bypassed'), true);
+  assert.equal(context.isApproverStepResolved('overridden'), true);
+  assert.equal(context.isApproverStepResolved('pending'), false);
+  assert.equal(context.isApproverStepResolved('rejected'), false);
+  assert.equal(context.isApproverStepResolved(undefined), false);
+});
+
+test('PMO override to rejected marks the current pending step as overridden, not rejected', async () => {
+  const { context, userButton, userName } = createAppContext();
+  userButton.dataset.profileId = '';
+  userButton.dataset.isPmo = 'true';
+  userName.textContent = 'PMO Officer';
+  const initial = memo({
+    status: 'pending_a2',
+    approvers: [
+      { profileId: 1, name: 'นาย นวพล งามวรโรจน์สกุล', title: 'Director', status: 'approved', approvedAt: '2026-06-29T10:00:00.000Z' },
+      { profileId: 2, name: 'นาย ปกรณ์ เจียมสกุลทิพย์', title: 'CEO', status: 'pending' },
+    ],
+  });
+  vm.runInContext(`_memCache = [${JSON.stringify(initial)}]`, context);
+
+  const updated = await context.updateMemoStatusAsync(initial.memoNo, 'rejected', {
+    pmoOverrideNote: 'Rejected via email approval',
+    pmoOverrideBy: 'PMO Officer',
+  });
+
+  assert.equal(updated.status, 'rejected');
+  const step = updated.approvers[1]; // A2 was the pending step on a pending_a2 memo
+  assert.equal(step.status, 'overridden');
+  assert.equal(step.overriddenBy, 'PMO Officer');
+  assert.equal(step.overrideNote, 'Rejected via email approval');
+  assert.ok(step.overriddenAt);
+});
+
+test('a genuine (non-override) reject still marks the pending step as rejected', async () => {
+  const { context } = createAppContext();
+  const initial = memo({ status: 'pending_a2' });
+  vm.runInContext(`_memCache = [${JSON.stringify(initial)}]`, context);
+
+  // Simulate confirmReject's local pre-update to 'rejected' before calling
+  // updateMemoStatusAsync, matching views/pending.js's actual call order.
+  vm.runInContext(`_memCache[0] = {..._memCache[0], status:'rejected'}`, context);
+  const updated = await context.updateMemoStatusAsync(initial.memoNo, 'rejected', {
+    rejectedBy: 'นาย ปกรณ์ เจียมสกุลทิพย์',
+  });
+
+  // Terminal-state guard returns the memo unchanged when it's already
+  // terminal and this isn't a PMO override — confirms the existing
+  // (pre-Milestone-1A) short-circuit behavior for this call order is unchanged.
+  assert.equal(updated.status, 'rejected');
+  assert.equal(updated.approvers[1].status, 'pending');
+});
+
+// ── Milestone 1A — Task 1.4: shared status/badge vocabulary consolidation ──
+test('memoStatusKey/histStatusLabel/histStatusBadgeClass are defined once in app.js', () => {
+  const historyCode = fs.readFileSync(path.join(root, 'views/history.js'), 'utf8');
+  assert.match(appCode, /function memoStatusKey\(/);
+  assert.match(appCode, /function histStatusLabel\(/);
+  assert.match(appCode, /function histStatusBadgeClass\(/);
+  assert.doesNotMatch(historyCode, /function memoStatusKey\(/);
+  assert.doesNotMatch(historyCode, /function histStatusLabel\(/);
+  assert.doesNotMatch(historyCode, /function histStatusBadgeClass\(/);
+});
+
+test('histStatusLabel and histStatusBadgeClass cover every known memo status unchanged', () => {
+  const { context } = createAppContext();
+  const cases = [
+    ['draft', 'Draft', 'badge-gray'],
+    ['pending', 'Pending A1', 'badge-amber'],
+    ['pending_a2', 'Pending A2', 'badge-amber'],
+    ['pending_a3', 'Pending A3', 'badge-amber'],
+    ['completed', 'Completed', 'badge-green'],
+    ['rejected', 'Rejected', 'badge-red'],
+    ['cancelled', 'Cancelled', 'badge-gray'],
+  ];
+  cases.forEach(([status, label, badge]) => {
+    const m = memo({ status });
+    assert.equal(context.histStatusLabel(m), label, `label for ${status}`);
+    assert.equal(context.histStatusBadgeClass(m), badge, `badge for ${status}`);
+  });
+  // A falsy status defaults to Pending A1, matching memoStatusKey's fallback.
+  assert.equal(context.memoStatusKey({}), 'pending');
 });

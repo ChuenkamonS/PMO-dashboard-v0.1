@@ -4,28 +4,8 @@
 
 const HIST_TYPE_LABELS = { sl:'Software License', hw:'Hardware', int:'Team Activity', ent:'Client Expense', dep:'Deployment' };
 
-// ── Status lifecycle ──
-function memoStatusKey(memo) {
-  return memo.status || 'pending';
-}
-function histStatusLabel(memo) {
-  const key = memoStatusKey(memo);
-  const map = {
-    completed: 'Completed', rejected: 'Rejected', pending: 'Pending A1',
-    pending_a2: 'Pending A2', pending_a3: 'Pending A3',
-    draft: 'Draft', cancelled: 'Cancelled', expired: 'Expired'
-  };
-  return map[key] || key;
-}
-function histStatusBadgeClass(memo) {
-  const key = memoStatusKey(memo);
-  const map = {
-    completed: 'badge-green', rejected: 'badge-red', pending: 'badge-amber',
-    pending_a2: 'badge-amber', pending_a3: 'badge-amber',
-    draft: 'badge-gray', cancelled: 'badge-gray', expired: 'badge-red'
-  };
-  return map[key] || 'badge-gray';
-}
+// memoStatusKey / histStatusLabel / histStatusBadgeClass — defined in app.js
+// (single source of truth, moved there in Milestone 1A Task 1.4)
 
 // ── Helpers ──
 function histRequesterName(memo) {
@@ -594,16 +574,26 @@ function _buildMemoApproversTimeline(memo) {
   if (!approvers.length) return '';
 
   const items = approvers.map(a => {
-    const isApproved = a.status === 'approved';
-    const isRejected = a.status === 'rejected';
-    const dotColor   = isApproved ? 'var(--green-800,var(--color-text-success))'
-                     : isRejected ? 'var(--red-800,var(--color-text-danger))'
+    const isApproved   = a.status === 'approved';
+    const isRejected   = a.status === 'rejected';
+    const isBypassed   = a.status === 'bypassed';
+    const isOverridden = a.status === 'overridden';
+    // Milestone 1A Task 1.3: Bypassed/Overridden now render as distinct labels
+    // instead of collapsing into Approved/Pending, per MEMO_LIFECYCLE.md §7.
+    const dotColor   = isApproved   ? 'var(--green-800,var(--color-text-success))'
+                     : isRejected   ? 'var(--red-800,var(--color-text-danger))'
+                     : isBypassed   ? 'var(--blue-800,var(--color-text-info))'
+                     : isOverridden ? 'var(--amber-800,var(--color-text-warning))'
                      : 'var(--text-3,var(--color-text-tertiary))';
-    const statusText = isApproved ? 'Approved'
-                     : isRejected ? 'Rejected'
+    const statusText = isApproved   ? 'Approved'
+                     : isRejected   ? 'Rejected'
+                     : isBypassed   ? 'Bypassed (Self-review)'
+                     : isOverridden ? 'Overridden by PMO'
                      : 'Pending';
-    const statusColor = isApproved ? 'var(--green-800,var(--color-text-success))'
-                      : isRejected ? 'var(--red-800,var(--color-text-danger))'
+    const statusColor = isApproved   ? 'var(--green-800,var(--color-text-success))'
+                      : isRejected   ? 'var(--red-800,var(--color-text-danger))'
+                      : isBypassed   ? 'var(--blue-800,var(--color-text-info))'
+                      : isOverridden ? 'var(--amber-800,var(--color-text-warning))'
                       : 'var(--text-3,var(--color-text-tertiary))';
     return `
       <div style="position:relative;margin-bottom:8px;padding-left:18px">
