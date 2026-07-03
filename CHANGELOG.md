@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## Hotfix — Void Evidence UI (2026-07-03)
+
+Small hotfix before Milestone 2: the Void Memo modal asked PMO users to paste a URL for evidence,
+which is not acceptable for the PMO workflow (reason required, evidence optional, file-based when
+supported, never "paste a URL"). Void lifecycle logic, Draft Restore logic, and the data model are
+untouched.
+
+### Changed
+- `views/history.js` — `openVoidModal()`'s evidence field is now an optional `<input type="file"
+  accept="image/*,.pdf">` with a preview and a hidden field, replacing the visible `<input
+  placeholder="URL ของไฟล์หลักฐาน">` text box. New `handleVoidEvidenceUpload()` reuses the existing
+  optional-evidence upload pattern already shipped for Approve/PMO-Override evidence
+  (`handleApproveEvidenceUpload`/`handlePmoEvidenceUpload` in `views/pending.js`): 5MB cap, converts
+  the file to a base64 data URL via `FileReader`, clears the stored value when no file is chosen. No
+  new storage architecture — this is the same mechanism already used elsewhere in the app.
+- `confirmVoidMemo()` and `voidMemoAsync()` are unchanged: `confirmVoidMemo()` still just reads
+  whatever string ends up in `#void-evidence-url`, so it doesn't need to know or care whether that
+  string came from a pasted URL or an uploaded file.
+
+### Tests
+- `tests/workflow.test.js`: 3 new tests — the Void modal no longer has a URL text input and has the
+  file-upload markup instead; `handleVoidEvidenceUpload()` matches the established 5MB/base64/clear-on-
+  no-file pattern; `confirmVoidMemo()`/`voidMemoAsync()` are structurally unchanged by the swap. Full
+  suite: **312/312 passing** (was 309).
+- Manually verified in-browser: Void modal renders a file picker (no URL box), selecting a PDF shows
+  a "✓ แนบแล้ว" confirmation and populates the hidden field with a `data:application/pdf;base64,...`
+  URL, matching what `voidMemoAsync()` already expects to receive.
+
 ## Hotfix follow-up — saveDraft() console error on navigation (2026-07-03)
 
 Small regression found immediately after the Memo Detail Restore hotfix below: every Save Draft threw

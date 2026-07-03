@@ -709,8 +709,16 @@ function openVoidModal(memoNo) {
         <textarea id="void-reason" class="ri" rows="3" style="margin-top:4px" placeholder="ระบุเหตุผลที่ต้อง Void memo นี้"></textarea>
       </div>
       <div class="fg" style="margin-bottom:16px">
-        <label style="font-size:11px;font-weight:600;color:var(--text-2)">หลักฐานประกอบ (ถ้ามี)</label>
-        <input id="void-evidence-url" class="ri" style="margin-top:4px" placeholder="URL ของไฟล์หลักฐาน (ไม่บังคับ)">
+        <label style="font-size:11px;font-weight:600;color:var(--text-2)">
+          หลักฐานประกอบ (ถ้ามี — ภาพ Email, เอกสารสแกน, PDF)
+        </label>
+        <div style="margin-top:6px">
+          <input type="file" id="void-evidence-file" accept="image/*,.pdf"
+            style="font-size:12px;color:var(--text-2)"
+            onchange="handleVoidEvidenceUpload(this)">
+        </div>
+        <div id="void-evidence-preview" style="margin-top:6px;font-size:11px;color:var(--text-3)"></div>
+        <input type="hidden" id="void-evidence-url" value="">
       </div>
       <div style="display:flex;justify-content:flex-end;gap:10px">
         <button class="btn-ghost" type="button" onclick="document.getElementById('void-modal').remove()">Cancel</button>
@@ -719,6 +727,31 @@ function openVoidModal(memoNo) {
     </div>`;
   document.body.appendChild(modal);
   modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+}
+
+// Hotfix: Void Evidence UI — same file-to-base64-data-URL pattern already
+// used for Approve/PMO-Override evidence (views/pending.js
+// handleApproveEvidenceUpload/handlePmoEvidenceUpload). Evidence is optional
+// for Void, so a missing/cleared file just leaves void-evidence-url blank —
+// voidMemoAsync() already treats a falsy evidenceUrl as "no evidence".
+function handleVoidEvidenceUpload(input) {
+  const file = input.files[0];
+  const preview = document.getElementById('void-evidence-preview');
+  const urlInput = document.getElementById('void-evidence-url');
+  if (!file) { urlInput.value = ''; preview.textContent = ''; return; }
+  if (file.size > 5 * 1024 * 1024) {
+    preview.textContent = '⚠ ไฟล์ใหญ่เกิน 5MB';
+    preview.style.color = 'var(--red)';
+    input.value = ''; urlInput.value = '';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    urlInput.value = e.target.result; // base64 data URL — same pattern as Approve/PMO-Override evidence
+    preview.textContent = `✓ แนบแล้ว: ${file.name} (${(file.size/1024).toFixed(1)} KB)`;
+    preview.style.color = 'var(--green)';
+  };
+  reader.readAsDataURL(file);
 }
 
 async function confirmVoidMemo(memoNo) {

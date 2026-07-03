@@ -395,6 +395,54 @@ test('Void stores evidence when provided (evidence remains optional otherwise)',
   assert.equal(result.memo.auditLog.at(-1).evidenceUrl, 'https://example.com/evidence.pdf');
 });
 
+// ══════════════════════════════════════════════════════════════════
+// Hotfix: Void Evidence UI — the Void modal asked users to paste a URL for
+// evidence, which is not acceptable for the PMO workflow. Replaced with the
+// same optional file-upload-to-base64 pattern already used for Approve/PMO
+// Override evidence (handleApproveEvidenceUpload/handlePmoEvidenceUpload in
+// views/pending.js) — no new storage architecture, voidMemoAsync()'s
+// signature and lifecycle logic are untouched (it already just stores
+// whatever string it's given).
+// ══════════════════════════════════════════════════════════════════
+
+test('Hotfix: Void modal no longer has a URL text input for evidence; it has an optional PDF/image file upload instead', () => {
+  const historyCode = fs.readFileSync(path.join(root, 'views/history.js'), 'utf8');
+  const modalFn = historyCode.match(/function openVoidModal\(memoNo\) \{([\s\S]*?)\n\}\n/)?.[0] || '';
+  assert.ok(modalFn, 'openVoidModal must be defined');
+
+  // No more "paste a URL" input for evidence.
+  assert.doesNotMatch(modalFn, /placeholder="URL/, 'must not ask the user to paste a URL for evidence');
+  assert.doesNotMatch(modalFn, /<input id="void-evidence-url" class="ri"/, 'the old visible URL text input must be gone');
+
+  // Optional file upload, PDF/image, wired to a handler.
+  assert.match(modalFn, /<input type="file" id="void-evidence-file" accept="image\/\*,\.pdf"/);
+  assert.match(modalFn, /onchange="handleVoidEvidenceUpload\(this\)"/);
+  assert.doesNotMatch(modalFn, /void-evidence-file"[^>]*\brequired\b/, 'evidence must remain optional, never a required attribute');
+
+  // The reason field is unaffected — still required, still a plain textarea.
+  assert.match(modalFn, /id="void-reason" class="ri" rows="3"/);
+});
+
+test('Hotfix: handleVoidEvidenceUpload mirrors the existing optional-evidence upload pattern (5MB cap, base64 data URL, clears on no file)', () => {
+  const historyCode = fs.readFileSync(path.join(root, 'views/history.js'), 'utf8');
+  const fn = historyCode.match(/function handleVoidEvidenceUpload\(input\) \{([\s\S]*?)\n\}\n/)?.[0] || '';
+  assert.ok(fn, 'handleVoidEvidenceUpload must be defined');
+  assert.match(fn, /if \(!file\) \{ urlInput\.value = ''; preview\.textContent = ''; return; \}/, 'clearing the file must clear the stored evidence, not leave a stale value');
+  assert.match(fn, /file\.size > 5 \* 1024 \* 1024/, 'must keep the same 5MB cap used by Approve/PMO-Override evidence uploads');
+  assert.match(fn, /reader\.readAsDataURL\(file\)/, 'must reuse the existing base64 data-URL approach, not a new storage architecture');
+});
+
+test('Hotfix: confirmVoidMemo() and voidMemoAsync() are unchanged by the evidence UI swap (Void lifecycle logic untouched)', () => {
+  const historyCode = fs.readFileSync(path.join(root, 'views/history.js'), 'utf8');
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  // confirmVoidMemo still just reads whatever string ended up in #void-evidence-url —
+  // it doesn't care whether that string came from a pasted URL or an uploaded file.
+  assert.match(historyCode, /const evidenceUrl = document\.getElementById\('void-evidence-url'\)\?\.value\.trim\(\) \|\| '';/);
+  assert.match(historyCode, /await voidMemoAsync\(memoNo, reason, evidenceUrl\);/);
+  // voidMemoAsync()'s signature/behavior is untouched.
+  assert.match(appCode, /async function voidMemoAsync\(memoNo, reason, evidenceUrl = ''\) \{/);
+});
+
 test('Void requires a non-empty reason', async () => {
   const { context, userButton } = createAppContext();
   userButton.dataset.isPmo = 'true';
