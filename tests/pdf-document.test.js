@@ -336,6 +336,36 @@ test('Approval Information hides a Reviewer/Approver row when that approver has 
   assert.equal(reviewerRow, undefined, 'a nameless reviewer must not produce an empty row');
 });
 
+// ── Signature lookup: resolve via profile/alias, not just exact memo name ──
+test('_preloadSignatures resolves a signature saved under a profile alias when the exact approver name has none', async () => {
+  const ctx = context();
+  const store = { 'sig-Chuenkamon': JSON.stringify({ signatureDataUrl: 'data:image/png;base64,ALIAS' }) };
+  ctx.localStorage.getItem = key => store[key] || null;
+  await ctx.loadUserProfilesAsync(); // falls back to the hardcoded profiles (id 3 alias includes 'Chuenkamon')
+  await ctx._preloadSignatures([{ name: 'นางสาว ชื่นกมล สารมานิตย์', profileId: 3 }]);
+  assert.equal(ctx.getSignatureFromCache('นางสาว ชื่นกมล สารมานิตย์'), 'data:image/png;base64,ALIAS');
+});
+
+test('_preloadSignatures still prefers a signature saved under the exact approver name over the alias fallback', async () => {
+  const ctx = context();
+  const store = {
+    'sig-นางสาว ชื่นกมล สารมานิตย์': JSON.stringify({ signatureDataUrl: 'data:image/png;base64,EXACT' }),
+    'sig-Chuenkamon': JSON.stringify({ signatureDataUrl: 'data:image/png;base64,ALIAS' }),
+  };
+  ctx.localStorage.getItem = key => store[key] || null;
+  await ctx.loadUserProfilesAsync();
+  await ctx._preloadSignatures([{ name: 'นางสาว ชื่นกมล สารมานิตย์', profileId: 3 }]);
+  assert.equal(ctx.getSignatureFromCache('นางสาว ชื่นกมล สารมานิตย์'), 'data:image/png;base64,EXACT');
+});
+
+test('_preloadSignatures returns null (not a crash) when neither the exact name nor any alias has a saved signature', async () => {
+  const ctx = context();
+  ctx.localStorage.getItem = () => null;
+  await ctx.loadUserProfilesAsync();
+  await ctx._preloadSignatures([{ name: 'นางสาว ชื่นกมล สารมานิตย์', profileId: 3 }]);
+  assert.equal(ctx.getSignatureFromCache('นางสาว ชื่นกมล สารมานิตย์'), null);
+});
+
 // ── Task 7 — Printing: A4, page breaks, multi-page tables, no clipped sections ──
 test('Printing: index.html defines an A4 @page rule for the print fallback (previously missing entirely)', () => {
   assert.match(indexHtml, /@page\s*\{\s*size:\s*A4/);

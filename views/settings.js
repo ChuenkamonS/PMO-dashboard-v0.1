@@ -806,10 +806,31 @@ async function deleteUserSignatureAsync(name) {
 const _sigCache = {};
 
 async function _preloadSignatures(approvers) {
-  const names = [...new Set((approvers||[]).map(a => a.name).filter(Boolean))];
-  await Promise.all(names.map(async name => {
+  if (typeof loadUserProfilesAsync === 'function') await loadUserProfilesAsync();
+  // Dedup by name, keeping one approver entry (for its profileId) per name
+  const byName = new Map();
+  (approvers||[]).forEach(a => { if (a && a.name && !byName.has(a.name)) byName.set(a.name, a); });
+
+  await Promise.all([...byName.entries()].map(async ([name, a]) => {
     if (_sigCache[name] !== undefined) return;
-    _sigCache[name] = await loadUserSignatureAsync(name);
+    let sig = await loadUserSignatureAsync(name);
+    // The memo records the approver's exact assigned name, but a user may have
+    // saved their signature in Settings under a different alias/spelling of the
+    // same profile. Resolve via the same profileId/alias identity the rest of
+    // the app uses (findUserByName) and retry under those known names.
+    if (!sig) {
+      const profile = (a.profileId != null && typeof _userProfilesCache !== 'undefined' && _userProfilesCache)
+        ? _userProfilesCache.find(u => Number(u.id) === Number(a.profileId))
+        : (typeof findUserByName === 'function' ? findUserByName(name) : null);
+      if (profile) {
+        const candidates = [profile.full_name, ...(profile.name_aliases||[])].filter(n => n && n !== name);
+        for (const cand of candidates) {
+          sig = await loadUserSignatureAsync(cand);
+          if (sig) break;
+        }
+      }
+    }
+    _sigCache[name] = sig;
   }));
 }
 

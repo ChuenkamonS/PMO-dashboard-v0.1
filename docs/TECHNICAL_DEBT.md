@@ -1313,13 +1313,29 @@ Current Situation
    before this milestone. This milestone's print-CSS fix (`@page`, page-break rules, `.mp-*` base
    typography) was applied only to `index.html`'s active stylesheet, so `style.css` is now also
    stale relative to it.
+4. **Signature is resolved live, not snapshotted at approval (fixed: lookup, not this gap).**
+   2026-07-05 fixed a confirmed bug where `_preloadSignatures()` (views/settings.js) matched an
+   approver's signature by exact name string only, missing real cases where the signature was
+   saved under a profile alias rather than the memo's canonical approver name (see CHANGELOG.md
+   "2026-07-05 PDF Signature Lookup Fix"). The fix still performs a **live lookup** of whatever
+   signature is currently stored for the resolved profile — it does not capture a snapshot of the
+   signature image at the moment the approver actually approves. If a signature is replaced or
+   deleted after a memo is approved, that memo's PDF will render today's signature (or none)
+   rather than the one in effect at approval time. Recommendation: consider storing the resolved
+   `signatureDataUrl` on the approver's entry when `status` becomes `approved`/`bypassed`
+   (alongside the existing `approvedAt`/`approvedBy`), so historical PDFs stay stable regardless of
+   later signature changes. Not implemented — no evidence yet of a signature being changed
+   post-approval, and it would touch the approval-write path and memo record shape, which is out
+   of scope for a lookup-only fix.
 
 Risk
 
 Item 1: low — the appendix is self-contained and print-safe by construction, but nobody has
 confirmed what the live server actually outputs for it. Item 2: none — explicit, reviewed scope
 boundary, not a defect. Item 3: none currently (dead code has no runtime effect), but leaving a
-stale duplicate CSS file around risks a future editor updating the wrong one.
+stale duplicate CSS file around risks a future editor updating the wrong one. Item 4: low today
+(no known case of a post-approval signature change), but grows over time as more memos accumulate
+approval history against signatures that can still be edited/deleted in Settings.
 
 Exit Criteria
 

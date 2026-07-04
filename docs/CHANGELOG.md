@@ -22,6 +22,33 @@
 
 ## Current Baseline
 
+### 2026-07-05 PDF Signature Lookup Fix
+
+Scope: fix a confirmed defect where an approver's uploaded signature did not appear on the
+downloaded memo PDF even though the memo was approved and a signature existed. No PDF layout,
+storage, or workflow changes.
+
+#### Fixed
+- `_preloadSignatures()` (views/settings.js) resolved a signature by an exact string match on the
+  approver's assigned memo name only. Signatures are saved under whatever free-text "ชื่อในระบบ
+  Memo" a user types in Settings, which can legitimately differ from the canonical `full_name`
+  recorded as the approver on a memo (e.g. a nickname or alias). Confirmed in production data: a
+  real approved memo's approver name (`profileId` 3, canonical `full_name`) had a signature saved
+  only under alias-like name variants, so the exact-match lookup always missed and the PDF
+  rendered an empty signature box. `_preloadSignatures()` now falls back to resolving the
+  approver's profile (by `profileId`, or `findUserByName()` as a secondary fallback) and retries
+  the lookup under that profile's canonical `full_name` and each `name_aliases` entry before
+  giving up. Exact-name matches (the previously-working case) are tried first and unchanged.
+- `tests/pdf-document.test.js` — 3 new tests covering: alias-fallback resolution, exact-name match
+  still taking priority over the alias fallback, and a clean null (no crash) when no signature
+  exists under any known name.
+
+#### Remaining Work
+- Signature is still resolved live (latest Settings upload) at PDF-generation time, not captured
+  as an immutable snapshot at the moment of approval — see TD-PDF-01.
+
+---
+
 ### 2026-07-05 Functional Audit — Memo → Approval → Budget → License → Device end-to-end
 
 Scope: complete functional audit of the Memo → Approval → Budget → Actual Spend → Forecast →
