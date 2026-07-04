@@ -226,21 +226,69 @@ function getLinkedDevices(memo) {
 }
 
 // ── Detail modal (audit workspace) ──
-function buildApprovalTimeline(memo) {
+// Approval Timeline — single data source shared by the screen widget
+// (buildApprovalTimeline, below) and the PDF appendix
+// (buildApprovalTimelinePdfHtml, app.js's renderMemoPdf). Only applicable
+// events for this memo are included — no fixed/hardcoded stage list.
+function computeApprovalTimelineEvents(memo) {
   const events = [];
-  if (memo.createdAt) events.push({ at: memo.createdAt, label: 'สร้าง Memo', actor: histRequesterName(memo), kind: 'create' });
+  if (memo.createdAt) events.push({ at: memo.createdAt, label: 'สร้าง Memo (Draft)', actor: histRequesterName(memo), kind: 'create' });
   if (memo.submittedAt && memo.submittedAt !== memo.createdAt) {
-    events.push({ at: memo.submittedAt, label: 'ส่งขออนุมัติ', actor: histRequesterName(memo), kind: 'submit' });
+    events.push({ at: memo.submittedAt, label: 'ส่งขออนุมัติ (Submitted)', actor: histRequesterName(memo), kind: 'submit' });
   }
+  // Terminal-status events are pushed before the per-step loop below so the
+  // dedup pass (same instant + same actor) keeps the terminal label
+  // ("Completed"/"Rejected") rather than the final approver's own step event
+  // — both fire at the identical timestamp in real data, since
+  // updateMemoStatusAsync() stamps the final step and the memo itself with
+  // the same `now`. "Completed" is shown whenever the memo was ever
+  // approved, even if a later Void moved status away from 'completed' —
+  // reaching Approved/Completed is a historical fact that Void doesn't erase.
+  if (memo.approvedAt) {
+    events.push({ at: memo.approvedAt, label: 'อนุมัติสมบูรณ์ (Completed)', actor: memo.approvedBy || memo.approverName, kind: 'done' });
+  }
+  if (memo.status === 'rejected' && memo.rejectedAt) {
+    events.push({ at: memo.rejectedAt, label: 'ปฏิเสธ (Rejected)', actor: memo.rejectedBy, comment: memo.rejectionReason, kind: 'reject' });
+  }
+  if (memo.status === 'cancelled' && memo.cancelledAt) {
+    events.push({ at: memo.cancelledAt, label: 'ยกเลิก (Cancelled)', actor: memo.cancelledBy, comment: memo.cancellationReason, kind: 'audit' });
+  }
+  if (memo.voidedAt) {
+    events.push({ at: memo.voidedAt, label: 'Void แล้ว (Voided)', actor: memo.voidedBy, comment: memo.voidReason, kind: 'reject' });
+  }
+  (memo.approvers || []).forEach((a, i) => {
+    const roleLabel = i === 0 ? 'Reviewer' : `Approver ${i}`;
+    if (a.status === 'approved' && a.approvedAt) {
+      events.push({ at: a.approvedAt, label: `${roleLabel} อนุมัติ (Reviewed/Approved)`, actor: a.approvedBy || a.name, kind: 'approve' });
+    } else if (a.status === 'bypassed' && a.approvedAt) {
+      events.push({ at: a.approvedAt, label: `${roleLabel} ข้ามการตรวจสอบ (Self Review)`, actor: a.name, kind: 'approve' });
+    } else if (a.status === 'overridden' && a.overriddenAt) {
+      events.push({ at: a.overriddenAt, label: `${roleLabel} — PMO Override`, actor: a.overriddenBy, comment: a.overrideNote, kind: 'audit' });
+    } else if (a.status === 'rejected' && a.rejectedAt) {
+      events.push({ at: a.rejectedAt, label: `${roleLabel} ปฏิเสธ (Rejected)`, actor: a.rejectedBy, kind: 'reject' });
+    }
+  });
   (memo.approvalChain || []).forEach(step => {
     if (step.doneAt) events.push({ at: step.doneAt, label: `${step.role} อนุมัติ`, actor: step.name, kind: 'approve' });
   });
-  if (memo.approvedAt) events.push({ at: memo.approvedAt, label: 'อนุมัติแล้ว', actor: memo.approvedBy || memo.approverName, kind: 'done' });
-  if (memo.rejectedAt) events.push({ at: memo.rejectedAt, label: 'ปฏิเสธ', actor: memo.rejectedBy, kind: 'reject' });
   (memo.auditLog || []).forEach(e => {
     events.push({ at: e.timestamp, label: e.action, actor: e.actor, comment: e.comment, kind: 'audit' });
   });
-  events.sort((a, b) => new Date(a.at) - new Date(b.at));
+  // De-duplicate: the same transition is often captured both as a structured
+  // field above (for a friendlier label) and as a generic auditLog entry.
+  // Keep the first (friendlier) occurrence for a given timestamp+actor pair.
+  const seen = new Set();
+  const deduped = events.filter(e => {
+    const key = `${e.at}|${e.actor || ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  deduped.sort((a, b) => new Date(a.at) - new Date(b.at));
+  return deduped;
+}
+function buildApprovalTimeline(memo) {
+  const events = computeApprovalTimelineEvents(memo);
   if (!events.length) return '<div style="font-size:11px;color:var(--text-3)">ยังไม่มีประวัติ workflow</div>';
   return events.map(e => `
     <div class="hist-timeline-item">
@@ -251,6 +299,93 @@ function buildApprovalTimeline(memo) {
         ${e.comment ? `<div style="font-size:11px;color:var(--text-2);margin-top:2px">${esc(e.comment)}</div>` : ''}
       </div>
     </div>`).join('');
+}
+// PDF-safe rendering of the same timeline data — no CSS classes (the remote
+// PDF server and the local print fallback don't share app.js's stylesheet),
+// reuses the shared `table()` helper (app.js) for consistent print styling.
+function buildApprovalTimelinePdfHtml(memo) {
+  const events = computeApprovalTimelineEvents(memo);
+  if (!events.length) return '';
+  const rows = events.map((e, i) => [i + 1, e.label, e.actor || '—', e.at ? formatDateTime(e.at) : '—']);
+  return `<div style="margin-top:16px">
+    <div style="font-weight:700;color:#185FA5;margin-bottom:6px;font-size:13pt">Approval Timeline</div>
+    ${table(['#', 'เหตุการณ์ (Event)', 'ผู้ดำเนินการ (Actor)', 'วันที่ / เวลา'], rows, [], [0])}
+  </div>`;
+}
+
+// ── Approval Information — Reviewer/Approver/PMO Override/Self Review/
+// Rejected/Cancelled/Void details, single data source for the screen widget
+// and the PDF appendix. Only rows that actually apply to this memo are
+// returned (Task: "Display only information that actually exists").
+function buildApprovalInfoRows(memo) {
+  const rows = [];
+  const requester = histRequesterName(memo);
+  if (requester && requester !== '—') rows.push(['ผู้ขอ (Requester)', requester]);
+
+  (memo.approvers || []).forEach((a, i) => {
+    if (!a || !a.name) return;
+    const roleLabel = i === 0 ? 'ผู้ตรวจสอบ (Reviewer)' : `ผู้อนุมัติ ${i} (Approver ${i})`;
+    const statusText = a.status === 'approved' ? 'อนุมัติแล้ว (Approved)'
+      : a.status === 'bypassed' ? 'ข้ามการตรวจสอบ (Self Review)'
+      : a.status === 'overridden' ? 'PMO Override'
+      : a.status === 'rejected' ? 'ปฏิเสธ (Rejected)'
+      : 'รอดำเนินการ (Pending)';
+    const atIso = a.approvedAt || a.overriddenAt || a.rejectedAt || null;
+    const atText = atIso ? formatDateTime(atIso) : null;
+    rows.push([roleLabel, `${a.name}${a.title ? ' ('+a.title+')' : ''} — ${statusText}${atText ? ' · ' + atText : ''}`]);
+
+    if (a.status === 'overridden') {
+      rows.push([`PMO Override — ${roleLabel}`, `โดย ${a.overriddenBy || '—'}${a.overrideNote ? ' · เหตุผล: ' + a.overrideNote : ''}`]);
+    }
+    if (a.status === 'bypassed') {
+      rows.push([`Self Review — ${roleLabel}`, `${a.name} เป็นผู้ขอเอง จึงข้ามขั้นตอนการตรวจสอบของตนเอง`]);
+    }
+  });
+
+  if (memo.submittedAt) rows.push(['วันที่ส่งขออนุมัติ (Submitted)', formatDateTime(memo.submittedAt)]);
+  if (memo.status === 'completed' && memo.approvedAt) rows.push(['วันที่อนุมัติสมบูรณ์ (Approved)', formatDateTime(memo.approvedAt)]);
+
+  if (memo.status === 'rejected') {
+    rows.push(['เหตุผลที่ปฏิเสธ (Rejected Reason)', memo.rejectionReason || '—']);
+    rows.push(['ปฏิเสธโดย / วันที่', `${memo.rejectedBy || '—'} · ${memo.rejectedAt ? formatDateTime(memo.rejectedAt) : '—'}`]);
+  }
+  if (memo.status === 'cancelled') {
+    rows.push(['เหตุผลที่ยกเลิก (Cancelled Reason)', memo.cancellationReason || '—']);
+    rows.push(['ยกเลิกโดย / วันที่', `${memo.cancelledBy || '—'} · ${memo.cancelledAt ? formatDateTime(memo.cancelledAt) : '—'}`]);
+  }
+  if (memo.voidedAt) {
+    rows.push(['เหตุผลที่ Void (Void Reason)', memo.voidReason || '—']);
+    rows.push(['Void โดย / วันที่', `${memo.voidedBy || '—'} · ${formatDateTime(memo.voidedAt)}`]);
+    if (memo.voidEvidenceUrl) rows.push(['หลักฐาน Void (Evidence)', 'แนบไฟล์แล้ว']);
+  }
+  return rows;
+}
+function _buildMemoApprovalInfoHtml(memo) {
+  const rows = buildApprovalInfoRows(memo);
+  if (!rows.length) return '';
+  return `
+    <div style="margin-top:14px">
+      <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
+        text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">ข้อมูลการอนุมัติ</div>
+      <div style="border:0.5px solid var(--border,var(--color-border-tertiary));
+        border-radius:var(--r-sm,var(--border-radius-md));padding:0 12px">
+        ${rows.map(([label, value]) => `
+          <div style="display:flex;gap:12px;padding:7px 0;
+            border-bottom:0.5px solid var(--border,var(--color-border-tertiary))">
+            <div style="font-size:11px;color:var(--text-3,var(--color-text-tertiary));
+              white-space:nowrap;min-width:150px">${esc(label)}</div>
+            <div style="font-size:12px;color:var(--text-1,var(--color-text-primary))">${esc(value)}</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+function buildApprovalInfoPdfHtml(memo) {
+  const rows = buildApprovalInfoRows(memo);
+  if (!rows.length) return '';
+  return `<div style="margin-top:16px">
+    <div style="font-weight:700;color:#185FA5;margin-bottom:6px;font-size:13pt">ข้อมูลการอนุมัติ (Approval Information)</div>
+    ${table(['รายการ', 'รายละเอียด'], rows)}
+  </div>`;
 }
 
 // ── Shared memo detail content builder ──────────────────
@@ -311,20 +446,17 @@ function _buildMemoDetailContent(memo, mode) {
       </span>
     </div>` : '';
 
-  // ── Rejection / Cancellation note ──
-  // Only show when memo is actually rejected or cancelled — not on completed memos
-  // that may have stale rejectionReason from a previous cancel/override cycle
-  const isTerminalNegative = memo.status === 'rejected' || memo.status === 'cancelled';
-  const noteText = memo.rejectionReason || memo.cancellationReason;
-  const noteLabel = memo.status === 'cancelled' ? 'เหตุผลที่ยกเลิก' : 'เหตุผลที่ reject';
-  const noteHtml = (isTerminalNegative && noteText)
-    ? `<div style="background:var(--red-50,var(--color-background-danger));
-        border:0.5px solid var(--color-border-danger);
-        border-radius:var(--r-sm,var(--border-radius-md));
-        padding:8px 12px;margin-top:12px;font-size:12px;
-        color:var(--red-800,var(--color-text-danger))">
-        <strong>${noteLabel}:</strong> ${esc(noteText)}</div>`
-    : '';
+  // ── Approval Timeline (chronological, only applicable events) ──
+  const timelineHtml = `
+    <div style="margin-top:14px">
+      <div style="font-size:9px;font-weight:500;color:var(--text-3,var(--color-text-tertiary));
+        text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">Approval Timeline</div>
+      <div class="hist-timeline">${buildApprovalTimeline(memo)}</div>
+    </div>`;
+
+  // ── Approval Information — Reviewer/Approver/PMO Override/Self Review/
+  // Rejected/Cancelled/Void, single source shared with the PDF appendix.
+  const approvalInfoHtml = _buildMemoApprovalInfoHtml(memo);
 
   // ── เรียน / เหตุผล block ──
   const toReasonHtml = (memo.to || memo.reason) ? `
@@ -396,7 +528,8 @@ function _buildMemoDetailContent(memo, mode) {
     ${toReasonHtml}
     ${sectionHtml}
     ${approversHtml}
-    ${noteHtml}
+    ${timelineHtml}
+    ${approvalInfoHtml}
     ${auditHtml}
     ${pmoHtml}`;
 }

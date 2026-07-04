@@ -1187,6 +1187,66 @@ Exit Criteria
 
 ---
 
+# TD-PDF-01
+
+Title
+
+PDF Business Document — External PDF Server Fidelity, Signature Grid Scope Boundary, and Orphaned style.css
+
+Status
+
+OPEN
+
+Priority
+
+Low
+
+Introduced
+
+PDF Business Document milestone
+
+Owner Phase
+
+PDF Business Document
+
+Current Situation
+
+1. **External PDF server fidelity is unverified.** The primary PDF generation path posts HTML to
+   `https://memo-pdf-server.onrender.com/generate-pdf`, a service with no source in this repo. Its
+   real per-page running header/footer behavior and exact pagination cannot be confirmed from here.
+   This milestone's new Approval Record appendix (Status Banner, Approval Information, Approval
+   Timeline) uses only inline styles and a plain `page-break-before:always`, so it does not depend
+   on that server's own `.mp-*` stylesheet — but full A4/print fidelity of the *server-generated*
+   PDF (as opposed to the local browser print fallback, which this milestone did fix) is unverified.
+2. **Signature grid scope boundary.** The existing officially-signed memo signature grid
+   (`renderMemoPdf()`'s approval IIFE) still always renders a minimum of 2 signature boxes,
+   synthesizing a placeholder reviewer/approver title when data is incomplete. This was
+   deliberately left unchanged — it backs a physical/ink-signature workflow
+   (MEMO_LIFECYCLE.md §9.2/§9.3) where blank signature lines are required even when unresolved.
+   "Hide empty blocks" was implemented in the new Approval Information appendix instead, which only
+   lists a Reviewer/Approver/PMO Override/Self Review row when the underlying data exists.
+3. **`style.css` is orphaned.** Confirmed via repo-wide search: `index.html` never `<link>`s
+   `style.css`; it has its own inline `<style>` block instead. `style.css` was already fully dead
+   before this milestone. This milestone's print-CSS fix (`@page`, page-break rules, `.mp-*` base
+   typography) was applied only to `index.html`'s active stylesheet, so `style.css` is now also
+   stale relative to it.
+
+Risk
+
+Item 1: low — the appendix is self-contained and print-safe by construction, but nobody has
+confirmed what the live server actually outputs for it. Item 2: none — explicit, reviewed scope
+boundary, not a defect. Item 3: none currently (dead code has no runtime effect), but leaving a
+stale duplicate CSS file around risks a future editor updating the wrong one.
+
+Exit Criteria
+
+- Manually download a real PDF via the live server for at least one Approved and one Voided memo
+  and visually confirm the Approval Record appendix paginates correctly.
+- Decide whether `style.css` should be deleted (confirmed dead) or wired up — not decided as part
+  of this milestone (out of scope: unrelated file, no observable behavior change either way).
+
+---
+
 # Before Release Checklist
 
 Review every OPEN Technical Debt.

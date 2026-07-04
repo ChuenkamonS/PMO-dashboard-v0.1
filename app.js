@@ -2027,6 +2027,21 @@ function renderMemoPdf(data) {
   const reviewerDate = data.reviewerDate && data.reviewerDate !== '-' ? data.reviewerDate : (data.date||'');
   const approverDate = data.approverDate && data.approverDate !== '-' ? data.approverDate : (data.date||'');
 
+  // ── Status Banner — Task 4. Reuses the single status vocabulary
+  // (histStatusLabel/histStatusBadgeClass, both above) instead of a second
+  // status→label mapping. Colors are presentation-only, keyed off the
+  // existing badge class name, not off memo.status directly.
+  const _statusBadgeClass = data.status ? histStatusBadgeClass(data) : '';
+  const _statusColors = ({
+    'badge-green': { bg: '#ECFDF5', fg: '#065F46', border: '#10B981' },
+    'badge-red':   { bg: '#FEF2F2', fg: '#991B1B', border: '#EF4444' },
+    'badge-amber': { bg: '#FFFBEB', fg: '#92400E', border: '#F59E0B' },
+    'badge-gray':  { bg: '#F3F4F6', fg: '#374151', border: '#9CA3AF' },
+  })[_statusBadgeClass] || { bg: '#F3F4F6', fg: '#374151', border: '#9CA3AF' };
+  const statusBannerHtml = data.status ? `<div style="text-align:center;margin:0 0 10px">
+    <span style="display:inline-block;padding:5px 18px;border:1.5px solid ${_statusColors.border};background:${_statusColors.bg};color:${_statusColors.fg};border-radius:6px;font-weight:700;font-size:13pt;letter-spacing:.06em">${esc(String(histStatusLabel(data)).toUpperCase())}</span>
+  </div>` : '';
+
   return `<div class="preview-wrap">
     <!-- Header row: memo no + date (logo injected by server) -->
     <div class="mp-hdr">
@@ -2035,6 +2050,9 @@ function renderMemoPdf(data) {
         <div><strong>ลงวันที่</strong>&nbsp;&nbsp;${esc(fmtDate(data.date)||TODAY)}</div>
       </div>
     </div>
+
+    <!-- Status Banner -->
+    ${statusBannerHtml}
 
     <!-- Title -->
     <div class="mp-title">บันทึกข้อความ</div>
@@ -2222,6 +2240,24 @@ function renderMemoPdf(data) {
             + '</div>';
         }).join('')
         + '</div>';
+    })()}
+
+    <!-- Approval Record appendix — Tasks 2/3/4. Business/audit data that
+         supplements (does not replace) the official memo body above. Reuses
+         the exact same data functions the History "View Memo" detail modal
+         uses (views/history.js) — no parallel formatting logic. A new page
+         so the original signed memo layout above is never disturbed. -->
+    ${(function(){
+      const infoHtml     = typeof buildApprovalInfoPdfHtml === 'function' ? buildApprovalInfoPdfHtml(data) : '';
+      const timelineHtml = typeof buildApprovalTimelinePdfHtml === 'function' ? buildApprovalTimelinePdfHtml(data) : '';
+      if (!infoHtml && !timelineHtml) return '';
+      return `<div style="page-break-before:always;padding-top:16px;border-top:2px solid #185FA5">
+        <div style="font-size:14pt;font-weight:700;color:#185FA5;margin-bottom:4px">เอกสารประกอบการอนุมัติ (Approval Record)</div>
+        <div style="font-size:10pt;color:#666;margin-bottom:6px">เลขที่ ${esc(data.memoNo)} — ข้อมูลประกอบสำหรับการตรวจสอบ ไม่ใช่ส่วนหนึ่งของบันทึกข้อความต้นฉบับ</div>
+        ${statusBannerHtml}
+        ${infoHtml}
+        ${timelineHtml}
+      </div>`;
     })()}
     </div>
   </div>`;

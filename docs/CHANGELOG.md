@@ -22,6 +22,69 @@
 
 ## Current Baseline
 
+### PDF Business Document Milestone - Approval Info, Timeline, Status Banner, Printing
+
+Scope: make the generated memo PDF (`renderMemoPdf()`, app.js) a complete business/audit
+document, matching MEMO_LIFECYCLE.md §9.2's requirement that an Approved memo PDF show
+"Approval status, Approval log, Approver name, Approval timestamp". No UI redesign, no changes to
+Settings/Resource/Software Master/Device Type Master/Auth/Theme/CSS polish/responsive layout.
+
+#### Added
+- `computeApprovalTimelineEvents(memo)` (views/history.js) — extracted from the previously
+  unused `buildApprovalTimeline()`, now the single data source for the chronological Approval
+  Timeline (Draft → Submitted → Reviewed/Approved → PMO Override → Rejected/Cancelled/Voided →
+  Completed, only applicable events shown). Reused by both the screen widget
+  (`buildApprovalTimeline()`) and a new print renderer (`buildApprovalTimelinePdfHtml()`).
+- `buildApprovalInfoRows(memo)` (views/history.js) — single data source for Reviewer, Approver,
+  PMO Override + reason, Self Review, approval timestamps, Rejected/Cancelled/Void reason+by+at.
+  Rows are only included when the underlying data exists (empty blocks hidden). Reused by both a
+  new screen widget (`_buildMemoApprovalInfoHtml()`, wired into `_buildMemoDetailContent()` —
+  History's "View Memo" canonical detail view) and a new print renderer
+  (`buildApprovalInfoPdfHtml()`, using the existing shared `table()` helper from app.js).
+- Status Banner in the PDF header (`renderMemoPdf()`), reusing `histStatusLabel()` /
+  `histStatusBadgeClass()` (app.js) directly — no second status→label mapping.
+- Approval Record appendix in the PDF: a new page (`page-break-before:always`) after the official
+  signed memo body, containing the Status Banner, Approval Information table, and Approval
+  Timeline table — added, not mixed into, the existing officially-signed memo layout.
+- `index.html`: base typography for the `.mp-*` classes `renderMemoPdf()` emits, an `@page { size:
+  A4; ... }` rule, and print page-break rules (`page-break-inside:avoid` for rows/the signature
+  grid, `thead{display:table-header-group}` for repeating table headers) — previously the local
+  browser print fallback (used when the external PDF server is unreachable) had zero CSS for these
+  classes and no guaranteed page size.
+- `tests/pdf-document.test.js` — 29 new behavioral tests: Approval Timeline/Status Banner/Void
+  document/Rejected document/Cancelled document/PMO Override/Self Review/Duplicate document, all
+  five memo types (SL/HW/INT/ENT/DEP), and a same-source-data regression guard proving the PDF and
+  the History detail view render Approval Information/Timeline from identical row/event data.
+
+#### Changed
+- `views/history.js` `_buildMemoDetailContent()` now renders an Approval Timeline block and the
+  new Approval Information block (replacing the old rejection/cancellation-only note, which is now
+  a subset of the new block's rows) — closes the pre-existing gap where PMO Override, Self Review,
+  and Void reason/by/at were captured on the memo record but never shown anywhere.
+
+#### Fixed
+- The local browser print fallback (`window.print()` when `memo-pdf-server.onrender.com` is
+  unreachable) previously rendered the memo essentially unstyled with no guaranteed page size —
+  see Added above.
+
+#### Remaining Work
+- The primary PDF path (`memo-pdf-server.onrender.com`) is an external, unverified-from-this-repo
+  service; true per-page running header/footer and exact pagination fidelity there cannot be
+  confirmed without access to its implementation. The Approval Record appendix uses plain inline
+  styles (no dependency on that server's own `.mp-*` stylesheet) specifically to render correctly
+  regardless of its internals.
+- The existing officially-signed memo signature grid (minimum 2 boxes, synthesized placeholder
+  titles when reviewer/approver data is incomplete) was deliberately left unchanged — it backs a
+  physical/ink-signature workflow. "Hide empty blocks" (Task 5) was implemented in the new
+  Approval Information section instead, which only lists a Reviewer/Approver/PMO Override/Self
+  Review row when the underlying data exists.
+- `style.css` at the repo root is not linked from `index.html` (confirmed: no `<link>` reference
+  anywhere) and was already fully orphaned before this change — its `.pdf-*`/`.mp-*` rules are
+  dead. Left untouched (out of scope: unrelated file, no observable behavior) but now stale
+  relative to `index.html`'s copy; flagged for cleanup in a future phase.
+
+---
+
 ### Phase 7A-10 PR1 - Assignment Workspace Polish
 
 Scope: Budget vs Actual Assignment Workspace and Budget Settings polish items identified in the

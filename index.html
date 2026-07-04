@@ -665,10 +665,32 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 .pdf-sign-line { border-top: 1px solid #222; margin: 54px 18px 8px; }
 .pdf-muted { color: #666; }
 .pdf-alert { margin-top: 10px; padding: 8px 10px; border: 1px solid #B5D4F4; background: #E6F1FB; border-radius: 6px; color: #0C447C; font-size: 12px; }
+
+/* Base typography for the .mp-* elements emitted by renderMemoPdf() (app.js).
+   The remote PDF server injects its own .mp-* stylesheet (THSarabun font,
+   official memo layout) — these rules only matter for the local browser
+   print fallback used when that server is unreachable (see downloadMemoPdf()),
+   so the fallback isn't rendered unstyled. */
+.mp-hdr { display: flex; justify-content: flex-end; margin-bottom: 10px; font-size: 12px; color: #5F5E5A; }
+.mp-title { text-align: center; font-size: 18px; font-weight: 700; margin: 10px 0 16px; }
+.mp-field { display: flex; gap: 8px; margin-bottom: 4px; font-size: 13px; }
+.mp-field-label { font-weight: 700; min-width: 48px; }
+.mp-body, .mp-closing { margin-top: 10px; }
+.mp-note { font-size: 11px; color: #666; margin-top: 6px; }
+
+@page { size: A4; margin: 15mm 14mm; }
 @media print {
   body.printing-pdf .layout { display: none; }
   body.printing-pdf .pdf-stage { position: static; width: auto; }
   body.printing-pdf .pdf-page { width: auto; min-height: auto; padding: 32px; }
+  /* Task 7 — Printing: A4/page breaks/multi-page tables. No clipped sections:
+     tables may span multiple pages but a single row, the approval signature
+     grid, and each approval-timeline entry never split mid-block, and a
+     table's header repeats on every page it spans. */
+  body.printing-pdf table { page-break-inside: auto; }
+  body.printing-pdf tr { page-break-inside: avoid; page-break-after: auto; }
+  body.printing-pdf thead { display: table-header-group; }
+  body.printing-pdf .mp-approval { page-break-inside: avoid; }
 }
 
 /* ── SVG ICONS ── */
