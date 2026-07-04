@@ -100,7 +100,7 @@ function parseLicenseFromMemo(memo) {
 
   return items
     .filter(it => it.name && it.name !== '-')
-    .map(it => {
+    .map((it, idx) => {
       const price  = Number(it.price) || 0;
       const months = Number(it.months) || 12;
       const seats  = Number(it.qty) || 1;
@@ -109,7 +109,10 @@ function parseLicenseFromMemo(memo) {
         : new Date(purchaseDate);
       const expiry = new Date(start);
       expiry.setMonth(expiry.getMonth() + months);
-      const identity = [memo.memoNo, it.name, it.plan || '', it.startMonth || '', it.endMonth || '']
+      // idx (line position within this memo) keeps the id unique even when two lines share the
+      // same name/plan/coverage — matching on those fields alone would collide, making
+      // Edit/Delete silently act on the wrong line item.
+      const identity = [memo.memoNo, idx, it.name, it.plan || '', it.startMonth || '', it.endMonth || '']
         .map(value => String(value).trim().replace(/\s+/g, '_'))
         .join('-');
       return {
@@ -1258,7 +1261,7 @@ document.addEventListener('click', function(e) {
 // ── License Load More ──
 function loadMoreLicense() {
   window._licVisible = (window._licVisible || 20) + 20;
-  _renderLicMemoIndexTable();
+  _renderLicMemoIndexRows();
 }
 function resetLicensePagination() {
   window._licVisible = 20;

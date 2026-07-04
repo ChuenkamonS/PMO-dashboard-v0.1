@@ -221,3 +221,18 @@ test('review state persists to localStorage and round-trips through _getLicRevie
   const reloaded = context._getLicReviewState();
   assert.equal(reloaded['ORB-2608-787'].status, 'approved');
 });
+
+test('parseLicenseFromMemo gives each line item a unique id even when two lines share the same name/plan/coverage', () => {
+  const { context } = createLicenseContext();
+  const memo = slMemo({
+    memoNo: 'ORB-2609-900',
+    slItems: [
+      { name: 'Figma', plan: 'Pro', price: 500, qty: 2, months: 12, startMonth: '2026-01', endMonth: '2026-12' },
+      { name: 'Figma', plan: 'Pro', price: 500, qty: 3, months: 12, startMonth: '2026-01', endMonth: '2026-12' },
+    ],
+  });
+  const licenses = context.parseLicenseFromMemo(memo);
+  assert.equal(licenses.length, 2, 'both duplicate-named lines must be represented');
+  assert.equal(new Set(licenses.map(l => l.id)).size, 2, 'each line item must have a unique id, not a collision on memoNo+name+plan+coverage');
+  assert.deepEqual(Array.from(licenses.map(l => l.seats)).sort(), [2, 3], 'seat counts for both lines must be preserved, not overwritten by a colliding id');
+});

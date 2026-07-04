@@ -99,7 +99,11 @@ test('normal submission routes to A1 without final approval timestamp', () => {
   assert.equal(result.status, 'pending');
   assert.equal(result.currentApproverProfileId, 1);
   assert.equal(result.approvedAt, null);
-  assert.equal(result.auditLog.length, 0);
+  // MEMO_LIFECYCLE.md §17 requires Submit to be audited unconditionally, not only on A1-bypass.
+  assert.equal(result.auditLog.length, 1);
+  assert.equal(result.auditLog[0].action, 'Submitted');
+  assert.equal(result.auditLog[0].statusBefore, 'draft');
+  assert.equal(result.auditLog[0].statusAfter, 'pending');
 });
 
 test('personal Pending is the union of requester and current approver work', () => {

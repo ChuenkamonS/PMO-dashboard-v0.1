@@ -4,7 +4,7 @@
     {
       "name": "static-server",
       "runtimeExecutable": "/opt/homebrew/opt/node/bin/node",
-      "runtimeArgs": ["/private/tmp/claude-501/-Users-chuenklommon-Documents-GitHub-PMO-dashboard-v0-1/988aa463-0d19-45d9-9716-2747388ea867/scratchpad/static-server.js"],
+      "runtimeArgs": ["/private/tmp/claude-501/-Users-chuenklommon-Documents-GitHub-PMO-dashboard-v0-1/6aa8c69a-6bd9-4cb7-9f0e-8022eaba96ad/scratchpad/static-server.js"],
       "port": 8743
     }
   ]

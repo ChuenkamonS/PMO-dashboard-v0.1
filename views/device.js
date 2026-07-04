@@ -382,11 +382,13 @@ function createPurchaseOrdersFromMemo(memo) {
   const items = _hwLineItemsFromMemo(memo);
   if (!items.length) return;
   const existing = loadPurchaseOrders();
-  items.forEach(({ name, qty }) => {
-    // Don't duplicate — check by both memoNo + itemName
-    const isDup = existing.some(p => p.memoNo === memo.memoNo && p.itemName === name);
+  items.forEach(({ name, qty }, index) => {
+    // id (and dup-check) is keyed by the line's position within this memo, not just item name —
+    // two line items that legitimately share the same name (e.g. two separate "iPhone 13" rows)
+    // must not collide into a single PO and silently drop the second line's quantity.
+    const poId = `po_${memo.memoNo}_${index}_${name}`.replace(/[\s/\\]/g, '_');
+    const isDup = existing.some(p => p.id === poId);
     if (isDup) return;
-    const poId = `po_${memo.memoNo}_${name}`.replace(/[\s/\\]/g, '_');
     const po = {
       id:          poId,
       memoNo:      memo.memoNo,

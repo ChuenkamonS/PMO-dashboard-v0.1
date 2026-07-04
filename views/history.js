@@ -1106,6 +1106,30 @@ async function deleteDraft(memoNo) {
   });
 }
 
+// Appends an audit entry to the ORIGINAL memo when it is duplicated into a new draft
+// (MEMO_LIFECYCLE.md §17 lists Duplicate as a required audit action). Local-only persistence,
+// matching the existing precedent for non-status-changing memo edits (saveBudgetTag()).
+function _auditMemoDuplicated(memoNo, action) {
+  if (typeof appendAuditLog !== 'function' || typeof loadMemos !== 'function') return;
+  const memos = loadMemos();
+  const memo = memos.find(m => m.memoNo === memoNo);
+  if (!memo) return;
+  appendAuditLog(memos, memoNo, action, '', {
+    statusBefore: memo.status,
+    statusAfter: memo.status,
+  });
+  storeMemos(memos);
+  if (typeof checkSupa === 'function') {
+    const updatedAuditLog = memos.find(m => m.memoNo === memoNo)?.auditLog || [];
+    checkSupa().then(async ok => {
+      if (!ok) return;
+      try {
+        await supaFetch('memos', 'PATCH', { audit_log: updatedAuditLog }, '?memo_no=eq.' + encodeURIComponent(memoNo));
+      } catch(e) { console.warn('Duplicate audit Supabase sync failed:', e.message); }
+    });
+  }
+}
+
 function duplicateMemo(memoNo) {
   const memo = loadMemos().find(m => m.memoNo === memoNo);
   if (!memo) return;
@@ -1113,6 +1137,7 @@ function duplicateMemo(memoNo) {
   try {
     localStorage.setItem('orbit-pmo-edit-draft', JSON.stringify(draftFromMemo(memo)));
   } catch(e) {}
+  _auditMemoDuplicated(memoNo, `Duplicated by ${currentUser()}`);
   swView('create', document.querySelector('.sb-sub-item[onclick*="create"]'), 'Create Memo');
   setTimeout(() => { if (typeof applyDraftEdit === 'function') applyDraftEdit(); }, 100);
 }
@@ -1124,6 +1149,7 @@ function reeditRejectedMemo(memoNo) {
   try {
     localStorage.setItem('orbit-pmo-edit-draft', JSON.stringify(draftFromMemo(memo, memoNo)));
   } catch(e) { return; }
+  _auditMemoDuplicated(memoNo, `Re-edited (Rejected) by ${currentUser()}`);
   swView('create', document.querySelector('.sb-sub-item[onclick*="create"]'), 'Create Memo');
   setTimeout(() => { if (typeof applyDraftEdit === 'function') applyDraftEdit(); }, 100);
 }

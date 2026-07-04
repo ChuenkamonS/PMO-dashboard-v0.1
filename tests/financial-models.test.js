@@ -892,24 +892,49 @@ test('forecast carries the latest coverage monthly cost into future months and e
   ]);
 });
 
-test('canonical Software detail lines do not change Forecast, Forecast export, or BvA totals', () => {
+test('canonical Software detail lines expand into independent Forecast rows (one per line item), while BvA/Actual Spend totals stay aggregated per memo record', () => {
   const ctx = context();
   const input = { ...base, amount:2550, startDate:'2026-01', endDate:'2026-12', vendorProgram:'Product A, Product B' };
-  const parentOnly = ctx.createActualSpendRecord(input);
   const withDetails = ctx.createActualSpendRecord({ ...input, detailLines:[
     { program:'Product A', plan:'Business', quantity:2, unitCost:100, monthlyCost:200, coverageStart:'2026-01', coverageEnd:'2026-12', coverageMonths:12, lineAmount:2400 },
     { program:'Product B', plan:'Pro', quantity:1, unitCost:50, monthlyCost:50, coverageStart:'2026-01', coverageEnd:'2026-03', coverageMonths:3, lineAmount:150 },
   ] });
 
-  const baselineForecast = ctx.calculateForecast([parentOnly], new Date(2026, 6, 15));
-  const detailedForecast = ctx.calculateForecast([withDetails], new Date(2026, 6, 15));
-  assert.deepEqual(JSON.parse(JSON.stringify(detailedForecast)), JSON.parse(JSON.stringify(baselineForecast)));
-  assert.deepEqual(
-    JSON.parse(JSON.stringify(ctx.forecastExportDataset(detailedForecast))),
-    JSON.parse(JSON.stringify(ctx.forecastExportDataset(baselineForecast))),
-  );
+  const forecast = ctx.calculateForecast([withDetails], new Date(2026, 6, 15));
+  assert.equal(forecast.rows.length, 2, 'each software line item must produce its own independent Forecast row, not one row aggregated per memo');
+  const rowA = forecast.rows.find(row => row.program === 'Product A');
+  const rowB = forecast.rows.find(row => row.program === 'Product B');
+  assert.ok(rowA && rowB, 'both line items must be represented by name, not merged into a single joined program label');
+  assert.equal(rowA.values['2026-02'], 200);
+  assert.equal(rowA.values['2027-01'], 200, 'Product A carries its own monthly cost (2400/12) into forecast months');
+  assert.equal(rowB.values['2026-02'], 50);
+  assert.equal(rowB.values['2026-03'], 50);
+  assert.equal(rowB.values['2027-01'], 50, 'Product B carries its own monthly cost (150/3), independent of Product A coverage/amount');
+  assert.equal(rowA.total, 2400);
+  assert.equal(rowB.total, 400);
+
+  const exported = ctx.forecastExportDataset(forecast);
+  assert.equal(exported.rows.length, 2, 'export must match the UI row count exactly (one row per line item)');
+  assert.deepEqual(new Set(exported.rows.map(row => row[1])), new Set(['Product A', 'Product B']));
+
+  // The Forecast row split must not leak into Actual Spend / Budget vs Actual, which stay one
+  // canonical record per memo (MASTER_SPEC.md Single Source of Truth).
   assert.equal(ctx.calculateBudgetVsActualDataset([], [withDetails], { year:'2569' }).totals.actual, 2550);
   assert.equal(ctx.calculateActualSpend([withDetails]), 2550);
+});
+
+test('a single Software line item still produces exactly one Forecast row (no over-splitting)', () => {
+  const ctx = context();
+  const record = ctx.createActualSpendRecord({
+    ...base, amount:1200, startDate:'2026-01', endDate:'2026-12', vendorProgram:'Solo Product',
+    detailLines: [
+      { program:'Solo Product', plan:'Pro', quantity:1, unitCost:100, monthlyCost:100, coverageStart:'2026-01', coverageEnd:'2026-12', coverageMonths:12, lineAmount:1200 },
+    ],
+  });
+  const forecast = ctx.calculateForecast([record], new Date(2026, 6, 15));
+  assert.equal(forecast.rows.length, 1);
+  assert.equal(forecast.rows[0].program, 'Solo Product');
+  assert.equal(forecast.rows[0].total, 1200);
 });
 
 test('Infra Cost entered through Actual Spend remains canonical for BvA, Forecast, export, and Unbudgeted', () => {

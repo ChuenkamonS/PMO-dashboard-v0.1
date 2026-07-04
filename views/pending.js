@@ -705,7 +705,11 @@ function confirmPmoOverride(memoNo) {
   }
 
   const memos = loadMemos();
-  appendAuditLog(memos, memoNo, `PMO Override → ${newStatus} by ${user}`, note);
+  appendAuditLog(memos, memoNo, `PMO Override → ${newStatus} by ${user}`, note, {
+    statusBefore: memo?.status || null,
+    statusAfter:  newStatus,
+    evidenceUrl,
+  });
   storeMemos(memos);
   const updatedAuditLog = memos.find(m => m.memoNo === memoNo)?.auditLog || [];
 
@@ -912,7 +916,10 @@ function cancelMemo(memoNo) {
   const user = currentUser();
   const memos = loadMemos();
   const actorType = isPmoUser && !isRequester ? 'PMO' : 'Requester';
-  appendAuditLog(memos, memoNo, `Cancelled by ${user} (${actorType})`, reason.trim());
+  appendAuditLog(memos, memoNo, `Cancelled by ${user} (${actorType})`, reason.trim(), {
+    statusBefore: memo.status,
+    statusAfter:  'cancelled',
+  });
   storeMemos(memos);
   updateMemoStatusAsync(memoNo, 'cancelled', {
     cancellationReason: reason.trim(),

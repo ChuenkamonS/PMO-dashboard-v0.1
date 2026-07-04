@@ -22,6 +22,90 @@
 
 ## Current Baseline
 
+### 2026-07-05 Functional Audit — Memo → Approval → Budget → License → Device end-to-end
+
+Scope: complete functional audit of the Memo → Approval → Budget → Actual Spend → Forecast →
+Budget vs Actual → License → Purchase Order → Device Registry flow. No new features, no UI
+redesign. Only confirmed functional/logic/business-rule/propagation bugs were fixed.
+
+#### Fixed
+- `calculateForecast()` (app.js) previously aggregated every Software line item in a memo into
+  one joined Forecast row (e.g. "Product A, Product B") using the memo's combined coverage
+  envelope and total amount. It now expands a Software Actual Spend record's `detailLines` into
+  one independent Forecast row per line item (own program name, own amount, own coverage months),
+  matching MASTER_SPEC.md's Forecast Rules ("Monthly Cost = Amount / Coverage Months" per item).
+  Actual Spend / Budget vs Actual totals are unaffected — they still read one record per memo.
+- `createPurchaseOrdersFromMemo()` (views/device.js): a Hardware memo with two line items sharing
+  the same item name (e.g. two separate "iPhone 13" rows with different specs) collided on both
+  the dedup check and the generated PO id (`memoNo + itemName`), silently dropping the second
+  line's quantity from Purchase Order creation. The PO id and dedup key now include the line's
+  index within the memo, so duplicate-named lines each get their own PO.
+- `parseLicenseFromMemo()` (views/license.js): two License memo line items sharing the same
+  name/plan/coverage collided on the same derived id, so Edit/Delete on the second row silently
+  acted on the first row's data. The id now includes the line's index within the memo.
+- `loadMoreLicense()` (views/license.js) called a non-existent `_renderLicMemoIndexTable()`
+  (unreachable dead code — no UI wires it up today, but it would throw if ever invoked). Repointed
+  to the real pagination render function, `_renderLicMemoIndexRows()`.
+- `prepareMemoForSubmission()` (app.js): Submit only wrote an audit log entry when the A1-bypass
+  (requester is also A1) path fired; a normal submission produced no audit entry at all,
+  contradicting MEMO_LIFECYCLE.md §17. Submit now always appends a "Submitted" audit entry.
+- `duplicateMemo()` / `reeditRejectedMemo()` (views/history.js): Duplicate and Re-edit Rejected
+  never wrote an audit entry on the original memo. Both now append a "Duplicated by ..." /
+  "Re-edited (Rejected) by ..." entry to the original memo (local-only persistence, matching the
+  existing precedent set by `saveBudgetTag()`).
+- `confirmPmoOverride()` / `cancelMemo()` (views/pending.js): both called `appendAuditLog()`
+  without the `extra` argument, so PMO Override and Cancel audit entries always had
+  `statusBefore`/`statusAfter`/`evidenceUrl` recorded as `null` even though the data was available
+  at the call site (Override even *requires* evidence upload before it can submit). Both now pass
+  the previous/new status and, for Override, the evidence URL.
+
+#### Investigated, not a bug (no change made)
+- Save Draft double-click race: a rapid double-click was suspected of creating two draft records,
+  since the generated `DRAFT-<timestamp>` memo number is only written to a local variable, not
+  back into `#f-memo-no`, before the blocking `alert()` fires. On closer trace, `saveDraft()` is
+  fully synchronous up to that `alert()` call; a browser's `alert()` blocks the JS event loop, so a
+  second click's handler cannot begin running until the first alert is dismissed. Not reproducible
+  under normal single-tab browser semantics.
+- `resetMemoForm()` and manually-edited Account-table column headers (`#acct-cols .acct-col`,
+  `data-manual="true"`): suspected these survive a form reset since `acct-cols` isn't in the
+  container `innerHTML`-clear list. On closer trace, they are `<input>` elements inside
+  `#form-body`, so the earlier blanket `#form-body input` value-clear already blanks them; no gap.
+
+#### Remaining Work (documented, not fixed — see docs/TECHNICAL_DEBT.md)
+- **TD-AUDIT-01 (new)**: the Forecast tab's embedded "Budget vs Actual" widget
+  (`_renderBudgetVsActual()`, views/budget.js) is a third, independent allocation engine — it never
+  calls `calculateBudgetVsActualDataset()`/`findMatchingBudgetPools()`/`mapBudgetPool()`, instead
+  re-deriving Actual from a raw memo walk and Budget from the legacy `loadSLBudgets()` annual
+  setting, on a rolling-window basis. Its numbers can disagree with the real Budget vs Actual tab
+  for the same nominal project/period. Not fixed here — swapping its calculation engine changes
+  on-screen numbers/semantics and, per this repo's own precedent (TD-7A-09), needs a scoped design
+  decision, not a silent audit fix. `buildActualByMonth()`/`getActualInRange()` (views/budget.js)
+  are dead code tied to the same widget.
+- License Management has no "Approve All / Reject All" bulk action in the PMO Review Queue (only
+  per-memo Approve/Reject). SYSTEM_STATE_MACHINE.md §7 names the flow "Approve All / Reject All";
+  the per-item buttons are functionally correct but not a literal bulk action. Not implemented —
+  out of this audit's "no new features" scope; flagged for a future UI decision.
+- All Memo has no dedicated "Voided" filter tab/count (SYSTEM_OVERVIEW.md §3.3 lists Voided as one
+  of the tracked statuses). Voided memos are fully visible and correctly labeled under the "All"
+  tab today — this is a missing filter convenience, not a data-visibility or data-correctness bug.
+  Not implemented — adding a new tab is a UI change, out of this audit's scope.
+
+#### Tests
+- `tests/financial-models.test.js`: rewrote the test that had encoded the Forecast aggregation bug
+  as expected behavior; added a companion test proving a single line item still yields exactly one
+  row (no over-splitting).
+- `tests/device.test.js`: new regression test for duplicate-named Hardware line items each getting
+  their own PO with a unique id and unclipped quantity.
+- `tests/license.test.js`: new regression test for duplicate-named License line items each getting
+  a unique id with seat counts preserved.
+- `tests/workflow.test.js`: updated the submission test that had asserted zero audit entries for a
+  normal (non-bypass) submission.
+- `tests/memo-audit.test.js` (new file): regression tests for the PMO Override / Cancel /
+  Duplicate / Re-edit Rejected audit-log gaps, using a stateful VM harness (app.js + pending.js +
+  history.js) with real localStorage persistence.
+
+---
+
 ### PDF Business Document Milestone - Approval Info, Timeline, Status Banner, Printing
 
 Scope: make the generated memo PDF (`renderMemoPdf()`, app.js) a complete business/audit

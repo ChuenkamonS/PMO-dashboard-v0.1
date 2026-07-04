@@ -649,6 +649,31 @@ function calculateActualSpendInRange(records = [], fromMonth, toMonth, filters =
   }, 0);
 }
 
+// A Software Actual Spend record can carry multiple independent cost items (one per memo
+// line item, e.g. several distinct software products in one memo) inside detailLines.
+// Forecast must render one row per cost item, not one aggregated row per memo/record.
+function forecastLineItems(record = {}) {
+  const lines = record.spendType === SPEND_TYPES.SOFTWARE && Array.isArray(record.detailLines)
+    ? record.detailLines.filter(line => line && line.program && line.coverageStart && line.coverageEnd)
+    : [];
+  if (lines.length) {
+    return lines.map(line => ({
+      program: line.program,
+      amount: Number(line.lineAmount) || 0,
+      startDate: line.coverageStart,
+      endDate: line.coverageEnd,
+      coverageMonths: line.coverageMonths,
+    }));
+  }
+  return [{
+    program: record.vendorProgram || record.description || record.referenceNo || record.spendType,
+    amount: Number(record.amount) || 0,
+    startDate: record.startDate,
+    endDate: record.endDate,
+    coverageMonths: record.coverageMonths,
+  }];
+}
+
 function calculateForecast(records = [], asOfDate = new Date(), filters = {}) {
   const anchor = new Date(asOfDate);
   const anchorYear = anchor.getFullYear();
@@ -667,22 +692,26 @@ function calculateForecast(records = [], asOfDate = new Date(), filters = {}) {
   );
   const grouped = new Map();
   eligible.forEach(record => {
-    const program = record.vendorProgram || record.description || record.referenceNo || record.spendType;
-    const key = [record.project, program, record.spendType].join('\u0000');
-    if (!grouped.has(key)) grouped.set(key, {
-      project: record.project,
-      program,
-      spendType: record.spendType,
-      values: Object.fromEntries(months.map(month => [month.key, 0])),
-    });
-    const row = grouped.get(key);
-    const allocations = actualSpendMonthlyAllocations(record);
-    const coverageEnd = String(record.endDate).slice(0, 7);
-    const monthlyCost = (Number(record.amount) || 0) / record.coverageMonths;
-    months.forEach(month => {
-      const allocated = Number(allocations[month.key]) || 0;
-      const carriedForecast = month.kind === 'forecast' && month.key > coverageEnd ? monthlyCost : 0;
-      row.values[month.key] += allocated || carriedForecast;
+    forecastLineItems(record).forEach(item => {
+      const key = [record.project, item.program, record.spendType].join('\u0000');
+      if (!grouped.has(key)) grouped.set(key, {
+        project: record.project,
+        program: item.program,
+        spendType: record.spendType,
+        values: Object.fromEntries(months.map(month => [month.key, 0])),
+      });
+      const row = grouped.get(key);
+      const allocations = actualSpendMonthlyAllocations({
+        startDate: item.startDate, endDate: item.endDate, amount: item.amount,
+        createdAt: record.createdAt, updatedAt: record.updatedAt,
+      });
+      const coverageEnd = String(item.endDate).slice(0, 7);
+      const monthlyCost = item.coverageMonths ? (Number(item.amount) || 0) / item.coverageMonths : 0;
+      months.forEach(month => {
+        const allocated = Number(allocations[month.key]) || 0;
+        const carriedForecast = month.kind === 'forecast' && month.key > coverageEnd ? monthlyCost : 0;
+        row.values[month.key] += allocated || carriedForecast;
+      });
     });
   });
   const rows = [...grouped.values()].sort((a, b) =>
@@ -1199,6 +1228,16 @@ function prepareMemoForSubmission(data, now = new Date().toISOString()) {
   }
   const status = next ? (selfA1 ? 'pending_a2' : 'pending') : 'completed';
   const auditLog = [...(data.auditLog || [])];
+  // MEMO_LIFECYCLE.md §17 requires an audit entry for every Submit, not only the A1-bypass case.
+  auditLog.push({
+    actor: requesterName,
+    actorProfileId: requesterProfileId,
+    action: 'Submitted',
+    comment: '',
+    timestamp: now,
+    statusBefore: data.status || 'draft',
+    statusAfter: status,
+  });
   if (selfA1) {
     auditLog.push({
       actor: requesterName,

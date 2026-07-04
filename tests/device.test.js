@@ -160,6 +160,27 @@ test('createPurchaseOrdersFromMemo dedupes by memoNo + item name and does not re
   assert.equal(context.loadPurchaseOrders().length, 1, 'dedup by memoNo + itemName must prevent a duplicate PO');
 });
 
+test('createPurchaseOrdersFromMemo creates a separate PO for each line item even when two lines share the same item name', () => {
+  const { context } = createDeviceContext();
+  const memo = {
+    type: 'hw', status: 'completed', memoNo: 'HW-106', project: 'AOA-MP',
+    hwItems: [
+      { name: 'iPhone 13', price: 25000, qty: 3 },
+      { name: 'iPhone 13', price: 27000, qty: 2 },
+    ],
+  };
+  context.createPurchaseOrdersFromMemo(memo);
+  const pos = context.loadPurchaseOrders().filter(p => p.memoNo === 'HW-106');
+  assert.equal(pos.length, 2, 'both duplicate-named lines must each produce their own PO');
+  assert.deepEqual(Array.from(pos.map(p => p.orderedQty)).sort(), [2, 3], 'neither line\'s quantity may be dropped');
+  assert.equal(new Set(pos.map(p => p.id)).size, 2, 'each PO must have a unique id, not a collision on memoNo+itemName');
+
+  // Re-running (simulating the two independent app.js call sites both firing) must still dedupe
+  // per-line, not recreate or drop either PO.
+  context.createPurchaseOrdersFromMemo(memo);
+  assert.equal(context.loadPurchaseOrders().filter(p => p.memoNo === 'HW-106').length, 2);
+});
+
 test('createPurchaseOrdersFromMemo does nothing for a non-hw memo or a memo not yet completed', () => {
   const { context } = createDeviceContext();
   context.createPurchaseOrdersFromMemo({ type: 'sl', status: 'completed', memoNo: 'SL-1', hwItems: [{ name: 'x', qty: 1 }] });

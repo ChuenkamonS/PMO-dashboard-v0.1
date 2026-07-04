@@ -1187,6 +1187,89 @@ Exit Criteria
 
 ---
 
+# TD-AUDIT-01
+
+Title
+
+Forecast Tab's Embedded "Budget vs Actual" Widget Is a Third, Independent Allocation Engine
+
+Status
+
+OPEN (found during 2026-07-05 Functional Audit; not fixed — requires a design decision, see below)
+
+Priority
+
+Medium
+
+Introduced
+
+Found during the 2026-07-05 end-to-end Functional Audit (Memo → Approval → Budget → Actual Spend
+→ Forecast → Budget vs Actual → License → Purchase Order → Device Registry)
+
+Owner Phase
+
+Budget & Spend — Forecast tab (future design phase)
+
+Reason
+
+`_renderBudgetSLInfraWith()` (`views/budget.js`, the Forecast tab's render function) draws two
+widgets: the canonical Forecast table (`_renderForecastTable()`, which correctly calls
+`calculateForecast(loadActualSpendRecords(), ...)`) and a second "Budget vs Actual" summary
+(`_renderBudgetVsActual()`, `views/budget.js:1492-1608`) that never calls
+`calculateBudgetVsActualDataset()`, `findMatchingBudgetPools()`, `mapBudgetPool()`, or even
+`calculateActualSpend()`. Instead it re-derives "Actual" by walking `loadMemos()` and re-parsing
+`slItems`/legacy HTML per month (`views/budget.js:1506-1531`), and re-derives "Budget" from the
+legacy annual `loadSLBudgets()` settings (`views/budget.js:1534-1554`) — both scoped to a
+rolling N-month window (`sl-bva-range` selector), not a calendar year. `buildActualByMonth()` /
+`getActualInRange()` (`views/budget.js:1271-1316`) are a related, currently-unused duplicate of
+the same re-derivation logic (confirmed via repo-wide search: no live callers today).
+
+This is distinct from TD-7A-09 (which is about Overview's rolling-window vs. Budget vs Actual's
+calendar-year *KPI* divergence, both of which at least call the canonical engine). Here, the
+Forecast tab's own embedded widget never touches Budget Pool or canonical Actual Spend at all —
+MASTER_SPEC.md's "Calculation Rules: Shared calculation functions only. No duplicated business
+logic in UI" is violated for this one widget specifically.
+
+Current Situation
+
+Unlike TD-7A-03 (Overview's Budget KPI, already migrated onto the canonical dataset in Phase
+7A-11), this widget was explicitly left untouched by TD-7A-03/TD-7A-09 under the instruction "do
+not change Forecast" — a prior, deliberate scope boundary for a different phase's Overview-only
+fix, not a decision that this widget's own calculation is correct.
+
+Risk
+
+A PMO user viewing the Forecast tab can see this widget's Budget/Actual/Remaining figures disagree
+with the real Budget vs Actual tab for the same nominal project/period, because this widget's
+"Budget" comes from the legacy annual Settings figure (not Budget Pool) and its "Actual" comes
+from a raw re-walk of SL memos (not canonical Actual Spend, so it omits Manual Expense records and
+any Voided-memo exclusion drift risk from being independently re-implemented rather than reused).
+
+Explicitly not fixed in the 2026-07-05 audit
+
+Swapping this widget's calculation onto `calculateBudgetVsActualDataset()` would change its
+displayed numbers, KPI cards, and possibly its rolling-window-vs-calendar-year semantic — a
+user-visible behavior/design change, not a pure logic fix, and this audit's scope was "fix
+functional bugs, do not redesign UI / do not add new features." Per this repo's own precedent
+(TD-7A-09, and the paused Phase 7A-12 design review for a related dropdown-unification question),
+allocation-engine swaps that change on-screen numbers get a scoped design review first, not a
+silent audit fix.
+
+Exit Criteria
+
+- PMO/BA decision: should this widget be replaced with a `calculateBudgetVsActualDataset()` call
+  (matching Budget vs Actual's calendar-year semantics, losing the rolling-window view), kept as an
+  intentionally different rolling-window view but reading canonical Actual Spend instead of
+  re-parsing memos, or removed as redundant now that `_renderForecastTable()` already covers the
+  Forecast tab's canonical numbers?
+- Whichever is decided, `buildActualByMonth()`/`getActualInRange()` should either be wired to the
+  same fix or deleted (currently dead code, and a landmine if a future change accidentally calls
+  them expecting canonical behavior).
+- Regression test proving the Forecast tab and the Budget vs Actual tab reconcile for the same
+  project + period once fixed.
+
+---
+
 # TD-PDF-01
 
 Title
