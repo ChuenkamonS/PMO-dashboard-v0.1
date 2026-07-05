@@ -250,6 +250,67 @@ function exportLicenseCSV() {
   _downloadCSV('License', headers, rows);
 }
 
+// ── Export User Licenses CSV — Users tab's own dataset, matrix format ───────
+// Reflects exactly what the Users tab currently shows: the same visible-user
+// list _renderLicUsersRows() computed (respecting Search/Project/Software
+// filters), reused as-is here so export can never drift from the UI
+// (MASTER_SPEC export rule). Columns are Software (+ "— Plan" when set),
+// deduplicated by Software+Plan, one column per unique combo — never one
+// column per memo.
+function exportUserLicensesCSV() {
+  const overrides = _getLicUserOverrides();
+  const allLicenses = getAllLicenses();
+
+  let users = window._licUsrVisibleUsers;
+  let allLicCols = window._licUsrCols;
+  if (!users) {
+    // Users tab hasn't rendered in this session yet — fall back to the full,
+    // unfiltered dataset via the same pipeline the render path uses,
+    // including Part 1's widened (inventory-based) assignable list.
+    const { allUserRows, allLicCols: legacyCols } = computeLicUserMappingData(loadMemos(), _getLicReviewState());
+    allLicCols = _licAssignableIdentities(allLicenses, legacyCols);
+    const groups = _buildLicUserGroups(allUserRows);
+    const userMap = {};
+    Object.values(groups).forEach(group => {
+      if (!userMap[group.email]) userMap[group.email] = { email: group.email, projectGroups: [] };
+      userMap[group.email].projectGroups.push(group);
+    });
+    users = Object.values(userMap).sort((a, b) => a.email.localeCompare(b.email));
+  }
+  allLicCols = allLicCols || [];
+
+  if (!users.length) { alert('ไม่มีข้อมูล User License'); return; }
+
+  const colLabel = new Map();  // key `${software}|${plan}` -> display label
+  const userCols = new Map();  // email -> Set(key)
+  users.forEach(u => {
+    const active = new Set();
+    u.projectGroups.forEach(group => {
+      _licActiveForGroup(group, allLicCols, overrides).forEach(lic => {
+        const ovKey = `${group.email}|${group.project}|${lic}`;
+        const parsed = _parseLicIdentity(lic);
+        const detail = _licUserAssignmentDetail(group, lic, allLicenses, overrides[ovKey]);
+        const plan = detail.plan || parsed.plan;
+        const key = `${parsed.name}|${plan}`;
+        if (!colLabel.has(key)) colLabel.set(key, plan ? `${parsed.name} — ${plan}` : parsed.name);
+        active.add(key);
+      });
+    });
+    userCols.set(u.email, active);
+  });
+
+  const colKeys = [...colLabel.keys()].sort((a, b) => colLabel.get(a).localeCompare(colLabel.get(b)));
+  if (!colKeys.length) { alert('ไม่มีข้อมูล User License'); return; }
+
+  const headers = ['User Email', ...colKeys.map(k => colLabel.get(k))];
+  const rows = users.map(u => {
+    const active = userCols.get(u.email) || new Set();
+    return [u.email, ...colKeys.map(k => active.has(k) ? '✓' : '')];
+  });
+
+  _downloadCSV('User_Licenses_Matrix', headers, rows);
+}
+
 // ── Bulk Import / Template ─────────────────────────────────────
 function downloadTemplate(type) {
   if (type === 'license') {
@@ -547,9 +608,15 @@ function _renderLicByProject() {
         </select>
       </div>
     </div>
-    <div id="bp-table-wrap"></div>`;
+    <div id="bp-table-wrap"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin:20px 0 10px">
+      <div style="font-size:13px;font-weight:700">License Reconciliation</div>
+      <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="exportLicReconciliationCSV()">⬇ Export Reconciliation</button>
+    </div>
+    <div id="lic-recon-wrap"></div>`;
 
   _bpRenderMatrix();
+  _renderLicReconciliation();
 }
 
 function _bpGetFiltered() {
@@ -560,19 +627,38 @@ function _bpGetFiltered() {
   });
 }
 
+// Purchased Seats aggregation shared by License Summary's existing project
+// matrix and the new Reconciliation section (Phase 1 Part 3 — MASTER_SPEC:
+// shared calculation functions only, no duplicated business logic in UI).
+// Sums `seats` per (project, name, plan), excluding cancelled licenses —
+// project-less (manual license with no project) buckets under the same
+// '(ไม่ระบุ)' placeholder the existing matrix already uses.
+function _licSeatsByProjectSoftwarePlan(allLicenses) {
+  const map = new Map();
+  allLicenses.forEach(l => {
+    if (getLicenseStatus(l).key === 'cancelled') return;
+    const project = l.project || '(ไม่ระบุ)';
+    const plan = l.plan || '';
+    const key = `${project}||${l.name}||${plan}`;
+    if (!map.has(key)) map.set(key, { project, name: l.name, plan, seats: 0 });
+    map.get(key).seats += (l.seats || 1);
+  });
+  return map;
+}
+
 function _bpRenderMatrix() {
   const wrap = document.getElementById('bp-table-wrap');
   if (!wrap) return;
   const filtered = _bpGetFiltered();
-  const projects = [...new Set(filtered.map(l => l.project || '(ไม่ระบุ)'))].sort();
+  const seatMap = _licSeatsByProjectSoftwarePlan(filtered);
+  const projects = [...new Set([...seatMap.values()].map(r => r.project))].sort();
 
   const rowMap = {};
-  filtered.forEach(l => {
-    const k = `${l.name}||${l.plan||''}`;
-    if (!rowMap[k]) rowMap[k] = { name: l.name, plan: l.plan||'', byProj: {}, total: 0 };
-    const proj = l.project || '(ไม่ระบุ)';
-    rowMap[k].byProj[proj] = (rowMap[k].byProj[proj]||0) + (l.seats||1);
-    rowMap[k].total += (l.seats||1);
+  seatMap.forEach(r => {
+    const k = `${r.name}||${r.plan}`;
+    if (!rowMap[k]) rowMap[k] = { name: r.name, plan: r.plan, byProj: {}, total: 0 };
+    rowMap[k].byProj[r.project] = (rowMap[k].byProj[r.project]||0) + r.seats;
+    rowMap[k].total += r.seats;
   });
 
   const matrixRows = Object.values(rowMap).sort((a,b) => a.name.localeCompare(b.name) || a.plan.localeCompare(b.plan));
@@ -610,6 +696,157 @@ function _bpRenderMatrix() {
       ${head}<tbody>${bodyRows}${totalRow}</tbody>
     </table>
   </div>`;
+}
+
+// ── Phase 1 Part 3 — License Reconciliation ───────────────────────────────
+// Joins Purchased Seats (effective License Inventory, via the shared
+// _licSeatsByProjectSoftwarePlan()) against effective, post-Review-Queue,
+// post-override user Assignments (the exact same
+// computeLicUserMappingData()/_buildLicUserGroups()/_licActiveForGroup()
+// pipeline the Users tab uses) — pure, no DOM, so the on-screen table, its
+// export, and the Assigned Users drill-down all read one canonical result.
+function computeLicReconciliation(memos, reviewState, overrides) {
+  const allLicenses = getAllLicenses();
+  const seatMap = _licSeatsByProjectSoftwarePlan(allLicenses);
+
+  const { allUserRows, allLicCols } = computeLicUserMappingData(memos, reviewState);
+  const assignableCols = _licAssignableIdentities(allLicenses, allLicCols);
+  const groups = _buildLicUserGroups(allUserRows);
+
+  const rows = new Map(); // key `${project}||${name}||${plan}` -> row
+  const ensureRow = (project, name, plan) => {
+    const key = `${project}||${name}||${plan}`;
+    if (!rows.has(key)) rows.set(key, { project, name, plan, purchased: 0, assigned: new Map() });
+    return rows.get(key);
+  };
+
+  seatMap.forEach(r => { ensureRow(r.project, r.name, r.plan).purchased = r.seats; });
+
+  Object.values(groups).forEach(group => {
+    _licActiveForGroup(group, assignableCols, overrides).forEach(lic => {
+      const ovKey = `${group.email}|${group.project}|${lic}`;
+      const detail = _licUserAssignmentDetail(group, lic, allLicenses, overrides[ovKey]);
+      const parsed = _parseLicIdentity(lic);
+      const plan = detail.plan || parsed.plan;
+      // Bucket under the matched license record's own project (so Assigned
+      // lines up with the same bucket Purchased Seats used) — falling back
+      // to the user's group project only when no inventory record resolved
+      // at all (a genuine data gap, correctly surfaces as Over Assigned).
+      const project = detail.match ? (detail.match.project || '(ไม่ระบุ)') : group.project;
+      const row = ensureRow(project, parsed.name, plan);
+      if (!row.assigned.has(group.email)) {
+        row.assigned.set(group.email, {
+          email: group.email,
+          source: detail.sources.length > 1 ? 'Multiple memos' : detail.sources.length === 1 ? 'Memo' : 'Manual',
+          project: group.project,
+          sourceMemo: detail.sources.length ? detail.sources.join(', ') : '',
+        });
+      }
+    });
+  });
+
+  return [...rows.values()].map(r => {
+    const assignedCount = r.assigned.size;
+    const remaining = r.purchased - assignedCount;
+    return {
+      project: r.project, name: r.name, plan: r.plan,
+      purchased: r.purchased, assignedCount, remaining,
+      overAssigned: remaining < 0,
+      assignedUsers: [...r.assigned.values()].sort((a, b) => a.email.localeCompare(b.email)),
+    };
+  }).sort((a, b) => a.project.localeCompare(b.project) || a.name.localeCompare(b.name) || a.plan.localeCompare(b.plan));
+}
+
+function _renderLicReconciliation() {
+  const wrap = document.getElementById('lic-recon-wrap');
+  if (!wrap) return;
+  const rows = computeLicReconciliation(loadMemos(), _getLicReviewState(), _getLicUserOverrides());
+  window._licReconRows = rows;
+
+  if (!rows.length) {
+    wrap.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text-3)">ไม่มีข้อมูล Reconciliation</div>`;
+    return;
+  }
+
+  const bodyRows = rows.map((r, idx) => `<tr>
+      <td style="padding-left:14px;font-size:12px">${esc(r.project)}</td>
+      <td style="font-weight:500">${esc(r.name)}</td>
+      <td style="font-size:12px;color:var(--text-2)">${esc(r.plan) || '<span style="color:var(--text-3)">—</span>'}</td>
+      <td style="text-align:right">${r.purchased}</td>
+      <td style="text-align:right"><span style="color:var(--blue);cursor:pointer;text-decoration:underline" onclick="_openLicReconDetail(${idx})">${r.assignedCount}</span></td>
+      <td style="text-align:right;font-weight:600;${r.overAssigned ? 'color:var(--red)' : ''}">
+        ${r.remaining}${r.overAssigned ? ' <span class="badge badge-red" style="font-size:10px;margin-left:4px">Over Assigned</span>' : ''}
+      </td>
+    </tr>`).join('');
+
+  wrap.innerHTML = `
+    <div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
+      <table class="hist-table" style="min-width:600px">
+        <thead><tr>
+          <th style="padding-left:14px">Project</th>
+          <th>Software</th>
+          <th>Plan</th>
+          <th style="text-align:right">Purchased Seats</th>
+          <th style="text-align:right">Assigned Users</th>
+          <th style="text-align:right">Remaining Seats</th>
+        </tr></thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </div>
+    <div id="lic-recon-detail" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:300;align-items:center;justify-content:center">
+      <div class="card" style="width:440px;max-width:94vw;max-height:80vh;overflow-y:auto;padding:20px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px">
+          <div><div style="font-size:15px;font-weight:700">Assigned Users</div><div id="lic-recon-detail-name" style="font-size:11px;color:var(--text-2);margin-top:2px"></div></div>
+          <button class="btn-sm" onclick="_closeLicReconDetail()">✕</button>
+        </div>
+        <div style="display:flex;gap:18px;margin-bottom:12px">
+          <div><div style="font-size:10px;color:var(--text-3);text-transform:uppercase">Purchased</div><div id="lic-recon-detail-purchased" style="font-weight:700;font-size:16px"></div></div>
+          <div><div style="font-size:10px;color:var(--text-3);text-transform:uppercase">Assigned</div><div id="lic-recon-detail-assigned" style="font-weight:700;font-size:16px"></div></div>
+          <div><div style="font-size:10px;color:var(--text-3);text-transform:uppercase">Remaining</div><div id="lic-recon-detail-remaining" style="font-weight:700;font-size:16px"></div></div>
+        </div>
+        <div id="lic-recon-detail-body"></div>
+      </div>
+    </div>`;
+}
+
+// Read-only drill-down (Phase 1 Part 4) — no editing here, just reads the
+// row computeLicReconciliation() already built (no re-derivation).
+function _openLicReconDetail(idx) {
+  const row = (window._licReconRows || [])[idx];
+  const modal = document.getElementById('lic-recon-detail');
+  if (!row || !modal) return;
+  const nameEl = document.getElementById('lic-recon-detail-name');
+  if (nameEl) nameEl.textContent = `${row.name}${row.plan ? ' — ' + row.plan : ''} · ${row.project}`;
+  const setText = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  setText('lic-recon-detail-purchased', row.purchased);
+  setText('lic-recon-detail-assigned', row.assignedCount);
+  setText('lic-recon-detail-remaining', row.remaining);
+  const body = document.getElementById('lic-recon-detail-body');
+  if (body) {
+    body.innerHTML = row.assignedUsers.length
+      ? row.assignedUsers.map(u => `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
+          <div style="font-weight:600">${esc(u.email)}</div>
+          <div style="color:var(--text-2)">Source: ${esc(u.source)} · Project: ${esc(u.project || '—')}${u.sourceMemo ? ` · Source Memo: ${esc(u.sourceMemo)}` : ''}</div>
+        </div>`).join('')
+      : `<div style="text-align:center;padding:16px;color:var(--text-3)">No assigned users</div>`;
+  }
+  modal.style.display = 'flex';
+}
+
+function _closeLicReconDetail() {
+  const modal = document.getElementById('lic-recon-detail');
+  if (modal) modal.style.display = 'none';
+}
+
+// Phase 1 Part 7 — separate from the existing User Matrix export
+// (exportUserLicensesCSV), reads the exact same canonical reconciliation
+// rows the on-screen table renders.
+function exportLicReconciliationCSV() {
+  const rows = computeLicReconciliation(loadMemos(), _getLicReviewState(), _getLicUserOverrides());
+  if (!rows.length) { alert('ไม่มีข้อมูล Reconciliation'); return; }
+  const headers = ['Project', 'Software', 'Plan', 'Purchased Seats', 'Assigned Users', 'Remaining Seats'];
+  const csvRows = rows.map(r => [r.project, r.name, r.plan, r.purchased, r.assignedCount, r.remaining]);
+  _downloadCSV('License_Reconciliation', headers, csvRows);
 }
 
 // ── TAB 3: USERS — PMO Review Queue (Milestone 3A) ────────
@@ -764,7 +1001,78 @@ function _rejectLicReview(memoNo) {
   _setLicReviewStatus(memoNo, 'rejected', (reason || '').trim());
 }
 
+// ── Phase 1 (Inventory ↔ Assignment Alignment) — shared helpers ──────────
+// Part 2: an override value may be the legacy plain boolean (untouched,
+// still the only shape ever written for account-table-derived identities)
+// or the new `{ active, licenseId }` object (only written for inventory-only
+// identities). Every override read in this file goes through this one
+// normalizer so both shapes are handled identically, with no migration.
+function _ovIsActive(ov, fallback) {
+  if (ov === undefined) return fallback;
+  return typeof ov === 'object' ? !!ov.active : !!ov;
+}
+
+// Inverse of the "Name — Plan" display convention (already used by
+// exportUserLicensesCSV's matrix columns): splits an assignable identity
+// string back into its name/plan parts. A bare name (no " — ") has plan ''.
+function _parseLicIdentity(identity) {
+  const idx = identity.indexOf(' — ');
+  return idx === -1 ? { name: identity, plan: '' } : { name: identity.slice(0, idx), plan: identity.slice(idx + 3) };
+}
+
+// Part 1 — Full License Inventory. Widens the assignable-software universe
+// beyond account-table columns (`legacyCols`) to the complete effective
+// License Inventory (`getAllLicenses()`: approved memo + manual + imported —
+// imported licenses already land in the same manual store, no separate flag
+// exists or is needed). "Name — Plan" is used only when the same name has
+// more than one distinct plan in inventory; a single-plan name stays bare,
+// matching the existing chip-label convention. Cancelled licenses are not
+// assignable. Legacy columns are never duplicated into the widened set —
+// their existing bare-name behavior (and any boolean overrides already
+// written against them) is completely unaffected.
+function _licAssignableIdentities(allLicenses, legacyCols) {
+  const legacy = new Set(legacyCols || []);
+  const plansByName = new Map();
+  allLicenses.forEach(l => {
+    if (getLicenseStatus(l).key === 'cancelled') return;
+    if (!plansByName.has(l.name)) plansByName.set(l.name, new Set());
+    if (l.plan) plansByName.get(l.name).add(l.plan);
+  });
+  const identities = new Set(legacy);
+  plansByName.forEach((plans, name) => {
+    if (plans.size > 1) {
+      plans.forEach(plan => { const id = `${name} — ${plan}`; if (!legacy.has(id)) identities.add(id); });
+    } else if (!legacy.has(name)) {
+      identities.add(name);
+    }
+  });
+  return [...identities].sort();
+}
+
+// Resolves an assignable identity ("Name" or "Name — Plan") to a specific
+// inventory record when no memo directly backs it — i.e. a manual/imported
+// inventory assignment (Part 1/2). Prefers an explicit licenseId pin (the
+// new override shape) for an unambiguous match; otherwise matches by parsed
+// name(+plan), preferring the group's own project, then a project-less
+// (any-project) manual record ("manual license with no project" edge case),
+// then any remaining match. Cancelled records are never resolved.
+function _resolveInventoryIdentity(identity, allLicenses, project, ovValue) {
+  const pinnedId = ovValue && typeof ovValue === 'object' ? ovValue.licenseId : null;
+  if (pinnedId) {
+    const pinned = allLicenses.find(l => String(l.id) === String(pinnedId));
+    if (pinned) return pinned;
+  }
+  const { name, plan } = _parseLicIdentity(identity);
+  const candidates = allLicenses.filter(l => l.name === name && (!plan || l.plan === plan) && getLicenseStatus(l).key !== 'cancelled');
+  if (!candidates.length) return null;
+  return candidates.find(l => l.project === project) || candidates.find(l => !l.project) || candidates[0];
+}
+
 // ── TAB 3: USERS ─────────────────────────────────────────
+// Users tab answers one question — "which software does this user currently
+// have?" — so the primary table is User / Licenses (chips) / Action only.
+// Department, Project, Seat, Source Memo and Status are implementation detail
+// and live in the Export and inside the Edit Licenses dialog, not the table.
 function _renderLicUsers() {
   const memos = loadMemos();
   const reviewState = _getLicReviewState();
@@ -784,50 +1092,56 @@ function _renderLicUsers() {
     return;
   }
 
-  // Store data in window so handlers can access without embedding JSON in HTML
+  // Store data in window so handlers can access without embedding JSON in HTML.
+  // Part 1: the assignable universe (`_licUsrCols`) is widened to the full
+  // effective License Inventory, not just this memo's account-table columns;
+  // `_licUsrAcctCols` keeps the narrow legacy list so the save path can still
+  // tell a legacy (boolean-only) identity apart from a new inventory-only one.
+  const allLicenses = getAllLicenses();
   window._licUsrRows = allUserRows;
-  window._licUsrCols = allLicCols;
+  window._licUsrAcctCols = allLicCols;
+  window._licUsrCols = _licAssignableIdentities(allLicenses, allLicCols);
 
   el.innerHTML = `
     ${_renderLicReviewQueueHtml(queueItems)}
     <div style="background:var(--bg-2,#F8F8F6);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:12px;font-size:11px;color:var(--text-2)">
       ℹ ข้อมูลมาจาก "ตาราง Account" ใน SL Memo — email + ✓/- ต่อโปรแกรม (เฉพาะรายการที่ PMO อนุมัติแล้ว)
     </div>
-    <div class="filter-row" style="margin-bottom:12px">
-      <input id="lic-usr-search" type="text" placeholder="ค้นหา email..."
-        oninput="_renderLicUsersRows()">
-      <select id="lic-usr-proj" onchange="_renderLicUsersRows()">
-        ${projects.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
-      </select>
-      <select id="lic-usr-lic" onchange="_renderLicUsersRows()">
-        ${allLicCols.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
-      </select>
-    </div>
-    <div style="font-size:11px;color:var(--text-2);margin-bottom:6px">
-      คลิกแถวเพื่อดูรายละเอียด Program / Plan / Seat / Source Memo / Status ต่อ project · กด Edit licenses เพื่อแก้หลายรายการพร้อมกัน
+    <div class="filter-row" style="margin-bottom:12px;justify-content:space-between">
+      <div class="filter-row" style="margin-bottom:0">
+        <input id="lic-usr-search" type="text" placeholder="ค้นหา email..."
+          oninput="_renderLicUsersRows()">
+        <select id="lic-usr-proj" onchange="_renderLicUsersRows()">
+          ${projects.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
+        </select>
+        <select id="lic-usr-lic" onchange="_renderLicUsersRows()">
+          ${window._licUsrCols.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+        </select>
+      </div>
+      <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="exportUserLicensesCSV()">⬇ Export User Licenses</button>
     </div>
     <div class="card" style="padding:0;overflow:hidden">
       <table class="hist-table" id="lic-usr-table">
         <thead><tr>
           <th style="padding-left:14px">User</th>
-          <th>Department</th>
-          <th style="text-align:center">Software Count</th>
-          <th style="text-align:center;white-space:nowrap"></th>
+          <th>Licenses</th>
+          <th style="text-align:center;white-space:nowrap">Action</th>
         </tr></thead>
         <tbody id="lic-usr-body"></tbody>
       </table>
     </div>
     <div id="lic-usr-editor" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:300;align-items:center;justify-content:center">
-      <div class="card" style="width:480px;max-width:94vw;max-height:85vh;overflow-y:auto;padding:20px">
+      <div class="card" style="width:520px;max-width:94vw;max-height:85vh;overflow-y:auto;padding:20px">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px">
-          <div><div style="font-size:15px;font-weight:700">Edit licenses</div><div id="lic-usr-editor-name" style="font-size:11px;color:var(--text-2);margin-top:2px"></div></div>
+          <div><div style="font-size:15px;font-weight:700">Manage Licenses</div><div id="lic-usr-editor-name" style="font-size:11px;color:var(--text-2);margin-top:2px"></div></div>
           <button class="btn-sm" onclick="_closeLicUserEditor()">✕</button>
         </div>
+        <div style="font-size:11px;color:var(--text-2);margin-bottom:10px">Current Licenses shows what this user has today. Check an item under + Add Manual License to assign it; uncheck any item to remove it.</div>
         <div style="display:flex;gap:6px;margin-bottom:10px">
           <button class="btn-sm" onclick="_setAllLicUserEditor(true)">✓ Select all</button>
           <button class="btn-sm" onclick="_setAllLicUserEditor(false)">Clear all</button>
         </div>
-        <div id="lic-usr-editor-options" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+        <div id="lic-usr-editor-options"></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
           <button class="btn-ghost" onclick="_closeLicUserEditor()">Cancel</button>
           <button class="btn-primary" onclick="_saveLicUserEditor()">Save licenses</button>
@@ -841,30 +1155,13 @@ function _renderLicUsers() {
   _renderLicUsersRows();
 }
 
-function _renderLicUsersRows() {
-  const allUserRows = window._licUsrRows || [];
-  const allLicCols  = window._licUsrCols || [];
-  const search  = (document.getElementById('lic-usr-search')?.value || '').toLowerCase();
-  const projF   = msValues('lic-usr-proj');
-  const licF    = msValues('lic-usr-lic');
-  const tbody   = document.getElementById('lic-usr-body');
-  if (!tbody) return;
-
-  let rows = allUserRows;
-  if (projF.length) rows = rows.filter(r => projF.includes(r.project));
-  if (licF.length)  rows = rows.filter(r => licF.some(lic => r.licenses[lic] === true));
-  if (search) rows = rows.filter(r => r.email.toLowerCase().includes(search));
-
-  if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:24px;color:var(--text-3)">ไม่พบข้อมูล</td></tr>`;
-    return;
-  }
-
-  // Merge into one entry per (email, project) — the same grouping/override key
-  // shape _openLicUserEditor()/_saveLicUserEditor()/_toggleLicUserOverride()
-  // already depend on, unchanged. Also tracks, per license, which memo(s)
-  // actually granted it (licenseSources), so the expandable detail below can
-  // show a real Source Memo instead of guessing.
+// Merge account-list rows into one entry per (email, project) — the same
+// grouping/override key shape _openLicUserEditor()/_saveLicUserEditor()
+// already depend on, unchanged. Also tracks, per license, which memo(s)
+// actually granted it (licenseSources), so exports/detail can show a real
+// Source Memo instead of guessing. Shared by both the table render and the
+// export so the two never drift (MASTER_SPEC: exports must match the UI).
+function _buildLicUserGroups(rows) {
   const emailProjMap = {};
   rows.forEach(r => {
     const key = `${r.email}|${r.project}`;
@@ -878,16 +1175,91 @@ function _renderLicUsersRows() {
       group.licenseSources[lic].add(r.memoNo);
     });
   });
+  return emailProjMap;
+}
+
+// Which licenses are active for a group, after applying manual overrides —
+// same precedence rule the editor and export already use (override wins,
+// else fall back to what the memo's account table granted). Part 2: reads
+// either override shape (legacy boolean or the new {active, licenseId}
+// object) via the shared normalizer.
+function _licActiveForGroup(group, allLicCols, overrides) {
+  const key = `${group.email}|${group.project}`;
+  return allLicCols.filter(lic => {
+    const fromMemo = group.licenses[lic] === true;
+    return _ovIsActive(overrides[`${key}|${lic}`], fromMemo);
+  });
+}
+
+// Resolve which real license record (plan/seats/expiry) backs a given
+// (group, software) assignment. Tries the original memo-grant match first
+// (name + project + granting memo — unchanged, 100% legacy behavior), then
+// falls back to resolving `lic` as a Part 1 inventory-only identity (manual/
+// imported license, optionally pinned via the override's licenseId) when no
+// memo backs it.
+function _licUserAssignmentDetail(group, lic, allLicenses, ovValue) {
+  const sources = [...(group.licenseSources[lic] || [])];
+  let match = allLicenses.find(l => l.name === lic && l.project === group.project && sources.includes(l.memoNo));
+  if (!match) match = _resolveInventoryIdentity(lic, allLicenses, group.project, ovValue);
+  return {
+    plan: match?.plan || '', seat: match?.seats ?? null,
+    status: match ? getLicenseStatus(match) : null,
+    updatedAt: match?.updatedAt || null,
+    sources, match: match || null,
+  };
+}
+
+// Software names (not software+plan) a user currently, effectively (i.e.
+// after manual overrides) has — used by the software filter so "who has
+// Figma" reflects reality, not just what the memo originally granted.
+function _licUserHasAnySoftware(user, softwareNames, allLicCols, overrides) {
+  return user.projectGroups.some(group =>
+    _licActiveForGroup(group, allLicCols, overrides).some(lic => softwareNames.includes(lic)));
+}
+
+// One chip per unique Software + Plan combo across all of a user's project
+// groups (not per memo, not per project) — duplicates collapse visually only.
+// `lic` may be a legacy bare name (plan resolved via matching) or a Part 1
+// composite "Name — Plan" inventory identity; both normalize to the same
+// {name, plan} shape so the resulting label/dedup key is consistent either way.
+function _licChipsForUser(user, allLicCols, overrides, allLicenses) {
+  const seen = new Map();
+  user.projectGroups.forEach(group => {
+    _licActiveForGroup(group, allLicCols, overrides).forEach(lic => {
+      const ovKey = `${group.email}|${group.project}|${lic}`;
+      const parsed = _parseLicIdentity(lic);
+      const detail = _licUserAssignmentDetail(group, lic, allLicenses, overrides[ovKey]);
+      const plan = detail.plan || parsed.plan;
+      const key = `${parsed.name}|${plan}`;
+      if (!seen.has(key)) seen.set(key, plan ? `${parsed.name} ${plan}` : parsed.name);
+    });
+  });
+  return [...seen.values()];
+}
+
+function _renderLicUsersRows() {
+  const allUserRows = window._licUsrRows || [];
+  const allLicCols  = window._licUsrCols || [];
+  const search  = (document.getElementById('lic-usr-search')?.value || '').toLowerCase();
+  const projF   = msValues('lic-usr-proj');
+  const licF    = msValues('lic-usr-lic');
+  const tbody   = document.getElementById('lic-usr-body');
+  if (!tbody) return;
+
+  // Project/search narrow which (email, project) rows exist at all. The
+  // software filter is applied later, at the user level (after merging), so
+  // a matching user still shows their full license count/detail — not just
+  // the one software that matched the filter.
+  let rows = allUserRows;
+  if (projF.length) rows = rows.filter(r => projF.includes(r.project));
+  if (search) rows = rows.filter(r => r.email.toLowerCase().includes(search));
+
+  const emailProjMap = _buildLicUserGroups(rows);
   window._licUsrMerged = emailProjMap;
 
-  // Part 6 (UX consistency pass) — user-centric view: one primary row per
-  // email (User / Department / Software Count), expandable to reveal each
-  // project's Program/Plan/Seat/Source Memo/Status detail. Presentation only:
-  // the (email, project) groups, override keys, and Edit licenses editor are
-  // exactly the ones the matrix already used. Department has no data source
-  // yet (not tracked anywhere in memo account tables or user_profiles — that
-  // is Settings/Master-Data scope, out of bounds for this pass) so it always
-  // shows "—" rather than fabricating a value.
+  // User-centric view: one row per email (User / Licenses / Action). Project,
+  // Department, Seat, Source Memo and Status are not shown here — they live
+  // in View Details, the Edit Licenses dialog, and the Export.
   const userMap = {};
   Object.values(emailProjMap).forEach(group => {
     if (!userMap[group.email]) userMap[group.email] = { email: group.email, projectGroups: [] };
@@ -896,80 +1268,38 @@ function _renderLicUsersRows() {
 
   const overrides = _getLicUserOverrides();
   const allLicenses = getAllLicenses();
-  window._licUsrExpanded = window._licUsrExpanded || new Set();
 
-  const activeLicensesForGroup = group => {
-    const key = `${group.email}|${group.project}`;
-    return allLicCols.filter(lic => {
-      const fromMemo = group.licenses[lic] === true;
-      const ov = overrides[`${key}|${lic}`];
-      return ov !== undefined ? ov : fromMemo;
-    });
-  };
+  let users = Object.values(userMap).sort((a, b) => a.email.localeCompare(b.email));
+  // Software filter is OR across selections and reflects effective (post
+  // manual-override) assignment, so "who has Figma" answers with reality.
+  if (licF.length) users = users.filter(u => _licUserHasAnySoftware(u, licF, allLicCols, overrides));
+  window._licUsrVisibleUsers = users;
 
-  const users = Object.values(userMap).sort((a, b) => a.email.localeCompare(b.email));
+  if (!users.length) {
+    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;padding:24px;color:var(--text-3)">ไม่พบข้อมูล</td></tr>`;
+    return;
+  }
 
   tbody.innerHTML = users.map(u => {
     const initials = u.email.substring(0, 2).toUpperCase();
-    const uKey = encodeURIComponent(u.email);
-    const softwareCount = u.projectGroups.reduce((sum, g) => sum + activeLicensesForGroup(g).length, 0);
-    const expanded = window._licUsrExpanded.has(u.email);
-
-    const detailHtml = u.projectGroups.map(group => {
-      const key = `${group.email}|${group.project}`;
-      const active = activeLicensesForGroup(group);
-      const detailRows = active.length
-        ? active.map(lic => {
-            const sources = [...(group.licenseSources[lic] || [])];
-            const match = allLicenses.find(l => l.name === lic && l.project === group.project && sources.includes(l.memoNo));
-            const plan = match?.plan || '—';
-            const seat = match?.seats ?? '—';
-            const status = match ? getLicenseStatus(match) : null;
-            const sourceHtml = sources.length
-              ? sources.map(m => `<span style="color:var(--blue);cursor:pointer" onclick="event.stopPropagation();typeof openMemoReadOnly==='function'&&openMemoReadOnly('${esc(m)}')">${esc(m)}</span>`).join(', ')
-              : '<span style="font-style:italic;color:var(--text-3)">Manual override</span>';
-            return `<tr>
-              <td style="padding:6px 10px;font-size:12px">${esc(lic)}</td>
-              <td style="padding:6px 10px;font-size:12px">${esc(plan)}</td>
-              <td style="padding:6px 10px;font-size:12px;text-align:center">${esc(String(seat))}</td>
-              <td style="padding:6px 10px;font-size:12px">${sourceHtml}</td>
-              <td style="padding:6px 10px;font-size:12px">${status ? `<span class="badge ${status.badge}" style="font-size:10px">${esc(status.label)}</span>` : '<span style="color:var(--text-3)">—</span>'}</td>
-            </tr>`;
-          }).join('')
-        : `<tr><td colspan="5" style="padding:8px 10px;text-align:center;color:var(--text-3);font-size:12px">ไม่มี license ที่ active ใน project นี้</td></tr>`;
-      return `<div style="border:1px solid var(--border);border-radius:var(--r-sm);margin-bottom:8px;overflow:hidden">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg-2,#F8F8F6);font-size:12px">
-          <span><strong>Project:</strong> ${esc(group.project || '—')}</span>
-          <button class="btn-sm" onclick="event.stopPropagation();_openLicUserEditor(decodeURIComponent('${encodeURIComponent(key)}'))">Edit licenses</button>
-        </div>
-        <table style="width:100%;border-collapse:collapse">
-          <thead><tr style="text-align:left;font-size:10px;color:var(--text-3);text-transform:uppercase">
-            <th style="padding:6px 10px">Program</th><th style="padding:6px 10px">Plan</th>
-            <th style="padding:6px 10px;text-align:center">Seat</th><th style="padding:6px 10px">Source Memo</th><th style="padding:6px 10px">Status</th>
-          </tr></thead>
-          <tbody>${detailRows}</tbody>
-        </table>
-      </div>`;
-    }).join('');
-
-    return `<tr style="cursor:pointer" onclick="_toggleLicUserRow('${uKey}')">
+    const chips = _licChipsForUser(u, allLicCols, overrides, allLicenses);
+    const visibleChips = chips.slice(0, 3);
+    const hiddenChips = chips.slice(3);
+    const chipsHtml = chips.length
+      ? visibleChips.map(c => `<span class="badge badge-blue" style="margin:2px 4px 2px 0;display:inline-block">${esc(c)}</span>`).join('')
+        + (hiddenChips.length ? `<span style="font-size:11px;color:var(--text-3);margin-left:2px" title="${esc(hiddenChips.join(', '))}">+${hiddenChips.length} more</span>` : '')
+      : '<span style="color:var(--text-3)">—</span>';
+    return `<tr>
         <td style="padding-left:14px">
           <span style="width:26px;height:26px;border-radius:50%;background:var(--blue-50,#E6F1FB);display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:var(--blue);margin-right:6px;vertical-align:middle">${initials}</span>
           ${esc(u.email)}
         </td>
-        <td style="font-size:12px;color:var(--text-3)">—</td>
-        <td style="text-align:center;font-size:12px">${softwareCount}</td>
-        <td style="text-align:center;font-size:11px;color:var(--text-3)">${expanded ? '▾' : '▸'}</td>
-      </tr>${expanded ? `<tr><td colspan="4" style="padding:10px 14px;background:var(--bg)">${detailHtml}</td></tr>` : ''}`;
+        <td>${chipsHtml}</td>
+        <td style="text-align:center;white-space:nowrap">
+          <button class="btn-sm" onclick="_openLicUserEditorForEmail('${esc(u.email)}')">Manage Licenses</button>
+        </td>
+      </tr>`;
   }).join('');
-}
-
-function _toggleLicUserRow(encodedEmail) {
-  const email = decodeURIComponent(encodedEmail);
-  window._licUsrExpanded = window._licUsrExpanded || new Set();
-  if (window._licUsrExpanded.has(email)) window._licUsrExpanded.delete(email);
-  else window._licUsrExpanded.add(email);
-  _renderLicUsersRows();
 }
 
 
@@ -1020,21 +1350,77 @@ function _toggleLicUserOverride(ovKey, currentActive) {
   _renderLicUsersRows();
 }
 
+// Users tab shows one row per user (no Project column), but assignments are
+// still tracked per (email, project) under the hood — unchanged business
+// logic. Open the editor for the user's first project group; if they have
+// more than one, a small switcher inside the dialog lets PMO pick which
+// project's assignment they're editing (Project stays "inside Edit Licenses
+// only", never in the main table).
+function _openLicUserEditorForEmail(email) {
+  const groups = Object.values(window._licUsrMerged || {})
+    .filter(g => g.email === email)
+    .sort((a, b) => (a.project || '').localeCompare(b.project || ''));
+  if (!groups.length) return;
+  window._licUsrEditGroups = groups;
+  _openLicUserEditor(`${groups[0].email}|${groups[0].project}`);
+}
+
+// Manage Licenses combines what used to be two separate actions (View
+// Details + Edit Licenses) into one: for each software column, an active
+// assignment shows its Plan/Source/Source Memo/Status inline next to its
+// (checked) checkbox under "Current Licenses"; every not-yet-assigned
+// software is listed, unchecked, under "+ Add Manual License" so PMO has an
+// obvious place to manually grant it. Checking/unchecking either group is
+// the exact same override write _saveLicUserEditor() already performed —
+// only the option list's grouping/detail text is new, not the save logic.
 function _openLicUserEditor(key) {
   const row = window._licUsrMerged?.[key];
   const modal = document.getElementById('lic-usr-editor');
   if(!row || !modal) return;
   window._licUsrEditKey = key;
   const overrides = _getLicUserOverrides();
-  document.getElementById('lic-usr-editor-name').textContent = `${row.email} · ${row.project || '—'}`;
-  document.getElementById('lic-usr-editor-options').innerHTML = (window._licUsrCols || []).map((license, index) => {
+  const allLicenses = getAllLicenses();
+  const groups = (window._licUsrEditGroups || [row]).filter(g => g.email === row.email);
+  const nameEl = document.getElementById('lic-usr-editor-name');
+  if (groups.length > 1) {
+    nameEl.innerHTML = `${esc(row.email)} · <select onchange="_openLicUserEditor(this.value)" style="font-size:11px;font-family:inherit">
+      ${groups.map(g => `<option value="${esc(g.email)}|${esc(g.project)}" ${`${g.email}|${g.project}` === key ? 'selected' : ''}>${esc(g.project || '—')}</option>`).join('')}
+    </select>`;
+  } else {
+    nameEl.textContent = `${row.email} · ${row.project || '—'}`;
+  }
+
+  const entries = (window._licUsrCols || []).map((license, index) => {
     const ovKey = `${key}|${license}`;
-    const active = overrides[ovKey] !== undefined ? overrides[ovKey] : row.licenses[license] === true;
-    return `<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer">
-      <input type="checkbox" class="lic-usr-edit-check" data-license-index="${index}"${active ? ' checked' : ''} style="width:17px;height:17px;accent-color:var(--blue)">
-      <span style="font-size:12px">${esc(license)}</span>
+    const ov = overrides[ovKey];
+    const active = _ovIsActive(ov, row.licenses[license] === true);
+    const detail = active ? _licUserAssignmentDetail(row, license, allLicenses, ov) : null;
+    return { license, index, active, detail };
+  });
+  const activeEntries = entries.filter(e => e.active);
+  const inactiveEntries = entries.filter(e => !e.active);
+
+  const optionRow = e => {
+    // A composite "Name — Plan" identity already shows its plan in the label
+    // itself — skip the redundant "Plan: X" line for those.
+    const showPlanLine = e.detail?.plan && !e.license.includes(' — ');
+    const detailHtml = e.detail ? `<span style="font-size:11px;color:var(--text-2);display:block;margin-top:2px">
+        ${showPlanLine ? `Plan: ${esc(e.detail.plan)} · ` : ''}Source: ${esc(e.detail.sources.length > 1 ? 'Multiple memos' : e.detail.sources.length === 1 ? 'Memo' : 'Manual')}
+        ${e.detail.sources.length ? ` · Source Memo: ${esc(e.detail.sources.join(', '))}` : ''}
+        ${e.detail.status ? ` · Status: ${esc(e.detail.status.label)}` : ''}
+      </span>` : '';
+    return `<label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;margin-bottom:6px">
+      <input type="checkbox" class="lic-usr-edit-check" data-license-index="${e.index}"${e.active ? ' checked' : ''} style="width:17px;height:17px;accent-color:var(--blue);margin-top:1px;flex-shrink:0">
+      <span style="flex:1"><span style="font-size:12px;font-weight:600">${esc(e.license)}</span>${detailHtml}</span>
     </label>`;
-  }).join('');
+  };
+
+  document.getElementById('lic-usr-editor-options').innerHTML = `
+    <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.02em;margin-bottom:6px">Current Licenses (${activeEntries.length})</div>
+    ${activeEntries.length ? activeEntries.map(optionRow).join('') : '<div style="font-size:12px;color:var(--text-3);padding:2px 2px 10px">No active licenses</div>'}
+    <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.02em;margin:10px 0 6px">+ Add Manual License</div>
+    ${inactiveEntries.length ? inactiveEntries.map(optionRow).join('') : '<div style="font-size:12px;color:var(--text-3);padding:2px">All available software already assigned</div>'}
+  `;
   modal.style.display = 'flex';
 }
 
@@ -1046,6 +1432,7 @@ function _closeLicUserEditor() {
   const modal = document.getElementById('lic-usr-editor');
   if(modal) modal.style.display = 'none';
   window._licUsrEditKey = null;
+  window._licUsrEditGroups = null;
 }
 
 function _saveLicUserEditor() {
@@ -1053,13 +1440,27 @@ function _saveLicUserEditor() {
   const row = window._licUsrMerged?.[key];
   if(!key || !row) return;
   const licenses = window._licUsrCols || [];
+  const legacyCols = new Set(window._licUsrAcctCols || []);
   const overrides = _getLicUserOverrides();
+  const allLicenses = getAllLicenses();
   document.querySelectorAll('#lic-usr-editor-options .lic-usr-edit-check').forEach(input => {
     const license = licenses[Number(input.dataset.licenseIndex)];
     const ovKey = `${key}|${license}`;
     const fromMemo = row.licenses[license] === true;
-    if(input.checked === fromMemo) delete overrides[ovKey];
-    else overrides[ovKey] = input.checked;
+    if (legacyCols.has(license)) {
+      // Legacy account-table identity — unchanged boolean-only write path,
+      // byte-for-byte the same as before Phase 1.
+      if (input.checked === fromMemo) delete overrides[ovKey];
+      else overrides[ovKey] = input.checked;
+    } else if (!input.checked) {
+      delete overrides[ovKey];
+    } else {
+      // Part 1/2: a manual/imported inventory-only identity. Pin the exact
+      // backing record (licenseId) so reconciliation/plan resolution is
+      // unambiguous even if the identity string alone isn't.
+      const resolved = _resolveInventoryIdentity(license, allLicenses, row.project, null);
+      overrides[ovKey] = resolved ? { active: true, licenseId: String(resolved.id) } : { active: true };
+    }
   });
   _saveLicUserOverrides(overrides);
   _closeLicUserEditor();

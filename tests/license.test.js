@@ -291,13 +291,17 @@ test('parseLicenseFromMemo still computes the correct 12-month expiry when start
 });
 
 // ══════════════════════════════════════════════════════════════════
-// Final UX Consistency Pass — Part 6: License User Mapping becomes a
-// user-centric view (User / Department / Software Count, expandable to
-// Program / Plan / Seat / Source Memo / Status), replacing the old wide
-// per-project matrix. Presentation only — computeLicUserMappingData(),
-// the Review Queue, and the override editor's (email, project) key shape
-// are unchanged (already covered by the tests above); this locks the new
-// render shape itself.
+// Users Tab UX Follow-up — main table is User / Licenses (compact chip
+// preview, max 3 + "+N more") / Action, with a single "Manage Licenses"
+// button replacing the earlier separate View Details + Edit Licenses pair.
+// The Manage Licenses dialog itself now combines both: an active
+// assignment's Plan/Source/Source Memo/Status render inline next to its
+// (checked) checkbox under "Current Licenses"; every not-yet-assigned
+// software is listed, unchecked, under "+ Add Manual License". Presentation
+// only — computeLicUserMappingData(), the Review Queue, and the override
+// editor's (email, project) key/save logic are unchanged (covered by the
+// tests above); this locks the new render shape, chip preview, and combined
+// modal.
 // ══════════════════════════════════════════════════════════════════
 class FakeAcctDOMParser {
   parseFromString(html) {
@@ -315,9 +319,48 @@ class FakeAcctDOMParser {
   }
 }
 
-test('License Users tab renders a user-centric table (User / Department / Software Count) with an expandable Program/Plan/Seat/Source Memo/Status detail per project', () => {
+// Common DOM-element mock for License Users tab tests: only the ids the
+// render path actually touches, so initMultiSelect()/msValues() degrade to
+// their documented test-double fallbacks instead of crashing on a full
+// browser-only <select> enhancement (see msValues()'s doc comment, app.js).
+function licUsersElements(extra = {}) {
+  return {
+    'lic-content': { innerHTML: '' },
+    'lic-usr-body': { innerHTML: '' },
+    'lic-usr-editor': { style: {} },
+    'lic-usr-editor-name': {},
+    'lic-usr-editor-options': { innerHTML: '' },
+    ...extra,
+  };
+}
+
+// Builds a single approved SL memo granting `n` distinct software+plan pairs
+// to one user, for testing the ">3 licenses -> +N more" chip-preview rule.
+function memoWithNLicenses(n, email) {
+  const items = [];
+  const cols = [];
+  const cells = [];
+  for (let i = 1; i <= n; i++) {
+    const name = `Tool${i}`;
+    items.push({ name, plan: `Plan${i}`, price: 10, qty: 1, months: 12 });
+    cols.push(`<th>${name}</th>`);
+    cells.push('<td>✓</td>');
+  }
+  return slMemo({
+    memoNo: 'ORB-2620-001', project: 'AOA-MP',
+    slItems: items,
+    sections: [{
+      title: 'ตาราง Account',
+      html: `<table><thead><tr><th>Email</th>${cols.join('')}</tr></thead>` +
+            `<tbody><tr><td>${email}</td>${cells.join('')}</tr></tbody></table>`,
+    }],
+  });
+}
+
+test('License Users tab renders a compact license preview (up to 3 chips) with a single Manage Licenses action', () => {
   const { context } = createLicenseContext();
   context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
   const memo = slMemo({
     memoNo: 'ORB-2611-001',
     project: 'AOA-MP',
@@ -330,46 +373,526 @@ test('License Users tab renders a user-centric table (User / Department / Softwa
   });
   context.storeMemos([memo]);
 
-  const licContent = { innerHTML: '' };
-  const licUsrBody = { innerHTML: '' };
-  const elements = { 'lic-content': licContent, 'lic-usr-body': licUsrBody };
+  const elements = licUsersElements();
   const origGetById = context.document.getElementById;
   context.document.getElementById = id => elements[id] || origGetById(id);
 
   context._renderLicUsers();
 
-  // Top-level columns: User / Department / Software Count — no per-license
-  // matrix column, no Project column (Part 6 + TD-AUDIT-07).
+  const licContent = elements['lic-content'];
+  const licUsrBody = elements['lic-usr-body'];
+
+  // Top-level columns: User / Licenses / Action only.
   assert.match(licContent.innerHTML, /<th[^>]*>User<\/th>/);
-  assert.match(licContent.innerHTML, /<th[^>]*>Department<\/th>/);
-  assert.match(licContent.innerHTML, />Software Count<\/th>/);
-  assert.doesNotMatch(licContent.innerHTML, /<th[^>]*>Project<\/th>/, 'Project must not remain a primary matrix column');
+  assert.match(licContent.innerHTML, /<th[^>]*>Licenses<\/th>/);
+  assert.match(licContent.innerHTML, /<th[^>]*>Action<\/th>/);
+  assert.doesNotMatch(licContent.innerHTML, /<th[^>]*>Department<\/th>/, 'Department must not remain a primary table column');
+  assert.doesNotMatch(licContent.innerHTML, /<th[^>]*>Project<\/th>/, 'Project must not remain a primary table column');
 
-  // Row: one per user (email), with a Software Count reflecting the memo's
-  // active license(s), and Department showing "—" (no data source exists
-  // for it, so it must not fabricate a value).
+  // Row: one per user (email), a compact chip preview (not just a count), and
+  // exactly one action — Manage Licenses. No Seat/Source Memo/Status here.
   assert.match(licUsrBody.innerHTML, /designer@orbit\.co\.th/);
-  const rowMatch = licUsrBody.innerHTML.match(/<tr[^>]*onclick="_toggleLicUserRow\('[^']*'\)">([\s\S]*?)<\/tr>/);
-  assert.ok(rowMatch, 'the user row must be clickable via _toggleLicUserRow');
-  assert.match(rowMatch[1], />—<\/td>/, 'Department has no data source yet and must show "—", not a fabricated value');
-  assert.match(rowMatch[1], />1<\/td>/, 'Software Count must be 1 for a single active license');
+  assert.match(licUsrBody.innerHTML, /class="badge[^>]*>Figma Professional<\/span>/, 'Licenses column must render an actual chip, not just a count');
+  assert.doesNotMatch(licUsrBody.innerHTML, />Seat<\/th>/);
+  assert.doesNotMatch(licUsrBody.innerHTML, />Source Memo<\/th>/);
+  assert.doesNotMatch(licUsrBody.innerHTML, />Status<\/th>/);
+  assert.match(licUsrBody.innerHTML, /Manage Licenses/);
+  assert.doesNotMatch(licUsrBody.innerHTML, /View Details/, 'View Details must no longer be a separate action');
+  assert.doesNotMatch(licUsrBody.innerHTML, />Edit Licenses</, 'Edit Licenses must no longer be a separate action label');
 
-  // Expand the row (mirrors clicking it) and confirm the detail view exposes
-  // exactly Program / Plan / Seat / Source Memo / Status, sourced from the
-  // memo's own slItems (Plan/Seat) and account table (Source Memo), not
-  // fabricated.
-  context._toggleLicUserRow(encodeURIComponent('designer@orbit.co.th'));
-  assert.match(licUsrBody.innerHTML, />Program<\/th>/);
-  assert.match(licUsrBody.innerHTML, />Plan<\/th>/);
-  assert.match(licUsrBody.innerHTML, />Seat<\/th>/);
-  assert.match(licUsrBody.innerHTML, />Source Memo<\/th>/);
-  assert.match(licUsrBody.innerHTML, />Status<\/th>/);
-  assert.match(licUsrBody.innerHTML, />Figma<\/td>/);
-  assert.match(licUsrBody.innerHTML, />Professional<\/td>/);
-  assert.match(licUsrBody.innerHTML, />5<\/td>/);
-  assert.match(licUsrBody.innerHTML, /ORB-2611-001/, 'Source Memo must link back to the real memo, not a placeholder');
-  // Edit licenses still opens the exact same (email, project) keyed editor
-  // the override mechanism already depends on (Part 6 explicitly keeps this
-  // logic unchanged).
-  assert.match(licUsrBody.innerHTML, /_openLicUserEditor\(decodeURIComponent\('[^']*designer%40orbit\.co\.th%7CAOA-MP[^']*'\)\)/);
+  // Manage Licenses is keyed off the email, but still resolves to the exact
+  // same (email, project) keyed editor the override mechanism depends on —
+  // business logic unchanged, only the entry point/label changed.
+  assert.match(licUsrBody.innerHTML, /_openLicUserEditorForEmail\('designer@orbit\.co\.th'\)/);
+  context._openLicUserEditorForEmail('designer@orbit.co.th');
+  assert.equal(context.window._licUsrEditKey, 'designer@orbit.co.th|AOA-MP');
+});
+
+test('License preview shows at most 3 chips, then "+N more" for a user with more than 3 licenses', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  context.storeMemos([memoWithNLicenses(5, 'chuen@orbit.co.th')]);
+
+  const elements = licUsersElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+
+  const body = elements['lic-usr-body'].innerHTML;
+  const chipCount = (body.match(/class="badge[^>]*>Tool\d Plan\d<\/span>/g) || []).length;
+  assert.equal(chipCount, 3, 'no more than 3 chips should render in the main row');
+  assert.match(body, />\+2 more</, '2 remaining licenses (5 total - 3 shown) must render as "+2 more"');
+});
+
+test('License preview shows every chip with no "+N more" for a user with exactly 3 licenses', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  context.storeMemos([memoWithNLicenses(3, 'dev@orbit.co.th')]);
+
+  const elements = licUsersElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+
+  const body = elements['lic-usr-body'].innerHTML;
+  const chipCount = (body.match(/class="badge[^>]*>Tool\d Plan\d<\/span>/g) || []).length;
+  assert.equal(chipCount, 3);
+  assert.doesNotMatch(body, /more</);
+});
+
+test('License chips merge duplicate Software+Plan assignments across memos/projects into one item, but keep distinct Plans separate', () => {
+  const { context } = createLicenseContext();
+  const allLicCols = ['Figma'];
+  const overrides = {};
+  const allLicenses = [
+    { name: 'Figma', plan: 'Professional', project: 'AOA-MP', memoNo: 'M1' },
+    { name: 'Figma', plan: 'Professional', project: 'GAMMA', memoNo: 'M3' },
+    { name: 'Figma', plan: 'Enterprise', project: 'BETA', memoNo: 'M2' },
+  ];
+  const user = {
+    email: 'u@orbit.co.th',
+    projectGroups: [
+      { email: 'u@orbit.co.th', project: 'AOA-MP', licenses: { Figma: true }, licenseSources: { Figma: new Set(['M1']) } },
+      { email: 'u@orbit.co.th', project: 'GAMMA', licenses: { Figma: true }, licenseSources: { Figma: new Set(['M3']) } }, // different memo/project, same software+plan
+      { email: 'u@orbit.co.th', project: 'BETA', licenses: { Figma: true }, licenseSources: { Figma: new Set(['M2']) } }, // different plan
+    ],
+  };
+  const chips = Array.from(context._licChipsForUser(user, allLicCols, overrides, allLicenses));
+  assert.deepEqual(chips.sort(), ['Figma Enterprise', 'Figma Professional'].sort(), 'same software+plan across projects/memos must collapse to one item; different plans stay separate');
+});
+
+test('Manage Licenses dialog combines detail (Plan/Source/Source Memo/Status) with an editable checkbox per software, grouped Current vs + Add Manual License', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  // Two memos both grant Figma Professional to the same user in the same
+  // project — a same-project duplicate grant, so Source must say "Multiple
+  // memos" without needing any cross-project merge.
+  const memo1 = slMemo({
+    memoNo: 'ORB-2613-001', project: 'AOA-MP',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12, startMonth: '2026-01', endMonth: '2026-12' }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th><th>Slack</th></tr></thead>' +
+      '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td><td>-</td></tr></tbody></table>' }],
+  });
+  const memo2 = slMemo({
+    memoNo: 'ORB-2613-002', project: 'AOA-MP',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12, startMonth: '2026-01', endMonth: '2026-12' }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  context.storeMemos([memo1, memo2]);
+  // Manual override grants Slack directly (no memo ever checked it) — the
+  // pre-existing manual-override storage/precedence is untouched.
+  context._saveLicUserOverrides({ 'designer@orbit.co.th|AOA-MP|Slack': true });
+
+  const elements = licUsersElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+
+  context._renderLicUsers();
+  context._openLicUserEditorForEmail('designer@orbit.co.th');
+
+  const body = elements['lic-usr-editor-options'].innerHTML;
+  // Grouped headings, not a flat list.
+  assert.match(body, /Current Licenses \(2\)/);
+  assert.match(body, /\+ Add Manual License/);
+
+  // Figma: active, checked, with inline detail incl. "Multiple memos".
+  assert.match(body, /data-license-index="0"[^>]*checked/);
+  assert.match(body, /Plan: Professional/);
+  assert.match(body, /Source: Multiple memos/, 'same software+plan granted by two memos in one group must say "Multiple memos"');
+  assert.match(body, /ORB-2613-001/);
+  assert.match(body, /ORB-2613-002/);
+  assert.match(body, /Status:.*Active/s);
+
+  // Slack: active via manual override, checked, "Source: Manual".
+  assert.match(body, /Source: Manual/, 'a pure manual-override assignment must show Source: Manual');
+});
+
+test('Manage Licenses dialog lists not-yet-assigned software, unchecked, under + Add Manual License — reusing the existing override save path', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  const memo = slMemo({
+    memoNo: 'ORB-2614-500', project: 'AOA-MP',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th><th>Slack</th></tr></thead>' +
+      '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td><td>-</td></tr></tbody></table>' }],
+  });
+  context.storeMemos([memo]);
+
+  const elements = licUsersElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+
+  // Before any manual add: Slack is unchecked under "+ Add Manual License",
+  // with no Plan/Source/Status line (nothing to show for an inactive item).
+  context._openLicUserEditorForEmail('designer@orbit.co.th');
+  let body = elements['lic-usr-editor-options'].innerHTML;
+  assert.match(body, /Current Licenses \(1\)/);
+  const slackLabel = (body.match(/<label[^]*?<\/label>/g) || []).find(l => l.includes('data-license-index="1"')) || '';
+  assert.doesNotMatch(slackLabel, /checked/, 'Slack must render unchecked (not yet assigned)');
+  assert.doesNotMatch(slackLabel, /Source:/, 'an inactive item shows no detail line');
+
+  // Manually assigning Slack is the exact same override write the pre-existing
+  // editor already performed (business logic untouched) — simulate the save
+  // that checking the box + clicking "Save licenses" would produce.
+  context._saveLicUserOverrides({ 'designer@orbit.co.th|AOA-MP|Slack': true });
+  context._renderLicUsersRows();
+  context._openLicUserEditorForEmail('designer@orbit.co.th');
+  body = elements['lic-usr-editor-options'].innerHTML;
+  assert.match(body, /Current Licenses \(2\)/, 'Slack must now count as a Current License');
+  assert.match(body, /Source: Manual/);
+});
+
+test('Software filter shows a user if they have at least one selected software (OR across selections), reflecting effective (post-override) assignment', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  const memoFigma = slMemo({
+    memoNo: 'ORB-2614-001', project: 'AOA-MP',
+    slItems: [{ name: 'Figma', plan: 'Pro', price: 100, qty: 1, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  const memoSlack = slMemo({
+    memoNo: 'ORB-2614-002', project: 'BETA',
+    slItems: [{ name: 'Slack', plan: '', price: 50, qty: 1, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Slack</th></tr></thead>' +
+      '<tbody><tr><td>dev@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  context.storeMemos([memoFigma, memoSlack]);
+
+  const licUsrLic = { value: '', selectedOptions: [] };
+  const elements = licUsersElements({ 'lic-usr-lic': licUsrLic });
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+
+  context._renderLicUsers();
+  const bodyOf = () => elements['lic-usr-body'].innerHTML;
+
+  // No selection -> everyone shown.
+  assert.match(bodyOf(), /designer@orbit\.co\.th/);
+  assert.match(bodyOf(), /dev@orbit\.co\.th/);
+
+  // Filter = Figma only -> only designer.
+  licUsrLic.selectedOptions = [{ value: 'Figma' }];
+  context._renderLicUsersRows();
+  assert.match(bodyOf(), /designer@orbit\.co\.th/);
+  assert.doesNotMatch(bodyOf(), /dev@orbit\.co\.th/);
+
+  // Filter = Figma OR Slack -> both again.
+  licUsrLic.selectedOptions = [{ value: 'Figma' }, { value: 'Slack' }];
+  context._renderLicUsersRows();
+  assert.match(bodyOf(), /designer@orbit\.co\.th/);
+  assert.match(bodyOf(), /dev@orbit\.co\.th/);
+
+  // Filter = Slack only, but designer has no Slack from any memo -> excluded...
+  licUsrLic.selectedOptions = [{ value: 'Slack' }];
+  context._renderLicUsersRows();
+  assert.doesNotMatch(bodyOf(), /designer@orbit\.co\.th/);
+  assert.match(bodyOf(), /dev@orbit\.co\.th/);
+
+  // ...until a manual override effectively grants designer Slack too — the
+  // filter must reflect the override, not just the original memo grant.
+  context._saveLicUserOverrides({ 'designer@orbit.co.th|AOA-MP|Slack': true });
+  context._renderLicUsersRows();
+  assert.match(bodyOf(), /designer@orbit\.co\.th/, 'software filter must reflect effective (post-override) assignment');
+});
+
+test('exportUserLicensesCSV produces a User x Software matrix (Software — Plan columns, ✓/blank cells), respecting current filters', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  const memo = slMemo({
+    memoNo: 'ORB-2615-001',
+    project: 'AOA-MP',
+    slItems: [
+      { name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 },
+      { name: 'Slack', plan: '', price: 50, qty: 1, months: 12 },
+    ],
+    sections: [{
+      title: 'ตาราง Account',
+      html: '<table><thead><tr><th>Email</th><th>Figma</th><th>Slack</th><th>GitHub Copilot</th></tr></thead>' +
+            '<tbody>' +
+            '<tr><td>chuen@orbit.co.th</td><td>✓</td><td>✓</td><td>✓</td></tr>' +
+            '<tr><td>designer@orbit.co.th</td><td>✓</td><td>-</td><td>-</td></tr>' +
+            '</tbody></table>',
+    }],
+  });
+  context.storeMemos([memo]);
+
+  const elements = licUsersElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+
+  let downloaded = null;
+  context._downloadCSV = (name, headers, rows) => { downloaded = { name, headers, rows }; };
+  context.exportUserLicensesCSV();
+
+  assert.ok(downloaded, 'export must call _downloadCSV');
+  const headers = Array.from(downloaded.headers);
+  assert.equal(headers[0], 'User Email');
+  assert.ok(headers.includes('Figma — Professional'), 'software with a plan is labeled "Software — Plan"');
+  assert.ok(headers.includes('Slack'), 'software without a plan is labeled by name only');
+  assert.equal(headers.filter(h => h.startsWith('Figma')).length, 1, 'no duplicate column for the same software+plan');
+
+  const rows = downloaded.rows.map(r => Array.from(r));
+  const chuenRow = rows.find(r => r[0] === 'chuen@orbit.co.th');
+  const designerRow = rows.find(r => r[0] === 'designer@orbit.co.th');
+  const figmaCol = headers.indexOf('Figma — Professional');
+  const copilotCol = headers.indexOf('GitHub Copilot');
+  assert.equal(chuenRow[figmaCol], '✓');
+  assert.equal(chuenRow[copilotCol], '✓');
+  assert.equal(designerRow[figmaCol], '✓');
+  assert.equal(designerRow[copilotCol], '', 'blank cell (not ✓) when the user lacks that software');
+
+  // Export respects the current Search filter — only chuen visible.
+  elements['lic-usr-search'] = { value: 'chuen' };
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsersRows();
+  downloaded = null;
+  context.exportUserLicensesCSV();
+  assert.equal(downloaded.rows.length, 1, 'export must only include the currently filtered/visible users');
+  assert.equal(Array.from(downloaded.rows[0])[0], 'chuen@orbit.co.th');
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Phase 1 — Inventory ↔ Assignment Alignment. Manual/imported inventory
+// becomes assignable (Part 1), the override shape gains an optional
+// {active, licenseId} form without breaking legacy booleans (Part 2), and
+// License Summary gains a Purchased/Assigned/Remaining reconciliation with a
+// read-only Assigned Users drill-down (Part 3/4/7). Business logic untouched
+// — computeLicUserMappingData()'s Review Queue gate, _buildLicUserGroups()'s
+// merge, and _licActiveForGroup()'s override-wins precedence are all reused
+// unchanged; only the assignable universe and the override value shape
+// widen, and reconciliation is purely derived from them.
+// ══════════════════════════════════════════════════════════════════
+
+test('a manual license (never referenced by any memo account table) appears in the assignable list and Manage Licenses checklist', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  const memo = slMemo({
+    memoNo: 'ORB-2701-001', project: 'AOA-MP',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  context.storeMemos([memo]);
+  // A manual license — no memo ever checked it in an account table.
+  context.storeManualLicenses([{
+    id: 'man-1', name: 'Notion', plan: '', vendor: '', seats: 5, pricePerMonth: 0,
+    owner: '', department: '', project: 'AOA-MP', licenseType: 'subscription',
+    purchaseDate: '2026-01-01', expiry: null, billingFreq: 'monthly',
+    statusOverride: null, memoNo: '', note: '', source: 'manual',
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  }]);
+
+  const elements = licUsersElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+
+  assert.ok(context.window._licUsrCols.includes('Notion'), 'manual license must be in the widened assignable list');
+
+  context._openLicUserEditorForEmail('designer@orbit.co.th');
+  const body = elements['lic-usr-editor-options'].innerHTML;
+  const notionLabel = (body.match(/<label[^]*?<\/label>/g) || []).find(l => l.includes('>Notion<'));
+  assert.ok(notionLabel, 'Notion must appear as a checkbox option');
+  assert.doesNotMatch(notionLabel, /checked/, 'not yet assigned, so it starts unchecked under + Add Manual License');
+});
+
+test('an imported license (bulk-import shaped record, source manual) participates in the assignment list exactly like a manual one', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  const memo = slMemo({
+    memoNo: 'ORB-2701-002', project: 'AOA-MP',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  context.storeMemos([memo]);
+  // Exact shape importLicenses() (views/bulk_import.js) produces — same
+  // manual store, no separate "imported" flag exists or is needed.
+  context.storeManualLicenses([{
+    id: 'imp-1', name: 'Adobe Creative Cloud', plan: 'Business', vendor: 'Adobe',
+    seats: 10, pricePerMonth: 1500, owner: '', department: '', project: 'AOA-MP',
+    licenseType: 'subscription', purchaseDate: '2026-01-15', expiry: null,
+    billingFreq: 'monthly', statusOverride: null, memoNo: '', note: '',
+    source: 'manual', createdAt: '2026-01-15T00:00:00.000Z', updatedAt: '2026-01-15T00:00:00.000Z',
+  }]);
+
+  const elements = licUsersElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+
+  assert.ok(context.window._licUsrCols.includes('Adobe Creative Cloud'), 'imported license must be in the widened assignable list');
+});
+
+test('legacy plain-boolean overrides still work end-to-end, no migration needed', () => {
+  const { context } = createLicenseContext();
+  const memoGranted = { email: 'u@orbit.co.th', project: 'AOA-MP', licenses: { Figma: true }, licenseSources: {} };
+  const notGranted  = { email: 'u@orbit.co.th', project: 'AOA-MP', licenses: { Figma: false }, licenseSources: {} };
+
+  // Legacy `true` turns ON a software the memo did not grant.
+  assert.deepEqual(context._licActiveForGroup(notGranted, ['Figma'], { 'u@orbit.co.th|AOA-MP|Figma': true }), ['Figma']);
+  // Legacy `false` turns OFF a software the memo granted.
+  assert.deepEqual(context._licActiveForGroup(memoGranted, ['Figma'], { 'u@orbit.co.th|AOA-MP|Figma': false }), []);
+  // No override at all -> falls back to the memo value, unchanged.
+  assert.deepEqual(context._licActiveForGroup(memoGranted, ['Figma'], {}), ['Figma']);
+});
+
+test('the new {active, licenseId} override object works, and licenseId pins the exact inventory record for unambiguous plan/seat resolution', () => {
+  const { context } = createLicenseContext();
+  const group = { email: 'u@orbit.co.th', project: 'AOA-MP', licenses: {}, licenseSources: {} };
+  // Two same-name, same-plan manual records in different projects — without
+  // a pin, name/plan matching alone could pick either.
+  const allLicenses = [
+    { id: 'lic-a', name: 'Notion', plan: 'Team', project: 'AOA-MP', seats: 3 },
+    { id: 'lic-b', name: 'Notion', plan: 'Team', project: 'BETA', seats: 7 },
+  ];
+  const ovKey = 'u@orbit.co.th|AOA-MP|Notion';
+  const overrides = { [ovKey]: { active: true, licenseId: 'lic-b' } };
+
+  assert.deepEqual(context._licActiveForGroup(group, ['Notion'], overrides), ['Notion'], 'object-shaped override must be read as active');
+
+  const detail = context._licUserAssignmentDetail(group, 'Notion', allLicenses, overrides[ovKey]);
+  assert.equal(detail.match.id, 'lic-b', 'licenseId must pin the exact record, not just best-effort name/project matching');
+  assert.equal(detail.seat, 7);
+});
+
+test('computeLicReconciliation: Purchased/Assigned/Remaining match the effective inventory + assignment data, with a same-project duplicate memo grant counted once', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  // Two SL memos in the SAME project both grant the SAME user Figma — must
+  // count as ONE assigned user, not two (duplicate assignment collapse).
+  const memo1 = slMemo({
+    memoNo: 'ORB-2702-001', project: 'AOA-MP',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  const memo2 = slMemo({
+    memoNo: 'ORB-2702-002', project: 'AOA-MP',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  context.storeMemos([memo1, memo2]);
+
+  const rows = context.computeLicReconciliation([memo1, memo2], {}, {});
+  const figmaRow = rows.find(r => r.name === 'Figma' && r.project === 'AOA-MP');
+  assert.ok(figmaRow, 'a reconciliation row must exist for Figma/AOA-MP');
+  assert.equal(figmaRow.purchased, 10, '2 memo line items of 5 seats each = 10 purchased seats');
+  assert.equal(figmaRow.assignedCount, 1, 'the same user granted by two memos in one project counts once');
+  assert.equal(figmaRow.remaining, 9);
+  assert.equal(figmaRow.overAssigned, false);
+});
+
+test('computeLicReconciliation flags Over Assigned when Assigned Users exceeds Purchased Seats', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  const memo = slMemo({
+    memoNo: 'ORB-2703-001', project: 'AOA-MP',
+    slItems: [{ name: 'Slack', plan: '', price: 50, qty: 1, months: 12 }], // 1 seat purchased
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Slack</th></tr></thead>' +
+      '<tbody>' +
+      '<tr><td>a@orbit.co.th</td><td>✓</td></tr>' +
+      '<tr><td>b@orbit.co.th</td><td>✓</td></tr>' +
+      '</tbody></table>' }],
+  });
+  context.storeMemos([memo]);
+
+  const rows = context.computeLicReconciliation([memo], {}, {});
+  const slackRow = rows.find(r => r.name === 'Slack' && r.project === 'AOA-MP');
+  assert.equal(slackRow.purchased, 1);
+  assert.equal(slackRow.assignedCount, 2);
+  assert.equal(slackRow.remaining, -1);
+  assert.equal(slackRow.overAssigned, true);
+});
+
+test('Assigned Users count is clickable and opens a read-only drill-down modal listing each user with Source/Project (no editing)', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  const memo = slMemo({
+    memoNo: 'ORB-2704-001', project: 'AOA-MP',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 20, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody>' +
+      '<tr><td>designer1@orbit.co.th</td><td>✓</td></tr>' +
+      '<tr><td>designer2@orbit.co.th</td><td>✓</td></tr>' +
+      '</tbody></table>' }],
+  });
+  context.storeMemos([memo]);
+
+  const elements = {
+    'lic-recon-wrap': { innerHTML: '' },
+    'lic-recon-detail': { style: {} },
+    'lic-recon-detail-name': {},
+    'lic-recon-detail-purchased': {},
+    'lic-recon-detail-assigned': {},
+    'lic-recon-detail-remaining': {},
+    'lic-recon-detail-body': { innerHTML: '' },
+  };
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+
+  context._renderLicReconciliation();
+  assert.match(elements['lic-recon-wrap'].innerHTML, /onclick="_openLicReconDetail\(\d+\)"/, 'Assigned Users count must be clickable');
+
+  const idx = context.window._licReconRows.findIndex(r => r.name === 'Figma' && r.project === 'AOA-MP');
+  context._openLicReconDetail(idx);
+
+  assert.equal(elements['lic-recon-detail'].style.display, 'flex');
+  assert.equal(elements['lic-recon-detail-purchased'].textContent, 20);
+  assert.equal(elements['lic-recon-detail-assigned'].textContent, 2);
+  assert.equal(elements['lic-recon-detail-remaining'].textContent, 18);
+  const body = elements['lic-recon-detail-body'].innerHTML;
+  assert.match(body, /designer1@orbit\.co\.th/);
+  assert.match(body, /designer2@orbit\.co\.th/);
+  assert.match(body, /Source: Memo/);
+  // Read-only: no editable controls (checkbox/input) in the drill-down.
+  assert.doesNotMatch(body, /<input/);
+});
+
+test('exportLicReconciliationCSV exports Project/Software/Plan/Purchased/Assigned/Remaining and does not remove the existing User Matrix export', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  const memo = slMemo({
+    memoNo: 'ORB-2705-001', project: 'AOA-MP',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  context.storeMemos([memo]);
+
+  let downloaded = null;
+  context._downloadCSV = (name, headers, rows) => { downloaded = { name, headers, rows }; };
+  context.exportLicReconciliationCSV();
+
+  assert.ok(downloaded, 'reconciliation export must call _downloadCSV');
+  assert.deepEqual(Array.from(downloaded.headers), ['Project', 'Software', 'Plan', 'Purchased Seats', 'Assigned Users', 'Remaining Seats']);
+  const row = Array.from(downloaded.rows).map(r => Array.from(r)).find(r => r[1] === 'Figma');
+  assert.deepEqual(row, ['AOA-MP', 'Figma', 'Professional', 5, 1, 4]);
+
+  assert.equal(typeof context.exportUserLicensesCSV, 'function', 'the existing User Matrix export must still exist, unremoved');
 });

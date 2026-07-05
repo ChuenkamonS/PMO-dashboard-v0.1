@@ -22,6 +22,216 @@
 
 ## Current Baseline
 
+### 2026-07-05 License Management — Phase 1: Inventory ↔ Assignment Alignment
+
+Scope: architectural alignment between License Inventory (`getAllLicenses()`) and User Assignment
+(`computeLicUserMappingData()`/override editor), fully backward compatible. No new database table,
+no migration, no change to Memo workflow, Review Queue logic, or Budget/Device/Resource. All existing
+overrides, memos, and users continue to function unchanged.
+
+#### Added
+- **Part 1 — Full License Inventory as the assignable universe**: `_licAssignableIdentities(allLicenses,
+  legacyCols)` (`views/license.js`) widens the Manage Licenses checklist from "software discovered in
+  approved memo account tables only" to the complete effective License Inventory — approved memo +
+  manual + imported licenses (imported licenses already share the same `source==='manual'` store as
+  hand-added ones; no separate flag exists or is needed). `_renderLicUsers()` now stores the narrow
+  legacy list separately (`window._licUsrAcctCols`) from the widened assignable list
+  (`window._licUsrCols`), so the save path can still tell them apart. `"Name — Plan"` is used as the
+  assignable identity only when a name has more than one distinct plan in inventory; a single-plan
+  name stays bare.
+- **Part 2 — Override value gains an optional object shape**: `overrides[key]` may still be the plain
+  legacy boolean (unchanged, byte-for-byte, only ever written for account-table-derived identities) or
+  the new `{ active: boolean, licenseId?: string }` (only written for inventory-only identities,
+  pinning the exact backing record for unambiguous plan/seat resolution). One shared normalizer,
+  `_ovIsActive(ov, fallback)`, is used everywhere an override is read — no data migration, no schema
+  change (overrides already round-trip through the existing schemaless `settings.data jsonb` blob).
+- **Part 3 — License Summary Reconciliation**: a new section below the existing project matrix showing
+  Project / Software / Plan / Purchased Seats / Assigned Users / Remaining Seats, computed by
+  `computeLicReconciliation()` — Purchased Seats reuses the exact aggregation the existing matrix
+  already performed (extracted into shared `_licSeatsByProjectSoftwarePlan()`, so License Summary and
+  Reconciliation can never diverge); Assigned Users reuses the exact
+  `computeLicUserMappingData()`/`_buildLicUserGroups()`/`_licActiveForGroup()` pipeline the Users tab
+  uses (so the Review Queue gate and override precedence are inherited, not re-implemented). A
+  negative Remaining renders an "Over Assigned" badge.
+- **Part 4 — Assigned Users drill-down**: the Assigned Users count is clickable, opening a read-only
+  modal (`_openLicReconDetail()`) listing each assigned user's email, Assignment Source
+  (Memo/Manual/Multiple memos), Project, and Source Memo when available. No editing surface.
+- **Part 7 — License Reconciliation export**: `exportLicReconciliationCSV()`, a new CSV (Project,
+  Software, Plan, Purchased Seats, Assigned Users, Remaining Seats) reading the exact same
+  `computeLicReconciliation()` rows the on-screen table renders. The existing User Matrix export
+  (`exportUserLicensesCSV`) is unchanged/kept.
+
+#### Changed
+- `_licUserAssignmentDetail()` now falls back to resolving a manual/imported inventory identity (via
+  the new `_resolveInventoryIdentity()`) when no memo directly backs it — preferring an explicit
+  `licenseId` pin, then name(+plan) matching against the group's own project, then a project-less
+  ("manual license with no project") record, then any remaining match. The original memo-grant
+  matching path (name + project + granting memo) is tried first and is completely unchanged.
+- `_licChipsForUser()` and `exportUserLicensesCSV()` now normalize an identity (legacy bare name or a
+  Part 1 composite "Name — Plan") to the same `{name, plan}` shape before building chip labels/export
+  columns, so a manually-assigned inventory item renders identically to a memo-granted one.
+- `_saveLicUserEditor()` branches by identity: legacy account-table identities keep writing the plain
+  boolean (or delete-to-reset-to-memo-default) exactly as before; new inventory-only identities write
+  the `{active, licenseId}` object, resolving and pinning the backing record at save time.
+
+#### Data flow (no tab computes its own copy)
+Purchased Seats: `_licSeatsByProjectSoftwarePlan()`. Assigned Users:
+`computeLicUserMappingData()`→`_buildLicUserGroups()`→`_licActiveForGroup()`. Reconciliation:
+`computeLicReconciliation()` (joins the two). Users tab table, Manage Licenses, the User Matrix export,
+the Reconciliation table, its drill-down, and its export all read these same functions — verified via
+tests and manual browser check (a manual override written through Manage Licenses immediately appeared
+correctly bucketed in Reconciliation and its drill-down, project-attributed to the pinned license's
+own project, not the assigning user's group project).
+
+#### Remaining Work
+- Phase 2 (not implemented, per instruction): dedicated historical import UI beyond the existing bulk
+  import.
+- An "Add User" affordance (creating a brand-new (email, project) row with zero prior account-table
+  presence) remains out of scope — pre-existing, larger, separately-tracked gap (see TD-AUDIT-04);
+  Phase 1 only widens the *software* list inside an already-reachable user's Manage Licenses.
+- `TD-M3A-01` (manual override edits have no audit trail) is unaffected by the shape widening — still
+  open.
+- Full suite (480 tests; `tests/license.test.js` extended to 35, covering manual/imported inventory
+  assignability, legacy boolean + new object override shapes, reconciliation math, duplicate/over-
+  assigned edge cases, and the read-only drill-down) passes; verified manually in the browser.
+
+---
+
+### 2026-07-05 License Management — Users Tab UX Follow-up (Compact Chip Preview, Combined Manage Licenses Action)
+
+Scope: further presentation-only refinement of License Management's Users tab, on top of the
+same-day "UX Revision" pass below. No business logic, license assignment logic, Review Queue, Memo
+parsing, or Manual Override storage changed.
+
+#### Changed
+- **Licenses column shows compact chip previews again, capped at 3 + "+N more"** (`views/license.js`,
+  `_renderLicUsersRows()`): reverts the prior pass's count-only cell ("6 licenses") back to actual
+  chip names — there was enough horizontal room to preview them — while keeping the row scannable
+  for users with many licenses via a `+N more` tail (hover title lists the hidden names).
+- **View Details and Edit Licenses merged into a single "Manage Licenses" action**: the main table's
+  Action column now has one button; the separate `#lic-usr-detail` read-only modal is gone. The
+  existing `#lic-usr-editor` dialog (still keyed the same `${email}|${project}` way, still saved by
+  the unchanged `_saveLicUserEditor()`) now renders each software's checkbox grouped under "Current
+  Licenses" (checked, with an inline Plan/Source/Source Memo/Status line via
+  `_licUserAssignmentDetail()`) or "+ Add Manual License" (unchecked, no detail — nothing assigned
+  yet), instead of two separate detail-only and edit-only views.
+- **"Multiple memos" source wording now resolves per (email, project) group** instead of via the
+  removed cross-project `_licUserDetailRows()` merge — two memos granting the same software to the
+  same user in the same project already produce >1 entries in `group.licenseSources[license]`, so no
+  cross-project merge was needed to support this wording; `_licUserDetailRows()` was deleted as dead
+  code once its only caller (the old View Details modal) was removed.
+
+#### Added
+- **"+ Add Manual License" makes the manual-add path explicit**: previously, adding a license meant
+  checking an unlabeled box in an undifferentiated list; now every not-yet-assigned software is
+  grouped under a clearly-labeled "+ Add Manual License" heading, with updated helper text explaining
+  both directions ("Check an item under + Add Manual License to assign it; uncheck any item to
+  remove it"). No new business logic — same checkbox, same override write.
+
+#### Deferred (documented, not implemented)
+- Free-text "add a brand-new software name never seen by any memo" was considered risky (would
+  silently never match a real license record for Plan/Status, and fragments the software vocabulary
+  the same way TD-7A-07 already documents for Project dropdowns) and was not implemented. Manual add
+  still only offers software names already known to `allLicCols` (i.e., used by some approved SL
+  memo's account table, for any project). Recorded as `TD-LIC-USR-01` in `docs/TECHNICAL_DEBT.md`.
+
+#### Remaining Work
+- None identified beyond the deferred item above. Review Queue, Manual Override storage/precedence,
+  Memo Index, License Summary, and Other Subscription tabs verified unchanged. Full suite (472 tests,
+  `tests/license.test.js` extended to 27 License-module tests covering the chip preview cap/overflow,
+  the combined Manage Licenses render, and the manual-add grouping) passes.
+
+---
+
+### 2026-07-05 License Management — Users Tab UX Revision (View Details, Matrix Export, Software Filter Fix)
+
+Scope: further presentation-only refinement of License Management's Users tab, on top of the same-day
+"UX Simplification" pass below. No business logic, license assignment logic, Review Queue, Memo
+parsing, or Manual Override storage changed.
+
+#### Changed
+- **Licenses column now shows a count, not chips** (`views/license.js`, `_renderLicUsersRows()`):
+  "6 licenses" / "1 license" instead of inline badges, so a user with many licenses stays scannable.
+  A native `title` tooltip on the cell still lists the license names (Software + Plan) on hover —
+  the "simple, low-risk preview" option, no new UI chrome.
+- **Action column now offers View Details and Edit Licenses** as two separate buttons, instead of
+  Edit Licenses alone. "Edit Licenses" wording, the modal title ("Edit Licenses"), and a new helper
+  line ("Select software this user should have. Uncheck to remove manual assignment.") make clear
+  the dialog both adds and removes assignments, not remove-only. The underlying override save logic
+  (`_saveLicUserEditor`) is untouched.
+- **Software filter now reflects effective (post-override) assignment, not just the memo's original
+  grant**: `_licUserHasAnySoftware()` filters at the user level (OR across selected software) after
+  applying manual overrides, so "who has Slack" correctly includes a user whose Slack access came
+  from a manual override rather than a memo checkbox. Previously the filter checked the raw
+  memo-derived checkbox only, which could both hide a manually-added user and show a
+  manually-removed one. Project filter and Search are unchanged (already correct, left as-is).
+- **Export User Licenses is now a User × Software matrix**, not a flat list: one column per unique
+  Software (+ "— Plan" when the license has one), `✓`/blank cells, respecting the tab's current
+  Search/Project/Software filters (reuses the exact same visible-user list the table just rendered,
+  via `window._licUsrVisibleUsers`, so export can't drift from the UI per MASTER_SPEC's export rule).
+
+#### Added
+- **View Details modal** (`_openLicUserDetail()`/`_licUserDetailRows()`): read-only expansion of a
+  user's license count showing, per merged Software+Plan assignment, Source (Memo/Manual/"Multiple
+  memos"), Source Memo (clickable, links to `openMemoReadOnly`), Status, Project as secondary detail,
+  and Last Updated when the backing license record has one.
+
+#### Duplicate/merge rule (unchanged principle, now also applied to View Details)
+- Grouping key is still User + Software + Plan, not memo. Two memos granting the same software+plan
+  merge into one license-count item, one export `✓`, and one View Details row whose Source reads
+  "Multiple memos" (with all contributing memo numbers still listed) — underlying per-memo records
+  are never modified, this is visual grouping only, same as the prior pass.
+
+#### Remaining Work
+- None identified for this pass. Review Queue, Manual Override storage/precedence, Memo Index,
+  License Summary, and Other Subscription tabs verified unchanged. Full suite (469 tests,
+  `tests/license.test.js` extended to 24 License-module tests covering count display, the software
+  filter's OR/override-aware behavior, View Details content, and the matrix export) passes.
+
+---
+
+### 2026-07-05 License Management — Users Tab UX Simplification
+
+Scope: presentation-only refactor of License Management's Users tab. No business logic, license
+assignment logic, Review Queue, Memo parsing, or Manual Override behavior changed.
+
+#### Changed
+- **Users tab table simplified to User / Licenses / Action** (`views/license.js`): replaced the
+  previous user-centric table (User / Department / Software Count, expandable per-project detail
+  rows showing Program/Plan/Seat/Source Memo/Status) with a flat table showing only the user's
+  email and chips for their currently assigned software. Department, Project, Seat, Source Memo,
+  and Status are no longer shown in the main table — they were implementation detail the tab
+  wasn't meant to expose up front.
+- **License chips deduplicate by Software + Plan, not by memo**: chips are computed across all of
+  a user's project groups (`_licChipsForUser`), merging identical Software+Plan pairs into one chip
+  regardless of how many memos/projects granted it; different Plans for the same software render
+  as separate chips (e.g. "Figma Professional" vs "Figma Enterprise").
+- **Edit Licenses entry point moved from per-project expand rows to a per-user Action button**
+  (`_openLicUserEditorForEmail`): opens the exact same (email, project)-keyed editor dialog
+  unchanged; when a user has more than one project group, a small project switcher appears inside
+  the dialog (Project info still lives "inside Edit Licenses only", never in the main table).
+- **Extracted shared grouping/lookup helpers** (`_buildLicUserGroups`, `_licActiveForGroup`,
+  `_licUserAssignmentDetail`) so the table render and the new export use identical business logic
+  (MASTER_SPEC: exports must match the UI; no duplicated calculation logic).
+
+#### Added
+- **Export User Licenses** (`exportUserLicensesCSV()`): a dedicated CSV export for the Users tab's
+  own dataset — columns are User Email, Software, Plan, Assignment Source (Memo/Manual), Source
+  Memo, Status — separate from the existing Memo Index `exportLicenseCSV()`.
+
+#### Removed
+- Row expand/collapse (`_toggleLicUserRow`, `window._licUsrExpanded`) and the inline
+  Program/Plan/Seat/Source Memo/Status detail table are gone from the Users tab; that detail is
+  now available via Export User Licenses (and still inside the unchanged Edit Licenses dialog for
+  the license names themselves).
+
+#### Remaining Work
+- None identified for this pass. Review Queue, Manual Override, Memo Index, License Summary, and
+  Other Subscription tabs were verified unchanged; full test suite (467 tests, `tests/license.test.js`
+  updated to lock in the new render shape) passes.
+
+---
+
 ### 2026-07-05 UAT / Smoke Test Round — Device Registry Cache-Race Fix
 
 Scope: focused smoke test across Memo lifecycle, Budget & Spend, License, Device, and cross-module

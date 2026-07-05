@@ -1784,6 +1784,72 @@ Exit Criteria (met)
 
 ---
 
+# TD-LIC-USR-01
+
+Title
+
+License Management > Users "Manage Licenses" Manual Add Is Limited to Already-Known Software (No Free-Text)
+
+Status
+
+OPEN (deliberately deferred, 2026-07-05 Users tab UX follow-up)
+
+Priority
+
+Low
+
+Introduced
+
+License Management > Users tab UX follow-up (2026-07-05)
+
+Owner Phase
+
+License Logic — Users tab (future UX phase, contingent on a Software Master)
+
+Reason
+
+The Manage Licenses dialog's "+ Add Manual License" section lets PMO manually assign any software
+that already appears as a column in `allLicCols` (i.e., a software name that has shown up in at
+least one approved SL memo's "ตาราง Account" header, across any project) but not appeared for
+*this* user yet. It intentionally does not offer a free-text "type a new software name" input.
+
+A true free-text add would let PMO create a manual override for a software name that has never
+been seen by any memo — `_licActiveForGroup()`/`_licChipsForUser()`/the matrix export all key off
+`allLicCols` (the known-columns list), and `_licUserAssignmentDetail()`'s Plan/Status lookup matches
+against `getAllLicenses()` by exact software name. A free-text name would silently never match any
+real license record (no Plan, no Status, ever), and would introduce an uncontrolled, unvalidated
+vocabulary of software names with no relationship to Memo parsing or the License Index — a much
+larger change than this "UX/presentation only" pass's scope, and one that duplicates ground already
+staked out for a future Master Settings / Software Master module (see TD-7A-07's analogous
+reasoning for Project dropdowns).
+
+Current Situation
+
+PMO can only manually assign software that some approved SL memo has already introduced as a column
+(anywhere, for any user/project) — not append an entirely new software name from the Users tab.
+This does not block any currently-supported workflow: every real assignment need in production so
+far originates from an SL memo's account table, and manual override exists to correct/extend
+per-user assignment of that already-known software, not to introduce new software outside the Memo
+process (License Index/"Other" tab's Add License modal is the existing intentional path for
+introducing an entirely new piece of software into the system).
+
+Risk
+
+If PMO ever needs to manually grant a user a software that has never appeared in any memo's account
+table (e.g. a one-off tool with no SL memo on file), there is no UI path to do so from the Users tab
+today.
+
+Exit Criteria
+
+- Decide whether a controlled "add new software name" affordance belongs on the Users tab, on the
+  License Index ("Other") tab (already the existing free-text create-license path via `Add License`),
+  or awaits a future Software Master list — a scope/design decision, not a quick follow-up fix.
+- If added to the Users tab, it must not accept arbitrary free text without validation against a
+  canonical software list, to avoid fragmenting the software vocabulary the way TD-7A-07 documents
+  already happened for Project dropdowns.
+
+---
+
 # Before Release Checklist
 
 Review every OPEN Technical Debt.
