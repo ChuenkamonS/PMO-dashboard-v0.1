@@ -896,3 +896,208 @@ test('exportLicReconciliationCSV exports Project/Software/Plan/Purchased/Assigne
 
   assert.equal(typeof context.exportUserLicensesCSV, 'function', 'the existing User Matrix export must still exist, unremoved');
 });
+
+// ══════════════════════════════════════════════════════════════════
+// Phase 2A — License Management UX Improvements. Presentation-only, on top
+// of Phase 1's inventory/assignment alignment: Manage Licenses now groups a
+// user's software by Project (collapsible sections replace the old single-
+// project dropdown switcher) with read-only Purchased/Assigned/Remaining
+// seat context and a realtime search box; License Summary is split into
+// Summary/Reconciliation sub-tabs. No reconciliation math, override
+// precedence, Review Queue gate, or (email, project) override key shape is
+// changed — computeLicReconciliation()/_saveLicUserEditor()'s branching are
+// reused as-is.
+// ══════════════════════════════════════════════════════════════════
+
+test('Manage Licenses groups a user\'s licenses by Project, with each project section keeping independent checkbox state (Part 1/5)', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  const memoGeo9 = slMemo({
+    memoNo: 'ORB-2801-001', project: 'Geo9',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>multi@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  const memoEV = slMemo({
+    memoNo: 'ORB-2801-002', project: 'EV',
+    slItems: [{ name: 'Slack', plan: '', price: 50, qty: 3, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Slack</th></tr></thead>' +
+      '<tbody><tr><td>multi@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  context.storeMemos([memoGeo9, memoEV]);
+
+  const elements = licUsersElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+
+  // Users table itself keeps showing only software names — no Project column.
+  assert.doesNotMatch(elements['lic-content'].innerHTML, /<th[^>]*>Project<\/th>/);
+
+  context._openLicUserEditorForEmail('multi@orbit.co.th');
+  const body = elements['lic-usr-editor-options'].innerHTML;
+
+  assert.match(body, /Geo9/);
+  assert.match(body, /EV/);
+  assert.equal((body.match(/Current Licenses \(/g) || []).length, 2, 'one "Current Licenses" heading per project section — a grouped tree, not a flat list');
+
+  const inputs = body.match(/<input[^>]*>/g) || [];
+  const find = (project, license) => inputs.find(i =>
+    i.includes(`data-group-key="multi@orbit.co.th|${project}"`) && i.includes(`data-license-index="${license}"`));
+
+  const figmaGeo9 = find('Geo9', context.window._licUsrCols.indexOf('Figma'));
+  const figmaEV   = find('EV', context.window._licUsrCols.indexOf('Figma'));
+  const slackGeo9 = find('Geo9', context.window._licUsrCols.indexOf('Slack'));
+  const slackEV   = find('EV', context.window._licUsrCols.indexOf('Slack'));
+
+  assert.ok(figmaGeo9 && /checked/.test(figmaGeo9), 'Figma must be checked within its own Geo9 section');
+  assert.ok(figmaEV && !/checked/.test(figmaEV), 'Figma must be unchecked within the EV section — project scoping is independent');
+  assert.ok(slackEV && /checked/.test(slackEV), 'Slack must be checked within its own EV section');
+  assert.ok(slackGeo9 && !/checked/.test(slackGeo9), 'Slack must be unchecked within the Geo9 section — project scoping is independent');
+});
+
+test('Manage Licenses shows Purchased/Assigned/Remaining seats inline per software, read-only (Part 4/6)', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  const memo = slMemo({
+    memoNo: 'ORB-2802-001', project: 'Geo9',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  context.storeMemos([memo]);
+
+  const elements = licUsersElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+  context._openLicUserEditorForEmail('designer@orbit.co.th');
+
+  const body = elements['lic-usr-editor-options'].innerHTML;
+  assert.match(body, /Purchased 5 · Assigned 1 · Remaining <span[^>]*>4<\/span>/, 'inline seat line must match computeLicReconciliation\'s own math (5 purchased, 1 assigned, 4 remaining)');
+
+  // Read-only: the seat line is plain text, no clickable/editable control of
+  // its own (only the existing assignment checkbox is interactive).
+  const seatLine = (body.match(/Purchased 5[\s\S]*?<\/span>/) || [''])[0];
+  assert.doesNotMatch(seatLine, /onclick/);
+  assert.doesNotMatch(seatLine, /<input/);
+  assert.doesNotMatch(seatLine, /<button/);
+});
+
+test('Manage Licenses renders a realtime search box, and each software row carries a lowercase name for filtering (Part 2)', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  const memo = slMemo({
+    memoNo: 'ORB-2803-001', project: 'Geo9',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  context.storeMemos([memo]);
+
+  const elements = licUsersElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+
+  assert.match(elements['lic-content'].innerHTML, /id="lic-usr-editor-search"/, 'a search input must exist in the Manage Licenses dialog');
+  assert.match(elements['lic-content'].innerHTML, /oninput="_filterLicUserEditorOptions\(\)"/, 'the search box must filter in realtime (on every keystroke), not on submit/blur');
+
+  context._openLicUserEditorForEmail('designer@orbit.co.th');
+  const body = elements['lic-usr-editor-options'].innerHTML;
+  assert.match(body, /data-license-name="figma"/, 'each row must expose a lowercase, filterable software name');
+  assert.equal(typeof context._filterLicUserEditorOptions, 'function');
+});
+
+test('License Summary is split into Summary and Reconciliation sub-tabs — only one panel visible at a time (Part 3)', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  const memo = slMemo({
+    memoNo: 'ORB-2804-001', project: 'AOA-MP',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  context.storeMemos([memo]);
+
+  const elements = {
+    'lic-content': { innerHTML: '' },
+    'bp-table-wrap': { innerHTML: '' },
+    'lic-recon-wrap': { innerHTML: '' },
+  };
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+
+  context._renderLicByProject();
+  let content = elements['lic-content'].innerHTML;
+  let summaryTag = content.match(/<div id="lic-summary-panel"[^>]*>/)[0];
+  let reconTag = content.match(/<div id="lic-reconciliation-panel"[^>]*>/)[0];
+  assert.doesNotMatch(summaryTag, /display:none/, 'Summary panel must be visible by default');
+  assert.match(reconTag, /display:none/, 'Reconciliation panel must be hidden while Summary sub-tab is active');
+
+  context._switchLicSummarySubTab('reconciliation');
+  content = elements['lic-content'].innerHTML;
+  summaryTag = content.match(/<div id="lic-summary-panel"[^>]*>/)[0];
+  reconTag = content.match(/<div id="lic-reconciliation-panel"[^>]*>/)[0];
+  assert.match(summaryTag, /display:none/, 'Summary panel must hide after switching to Reconciliation');
+  assert.doesNotMatch(reconTag, /display:none/, 'Reconciliation panel must become visible after switching');
+
+  // Underlying data is untouched by the split — same tables, same numbers.
+  assert.match(elements['lic-recon-wrap'].innerHTML, /Figma/);
+});
+
+test('Manage Licenses "Save licenses" applies checkbox state per project section for a multi-project user (grouping does not change the override save path)', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  const memoGeo9 = slMemo({
+    memoNo: 'ORB-2805-001', project: 'Geo9',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>multi@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  const memoEV = slMemo({
+    memoNo: 'ORB-2805-002', project: 'EV',
+    slItems: [{ name: 'Slack', plan: '', price: 50, qty: 3, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Slack</th></tr></thead>' +
+      '<tbody><tr><td>multi@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  context.storeMemos([memoGeo9, memoEV]);
+
+  const elements = licUsersElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+  context._openLicUserEditorForEmail('multi@orbit.co.th');
+
+  // Simulate the checkbox states after PMO edits both sections in one Save:
+  // remove Figma from Geo9, manually add Figma to EV, leave Slack untouched
+  // in both sections.
+  const fakeInputs = [
+    { dataset: { groupKey: 'multi@orbit.co.th|Geo9', licenseIndex: '0' }, checked: false },
+    { dataset: { groupKey: 'multi@orbit.co.th|Geo9', licenseIndex: '1' }, checked: false },
+    { dataset: { groupKey: 'multi@orbit.co.th|EV', licenseIndex: '0' }, checked: true },
+    { dataset: { groupKey: 'multi@orbit.co.th|EV', licenseIndex: '1' }, checked: true },
+  ];
+  const origQSA = context.document.querySelectorAll;
+  context.document.querySelectorAll = sel =>
+    sel === '#lic-usr-editor-options .lic-usr-edit-check' ? fakeInputs : origQSA(sel);
+
+  context._saveLicUserEditor();
+
+  const overrides = context._getLicUserOverrides();
+  assert.equal(overrides['multi@orbit.co.th|Geo9|Figma'], false, 'unchecking a memo-granted identity in its own project section writes a scoped false override');
+  assert.equal(overrides['multi@orbit.co.th|EV|Figma'], true, 'checking the same identity in a different project section writes an override scoped to that project only, independent of Geo9');
+  assert.ok(!('multi@orbit.co.th|Geo9|Slack' in overrides), 'an untouched, still-unchecked entry writes no override');
+  assert.ok(!('multi@orbit.co.th|EV|Slack' in overrides), 'an untouched, still-checked (memo-granted) entry resets to memo default — no override');
+});

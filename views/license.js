@@ -590,6 +590,15 @@ function _worstLicenseStatus(lics) {
 
 // ── TAB 2: LICENSE SUMMARY ───────────────────────────────
 let _bpYear = 'all';
+// Part 3 (Phase 2A) — Summary and Reconciliation are separate sub-tabs (only
+// one panel in the DOM at a time) so viewing either never requires scrolling
+// past the other's table.
+let _bpSubTab = 'summary';
+
+function _switchLicSummarySubTab(tab) {
+  _bpSubTab = tab;
+  _renderLicByProject();
+}
 
 function _renderLicByProject() {
   const el = document.getElementById('lic-content');
@@ -599,21 +608,29 @@ function _renderLicByProject() {
   const years   = [...new Set(allLics.map(l => l.memoYear).filter(Boolean))].sort((a,b)=>b-a);
 
   el.innerHTML = `
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
-      <div>
-        <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Year</div>
-        <select onchange="_bpYear=this.value;_bpRenderMatrix()" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1)">
-          <option value="all">All years</option>
-          ${years.map(y=>`<option value="${y}" ${String(y)===_bpYear?'selected':''}>${y}</option>`).join('')}
-        </select>
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button class="btn-sm${_bpSubTab === 'summary' ? ' active' : ''}" data-subtab="summary" onclick="_switchLicSummarySubTab('summary')">Summary</button>
+      <button class="btn-sm${_bpSubTab === 'reconciliation' ? ' active' : ''}" data-subtab="reconciliation" onclick="_switchLicSummarySubTab('reconciliation')">Reconciliation</button>
+    </div>
+    <div id="lic-summary-panel" style="${_bpSubTab === 'summary' ? '' : 'display:none'}">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+        <div>
+          <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Year</div>
+          <select onchange="_bpYear=this.value;_bpRenderMatrix()" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1)">
+            <option value="all">All years</option>
+            ${years.map(y=>`<option value="${y}" ${String(y)===_bpYear?'selected':''}>${y}</option>`).join('')}
+          </select>
+        </div>
       </div>
+      <div id="bp-table-wrap"></div>
     </div>
-    <div id="bp-table-wrap"></div>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin:20px 0 10px">
-      <div style="font-size:13px;font-weight:700">License Reconciliation</div>
-      <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="exportLicReconciliationCSV()">⬇ Export Reconciliation</button>
-    </div>
-    <div id="lic-recon-wrap"></div>`;
+    <div id="lic-reconciliation-panel" style="${_bpSubTab === 'reconciliation' ? '' : 'display:none'}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:700">License Reconciliation</div>
+        <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="exportLicReconciliationCSV()">⬇ Export Reconciliation</button>
+      </div>
+      <div id="lic-recon-wrap"></div>
+    </div>`;
 
   _bpRenderMatrix();
   _renderLicReconciliation();
@@ -1131,12 +1148,14 @@ function _renderLicUsers() {
       </table>
     </div>
     <div id="lic-usr-editor" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:300;align-items:center;justify-content:center">
-      <div class="card" style="width:520px;max-width:94vw;max-height:85vh;overflow-y:auto;padding:20px">
+      <div class="card" style="width:560px;max-width:94vw;max-height:85vh;overflow-y:auto;padding:20px">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px">
           <div><div style="font-size:15px;font-weight:700">Manage Licenses</div><div id="lic-usr-editor-name" style="font-size:11px;color:var(--text-2);margin-top:2px"></div></div>
           <button class="btn-sm" onclick="_closeLicUserEditor()">✕</button>
         </div>
-        <div style="font-size:11px;color:var(--text-2);margin-bottom:10px">Current Licenses shows what this user has today. Check an item under + Add Manual License to assign it; uncheck any item to remove it.</div>
+        <div style="font-size:11px;color:var(--text-2);margin-bottom:10px">Current Licenses shows what this user has today, grouped by project. Check an item under + Add Manual License to assign it; uncheck any item to remove it. Assigned Users/Remaining Seats are read-only context from License Inventory.</div>
+        <input type="text" id="lic-usr-editor-search" placeholder="🔍 Search software..." oninput="_filterLicUserEditorOptions()"
+          style="width:100%;box-sizing:border-box;font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);outline:none;margin-bottom:10px">
         <div style="display:flex;gap:6px;margin-bottom:10px">
           <button class="btn-sm" onclick="_setAllLicUserEditor(true)">✓ Select all</button>
           <button class="btn-sm" onclick="_setAllLicUserEditor(false)">Clear all</button>
@@ -1366,13 +1385,20 @@ function _openLicUserEditorForEmail(email) {
 }
 
 // Manage Licenses combines what used to be two separate actions (View
-// Details + Edit Licenses) into one: for each software column, an active
-// assignment shows its Plan/Source/Source Memo/Status inline next to its
-// (checked) checkbox under "Current Licenses"; every not-yet-assigned
-// software is listed, unchecked, under "+ Add Manual License" so PMO has an
-// obvious place to manually grant it. Checking/unchecking either group is
-// the exact same override write _saveLicUserEditor() already performed —
-// only the option list's grouping/detail text is new, not the save logic.
+// Details + Edit Licenses) into one, and (Phase 2A Part 1/5) groups a user's
+// software by Project — collapsible "▼ Project" sections replace the old
+// single-project dropdown switcher, so every project the user belongs to is
+// visible at once. Project selection lives only inside this dialog (via the
+// section headers); the Users table and its rows keep showing software names
+// only, never Project. For each software column, an active assignment shows
+// its Plan/Source/Source Memo/Status plus read-only Purchased/Assigned/
+// Remaining seat context (Part 4/6 — plain text, no input, no click-to-edit)
+// inline next to its (checked) checkbox under "Current Licenses"; every
+// not-yet-assigned software is listed, unchecked, under "+ Add Manual
+// License". Checking/unchecking is the exact same override write
+// _saveLicUserEditor() already performed — only the grouping/detail text is
+// new. The seat context reads computeLicReconciliation() as-is (no
+// reconciliation math re-derived here).
 function _openLicUserEditor(key) {
   const row = window._licUsrMerged?.[key];
   const modal = document.getElementById('lic-usr-editor');
@@ -1381,24 +1407,17 @@ function _openLicUserEditor(key) {
   const overrides = _getLicUserOverrides();
   const allLicenses = getAllLicenses();
   const groups = (window._licUsrEditGroups || [row]).filter(g => g.email === row.email);
-  const nameEl = document.getElementById('lic-usr-editor-name');
-  if (groups.length > 1) {
-    nameEl.innerHTML = `${esc(row.email)} · <select onchange="_openLicUserEditor(this.value)" style="font-size:11px;font-family:inherit">
-      ${groups.map(g => `<option value="${esc(g.email)}|${esc(g.project)}" ${`${g.email}|${g.project}` === key ? 'selected' : ''}>${esc(g.project || '—')}</option>`).join('')}
-    </select>`;
-  } else {
-    nameEl.textContent = `${row.email} · ${row.project || '—'}`;
-  }
+  window._licUsrEditorGroups = groups;
 
-  const entries = (window._licUsrCols || []).map((license, index) => {
-    const ovKey = `${key}|${license}`;
-    const ov = overrides[ovKey];
-    const active = _ovIsActive(ov, row.licenses[license] === true);
-    const detail = active ? _licUserAssignmentDetail(row, license, allLicenses, ov) : null;
-    return { license, index, active, detail };
-  });
-  const activeEntries = entries.filter(e => e.active);
-  const inactiveEntries = entries.filter(e => !e.active);
+  const nameEl = document.getElementById('lic-usr-editor-name');
+  if (nameEl) nameEl.textContent = row.email;
+
+  // Purchased/Assigned/Remaining per (project, software, plan) — the exact
+  // same canonical rows License Summary's Reconciliation tab renders.
+  const reconRows = computeLicReconciliation(loadMemos(), _getLicReviewState(), overrides);
+  const reconMap = new Map(reconRows.map(r => [`${r.project}||${r.name}||${r.plan}`, r]));
+  const findRecon = (project, name, plan) =>
+    reconMap.get(`${project}||${name}||${plan}`) || reconMap.get(`${project}||${name}||`);
 
   const optionRow = e => {
     // A composite "Name — Plan" identity already shows its plan in the label
@@ -1409,19 +1428,72 @@ function _openLicUserEditor(key) {
         ${e.detail.sources.length ? ` · Source Memo: ${esc(e.detail.sources.join(', '))}` : ''}
         ${e.detail.status ? ` · Status: ${esc(e.detail.status.label)}` : ''}
       </span>` : '';
-    return `<label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;margin-bottom:6px">
-      <input type="checkbox" class="lic-usr-edit-check" data-license-index="${e.index}"${e.active ? ' checked' : ''} style="width:17px;height:17px;accent-color:var(--blue);margin-top:1px;flex-shrink:0">
-      <span style="flex:1"><span style="font-size:12px;font-weight:600">${esc(e.license)}</span>${detailHtml}</span>
+    const seatHtml = e.recon ? `<span style="font-size:11px;color:var(--text-3);display:block;margin-top:2px">
+        Purchased ${e.recon.purchased} · Assigned ${e.recon.assignedCount} · Remaining <span style="${e.recon.remaining < 0 ? 'color:var(--red);font-weight:600' : ''}">${e.recon.remaining}</span>
+      </span>` : '';
+    return `<label class="lic-usr-edit-row" data-license-name="${esc(e.license.toLowerCase())}" style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;margin-bottom:6px">
+      <input type="checkbox" class="lic-usr-edit-check" data-group-key="${esc(e.groupKey)}" data-license-index="${e.index}"${e.active ? ' checked' : ''} style="width:17px;height:17px;accent-color:var(--blue);margin-top:1px;flex-shrink:0">
+      <span style="flex:1"><span style="font-size:12px;font-weight:600">${esc(e.license)}</span>${detailHtml}${seatHtml}</span>
     </label>`;
   };
 
-  document.getElementById('lic-usr-editor-options').innerHTML = `
-    <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.02em;margin-bottom:6px">Current Licenses (${activeEntries.length})</div>
-    ${activeEntries.length ? activeEntries.map(optionRow).join('') : '<div style="font-size:12px;color:var(--text-3);padding:2px 2px 10px">No active licenses</div>'}
-    <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.02em;margin:10px 0 6px">+ Add Manual License</div>
-    ${inactiveEntries.length ? inactiveEntries.map(optionRow).join('') : '<div style="font-size:12px;color:var(--text-3);padding:2px">All available software already assigned</div>'}
-  `;
+  const sectionsHtml = groups.map((group, gIdx) => {
+    const groupKey = `${group.email}|${group.project}`;
+    const entries = (window._licUsrCols || []).map((license, index) => {
+      const ovKey = `${groupKey}|${license}`;
+      const ov = overrides[ovKey];
+      const active = _ovIsActive(ov, group.licenses[license] === true);
+      const detail = active ? _licUserAssignmentDetail(group, license, allLicenses, ov) : null;
+      const parsed = _parseLicIdentity(license);
+      const plan = detail?.plan || parsed.plan;
+      const recon = findRecon(group.project, parsed.name, plan);
+      return { license, index, active, detail, recon, groupKey };
+    });
+    const activeEntries = entries.filter(e => e.active);
+    const inactiveEntries = entries.filter(e => !e.active);
+
+    return `<div class="lic-usr-edit-group" data-group-idx="${gIdx}" style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 4px;font-size:12px;font-weight:700;border-bottom:1px solid var(--border);margin-bottom:8px" onclick="_toggleLicUserEditorGroup(${gIdx})">
+        <span id="lic-usr-edit-caret-${gIdx}">▼</span> ${esc(group.project || '(ไม่ระบุ)')}
+      </div>
+      <div id="lic-usr-edit-group-body-${gIdx}">
+        <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.02em;margin-bottom:6px">Current Licenses (${activeEntries.length})</div>
+        ${activeEntries.length ? activeEntries.map(optionRow).join('') : '<div style="font-size:12px;color:var(--text-3);padding:2px 2px 10px">No active licenses</div>'}
+        <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.02em;margin:10px 0 6px">+ Add Manual License</div>
+        ${inactiveEntries.length ? inactiveEntries.map(optionRow).join('') : '<div style="font-size:12px;color:var(--text-3);padding:2px">All available software already assigned</div>'}
+      </div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('lic-usr-editor-options').innerHTML = sectionsHtml;
+  const searchEl = document.getElementById('lic-usr-editor-search');
+  if (searchEl) searchEl.value = '';
   modal.style.display = 'flex';
+}
+
+function _toggleLicUserEditorGroup(gIdx) {
+  const body = document.getElementById(`lic-usr-edit-group-body-${gIdx}`);
+  const caret = document.getElementById(`lic-usr-edit-caret-${gIdx}`);
+  if (!body) return;
+  const collapsed = body.style.display === 'none';
+  body.style.display = collapsed ? '' : 'none';
+  if (caret) caret.textContent = collapsed ? '▼' : '▶';
+}
+
+// Part 2 — realtime search across every project section's software list.
+// Filters by name only (hide/show via CSS, no re-render), and collapses a
+// project section entirely when none of its rows match.
+function _filterLicUserEditorOptions() {
+  const q = (document.getElementById('lic-usr-editor-search')?.value || '').trim().toLowerCase();
+  document.querySelectorAll('#lic-usr-editor-options .lic-usr-edit-row').forEach(row => {
+    const match = !q || (row.dataset.licenseName || '').includes(q);
+    row.style.display = match ? '' : 'none';
+  });
+  document.querySelectorAll('#lic-usr-editor-options .lic-usr-edit-group').forEach(group => {
+    if (!q) { group.style.display = ''; return; }
+    const rows = [...group.querySelectorAll('.lic-usr-edit-row')];
+    group.style.display = rows.some(r => r.style.display !== 'none') ? '' : 'none';
+  });
 }
 
 function _setAllLicUserEditor(checked) {
@@ -1433,19 +1505,22 @@ function _closeLicUserEditor() {
   if(modal) modal.style.display = 'none';
   window._licUsrEditKey = null;
   window._licUsrEditGroups = null;
+  window._licUsrEditorGroups = null;
 }
 
 function _saveLicUserEditor() {
-  const key = window._licUsrEditKey;
-  const row = window._licUsrMerged?.[key];
-  if(!key || !row) return;
+  const groups = window._licUsrEditorGroups || [];
+  if (!groups.length) return;
+  const groupByKey = new Map(groups.map(g => [`${g.email}|${g.project}`, g]));
   const licenses = window._licUsrCols || [];
   const legacyCols = new Set(window._licUsrAcctCols || []);
   const overrides = _getLicUserOverrides();
   const allLicenses = getAllLicenses();
   document.querySelectorAll('#lic-usr-editor-options .lic-usr-edit-check').forEach(input => {
+    const row = groupByKey.get(input.dataset.groupKey);
+    if (!row) return;
     const license = licenses[Number(input.dataset.licenseIndex)];
-    const ovKey = `${key}|${license}`;
+    const ovKey = `${input.dataset.groupKey}|${license}`;
     const fromMemo = row.licenses[license] === true;
     if (legacyCols.has(license)) {
       // Legacy account-table identity — unchanged boolean-only write path,
