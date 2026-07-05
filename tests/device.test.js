@@ -220,6 +220,65 @@ test('markArrived: 5 ordered -> 3 arrive -> 2 arrive later (SYSTEM_STATE_MACHINE
   assert.equal(devices.length, 5, 'all 5 physical units now have device records');
 });
 
+test('UAT fix: two sequential markArrived() calls on one PO do not lose earlier device records to a racing Supabase devices GET', async () => {
+  // Reproduces a real, deterministic bug found during the 2026-07-05 UAT smoke
+  // test: markArrived() used to end with an internal renderDevice() call,
+  // which fires a full loadDevicesAsync() GET that unconditionally overwrites
+  // _devCache. The devices just created by that same (or a very recent prior)
+  // markArrived() call are pushed to Supabase via fire-and-forget
+  // saveDeviceAsync() POSTs — if the GET's response lands before those POSTs
+  // are visible server-side, the refetch silently discards the not-yet-synced
+  // device rows from the cache, even though the PO's own arrivedQty/status
+  // stay correct. Simulate exactly that ordering here: the devices GET
+  // resolves fast (returning only whatever the mock "server" already has),
+  // while devices POSTs resolve slightly slower.
+  const { context } = createDeviceContext();
+  context.storePurchaseOrders([{
+    id: 'po-503', memoNo: 'HW-503', project: 'AOA-MP', itemName: 'Laptop',
+    orderedQty: 3, arrivedQty: 0, status: 'awaiting', note: '',
+    createdAt: '2026-07-01T00:00:00.000Z', updatedAt: '2026-07-01T00:00:00.000Z',
+  }]);
+  context.checkSupa = async () => true;
+  let nextId = 1;
+  const serverDevices = [];
+  context.fetch = async (url, opts = {}) => {
+    const isDevices = url.includes('/devices');
+    const method = opts.method || 'GET';
+    if (isDevices && method === 'GET') {
+      // Fast response — races ahead of any in-flight POST below.
+      return { ok: true, text: async () => JSON.stringify(serverDevices) };
+    }
+    if (isDevices && method === 'POST') {
+      const row = JSON.parse(opts.body);
+      const saved = { ...row, id: nextId++ };
+      // Slight delay so a same-tick devices GET resolves first, matching the
+      // real network timing that produced the bug.
+      await new Promise(r => context.setTimeout(r, 5));
+      serverDevices.push(saved);
+      return { ok: true, text: async () => JSON.stringify([{ id: saved.id }]) };
+    }
+    // Any other table/query (purchase_orders, etc.) — succeed with no rows.
+    return { ok: true, text: async () => '[]' };
+  };
+
+  await context.markArrived('po-503', 2, ['SN1', 'SN2']);
+  // Real Mark Arrived clicks are always at least a few ms apart (human/network
+  // latency); force the same here so the two calls' Date.now()-based device
+  // batch ids can't collide — a same-millisecond id collision is a separate,
+  // narrower pre-existing quirk, not the GET-vs-POST race this test targets.
+  await new Promise(r => setTimeout(r, 10));
+  await context.markArrived('po-503', 1, ['SN3']);
+  // Let the trailing POST's setTimeout(5ms) settle before asserting.
+  await new Promise(r => setTimeout(r, 20));
+
+  const po = context.loadPurchaseOrders().find(p => p.id === 'po-503');
+  assert.equal(po.arrivedQty, 3);
+  assert.equal(po.status, 'fulfilled');
+  const devices = context.loadDevices().filter(d => d.memoNo === 'HW-503');
+  assert.equal(devices.length, 3, 'all 3 device records must survive both arrivals, not just the most recent one');
+  assert.deepEqual(Array.from(devices, d => d.serial).sort(), ['SN1', 'SN2', 'SN3']);
+});
+
 test('markArrived clamps arrival quantity to the remaining balance', async () => {
   const { context } = createDeviceContext();
   context.storePurchaseOrders([{ id: 'po-501', memoNo: 'HW-501', itemName: 'Monitor', orderedQty: 2, arrivedQty: 0, status: 'awaiting' }]);
@@ -300,6 +359,57 @@ test('saveDevice() (manual Edit) writes an Edited audit entry and preserves prio
   assert.equal(updated.auditLog[0].action, 'Created');
   assert.equal(updated.auditLog[1].action, 'Edited');
   assert.equal(updated.auditLog[1].statusAfter, 'in-use');
+});
+
+test('UAT fix: saveDevice() edit does not visibly revert when a racing Supabase devices GET resolves before the save\'s own PATCH', async () => {
+  // Same root cause as the markArrived() fix above, found in the same UAT
+  // pass: saveDevice() used to end with renderDevice(), whose loadDevicesAsync()
+  // GET can resolve before this save's own fire-and-forget saveDeviceAsync()
+  // PATCH is visible server-side, overwriting _devCache with the pre-edit
+  // server row — an Edit Device save would appear to silently discard the
+  // just-typed changes until a later full reload.
+  const { context, setForm } = createDeviceContext();
+  context.checkSupa = async () => true;
+  let serverDevice = null; // what the mock "server" currently has
+  context.fetch = async (url, opts = {}) => {
+    const isDevices = url.includes('/devices');
+    const method = opts.method || 'GET';
+    if (isDevices && method === 'GET') {
+      // Fast response — races ahead of the PATCH below, returns the STALE
+      // (pre-edit) row, matching the real network timing that produced the
+      // bug.
+      return { ok: true, text: async () => JSON.stringify(serverDevice ? [serverDevice] : []) };
+    }
+    if (isDevices && method === 'POST') {
+      const row = JSON.parse(opts.body);
+      serverDevice = { ...row, id: 501 };
+      return { ok: true, text: async () => JSON.stringify([{ id: 501 }]) };
+    }
+    if (isDevices && method === 'PATCH') {
+      const row = JSON.parse(opts.body);
+      // Slight delay so a same-tick devices GET resolves first with the old
+      // (pre-PATCH) serverDevice value.
+      await new Promise(r => context.setTimeout(r, 5));
+      serverDevice = { ...serverDevice, ...row };
+      return { ok: true, text: async () => JSON.stringify([serverDevice]) };
+    }
+    return { ok: true, text: async () => '[]' };
+  };
+
+  setForm({ 'dev-name': 'Race Target', 'dev-serial': 'SN-RACE-1', 'dev-owner': '' });
+  context.saveDevice();
+  await new Promise(r => setTimeout(r, 20)); // let the initial create's POST settle
+  const created = context.loadDevices().find(d => d.name === 'Race Target');
+  assert.ok(created, 'device must exist after the initial create');
+
+  setForm({ 'dev-edit-id': created.id, 'dev-name': 'Race Target', 'dev-serial': 'SN-RACE-1', 'dev-owner': 'UAT Owner' });
+  context.saveDevice();
+  // Give the racing devices GET (fast) and this edit's PATCH (5ms delay)
+  // both a chance to resolve before asserting.
+  await new Promise(r => setTimeout(r, 20));
+
+  const updated = context.loadDevices().find(d => String(d.id) === String(created.id));
+  assert.equal(updated.owner, 'UAT Owner', 'the just-saved edit must not be reverted by a racing devices refetch');
 });
 
 test('saveDeviceAsync retries without audit_log when Supabase schema cache returns PGRST204 (new device / POST path)', async () => {

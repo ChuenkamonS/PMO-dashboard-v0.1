@@ -22,6 +22,56 @@
 
 ## Current Baseline
 
+### 2026-07-05 UAT / Smoke Test Round — Device Registry Cache-Race Fix
+
+Scope: focused smoke test across Memo lifecycle, Budget & Spend, License, Device, and cross-module
+flows ahead of handoff. No new features, no refactors, no UI redesign, Settings/Resource untouched.
+One high-confidence functional bug found and fixed; everything else observed matched documented
+behavior.
+
+#### Fixed
+- **Device Registry silently drops just-created records on a second Mark Arrived / Edit Device
+  save**: `markArrived()` and `saveDevice()` (`views/device.js`) both ended by calling
+  `renderDevice()`, which fires a full `loadDevicesAsync()` Supabase GET that unconditionally
+  overwrites the in-memory `_devCache`. Because the record(s) that same call just created/edited are
+  pushed via a fire-and-forget `saveDeviceAsync()` (not awaited), that GET can resolve before the
+  write is visible server-side, silently reverting the local cache to pre-write server state.
+  Reproduced deterministically: a Partial Arrival followed shortly by the remaining-quantity Arrival
+  on one Purchase Order left only the newest device record visible in the Device Registry (the
+  earlier arrival's records disappeared from the UI, though they had in fact already reached
+  Supabase and reappeared after a full reload — a real, user-visible "did this save?" defect, not
+  permanent data loss). The identical pattern reproduced for Edit Device: saving an edit could show
+  the field revert to its pre-edit value until a later reload. This is the exact race
+  `deleteDevice()` already documents and avoids (re-rendering from the already-updated local cache
+  instead of re-fetching) — `markArrived()`'s own trailing `renderDevice()` call and `saveDevice()`'s
+  trailing `renderDevice()` call were the two remaining places still doing the unsafe fetch-based
+  re-render. Both now re-render directly from the local cache (`_renderPOTable()`/
+  `_renderDeviceTable()` for `markArrived()`, matching `submitMarkArrived()`'s existing safe pattern;
+  `_renderDeviceTable()` for `saveDevice()`), matching `deleteDevice()`'s established fix — no
+  behavior change beyond removing the redundant, race-prone refetch.
+
+#### Tests
+- `tests/device.test.js`: two new regression tests simulating the Supabase-online race directly (a
+  fast devices GET racing a slower in-flight POST/PATCH) — one for two sequential `markArrived()`
+  calls on the same PO (all device records must survive both arrivals), one for `saveDevice()`'s edit
+  path (a just-saved field change must not revert). Both fail against the pre-fix code exactly as
+  reproduced manually (2 devices instead of 3; edited field reverts to empty) and pass with the fix.
+- Full regression suite: 460/460 passing (up from 458 before this pass — 1 pre-existing gap between
+  458 documented in PROJECT_STATUS.md and 460 here reflects two new tests added by this pass).
+
+#### Remaining Work
+- No new Technical Debt items — the fix follows an already-established, already-documented pattern
+  (see `deleteDevice()`'s own comment) rather than introducing a new mitigation.
+- Everything else covered by this smoke test (Memo lifecycle all 5 types/Draft/Re-edit/Submit/
+  Approve/Reject/Cancel/Duplicate/Void/PDF; Budget Pool/Manual Entry/Budget Tag/Forecast/Budget vs
+  Actual/Export; License Memo Index/Summary/Review Queue/User Mapping/Other Subscription; Device PO/
+  Partial+Full Arrival/Edit/Delete/Void protection; cross-module Software→License, Hardware→PO→
+  Device, Approved→Actual Spend, Voided→downstream exclusion) matched already-documented behavior —
+  no further functional defects found. See `docs/TEST_MATRIX.md`-style UAT report (session output)
+  for the full pass/fail table.
+
+---
+
 ### 2026-07-05 Final Audit Follow-up (Round 2) — Hardware Duplicate Restore, Void Rule Confirmation, Device Detail Modal Stacking
 
 Scope: fix the three confirmed functional issues from the second final-audit follow-up review

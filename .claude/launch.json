@@ -2,10 +2,11 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "static-server",
+      "name": "static-server-uat",
       "runtimeExecutable": "/opt/homebrew/opt/node/bin/node",
-      "runtimeArgs": ["/private/tmp/claude-501/-Users-chuenklommon-Documents-GitHub-PMO-dashboard-v0-1/6aa8c69a-6bd9-4cb7-9f0e-8022eaba96ad/scratchpad/static-server.js"],
-      "port": 8743
+      "runtimeArgs": ["/private/tmp/claude-501/-Users-chuenklommon-Documents-GitHub-PMO-dashboard-v0-1/36802a66-4563-484c-a1d4-146131f87ea2/scratchpad/static-server.js"],
+      "port": 8744,
+      "autoPort": true
     }
   ]
 }

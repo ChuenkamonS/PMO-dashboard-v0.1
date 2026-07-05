@@ -513,7 +513,18 @@ async function markArrived(poId, qty, serialNumbers = []) {
   // Async push to Supabase in background
   newDevices.forEach(d => saveDeviceAsync(d).catch(e => console.warn('Device save failed', e)));
 
-  try { if (typeof renderDevice === 'function') renderDevice(); } catch(e) {}
+  // UAT smoke-test fix: markArrived() previously called renderDevice() here,
+  // which fires a full loadDevicesAsync() Supabase GET that unconditionally
+  // overwrites _devCache. That GET can race ahead of the saveDeviceAsync()
+  // POSTs just fired above (or from a prior markArrived() call on the same
+  // PO whose POSTs hadn't landed yet), silently discarding the just-created
+  // device record(s) from the cache — reproduced deterministically doing a
+  // partial arrival followed by the remaining-quantity arrival on one PO.
+  // markArrived()'s only caller (submitMarkArrived(), views/device.js) already
+  // re-renders safely straight from the just-updated local cache
+  // (_renderPOTable()/_renderDeviceTable(), no redundant fetch), matching the
+  // same race-avoidance pattern deleteDevice() already documents — so this
+  // call was both redundant and the sole source of the data loss.
 }
 
 // ── Helpers ──
@@ -977,7 +988,16 @@ function saveDevice() {
     }
   }
   closeDeviceModal();
-  renderDevice();
+  // UAT smoke-test fix: saveDevice() previously called renderDevice() here,
+  // the same race already fixed for markArrived() — a fresh loadDevicesAsync()
+  // GET fired right after this save's own fire-and-forget saveDeviceAsync()
+  // PATCH/POST can resolve first and overwrite _devCache with pre-save server
+  // data, so an Edit Device save could appear to silently revert (fields show
+  // their old values) until a later full reload. saveDeviceAsync() already
+  // updates _devCache/localStorage synchronously before its own network call,
+  // so re-rendering straight from the local cache (matching deleteDevice()'s
+  // already-documented safe pattern) is enough and avoids the race.
+  _renderDeviceTable();
 }
 
 function deleteDevice(id) {
