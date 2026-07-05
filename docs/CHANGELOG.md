@@ -22,6 +22,114 @@
 
 ## Current Baseline
 
+### 2026-07-06 License Management — Manage Licenses Modal Layout Hotfix
+
+Scope: pure markup/CSS restructuring of the Manage Licenses dialog (License Management > Users tab)
+only, on top of the same-week Current Licenses/+ Add Manual License clarity hotfix below. No data
+model, override model, `licenseId` behavior, reconciliation math, Review Queue, Memo parsing, or
+export change. Budget/Device/Memo/Settings/Resource untouched.
+
+#### Fixed
+- **Row layout overlap/misalignment** (`_openLicUserEditor()`, `views/license.js`): every detail
+  field (Plan/Source/Source Memo/Status for Current Licenses; Plan/Project/Purchased/Assigned/
+  Remaining for + Add Manual License) had been squashed onto one `<span>` line per row, and the
+  name+details wrapper relied on an inline flex `<span>` with no `min-width:0` guard — long software
+  names/Thai text could overflow their row and visually collide with the next one once rows started
+  varying in length after the Project-grouping change. Rows now use an explicit
+  checkbox + `<div style="flex:1;min-width:0">` body, with the software name in its own title `<div>`
+  and every detail field in its own `<div>` beneath it (`word-break:break-word` on both), so long text
+  wraps in place instead of overflowing.
+- **+ Add Manual License rows now show Plan on its own line** in addition to Project and Purchased/
+  Assigned/Remaining (previously Plan was omitted entirely from available rows; the seat line was a
+  single merged string). Current Licenses rows are unchanged in content (Plan/Source/Source Memo/
+  Status), still without Purchased/Assigned/Remaining.
+- **Search input placeholder was inconsistent/missing its icon** — now shows the exact text `Search
+  software, plan, or project...`, with a `🔍` icon positioned via `padding-left` so it never overlaps
+  typed text.
+- **Save/Cancel could scroll out of view** on a long options list (the whole modal card scrolled as
+  one block). The modal card is now a fixed-height flex column: header (title/intro/search/select-all)
+  and footer (Cancel/Save) are `flex-shrink:0` and stay in place; only `#lic-usr-editor-options` itself
+  scrolls (`flex:1;min-height:0;overflow-y:auto`), so Save/Cancel are always visible, never require
+  scrolling to reach.
+- Tightened spacing consistency: outer Project-group sections, inner + Add Manual License Project
+  sub-groups, and every row now use a single consistent margin/padding scale (previously a mix of
+  6px/8px/10px/14px ad hoc values).
+
+#### Unchanged (verified)
+- `_saveLicUserEditor()`, the override read/write shape, `_resolveInventoryIdentity()`, and
+  `computeLicReconciliation()` are untouched — only what `_openLicUserEditor()` renders changed, not
+  what gets saved, how overrides resolve, or reconciliation math. Existing row classes
+  (`lic-usr-edit-row`, `lic-usr-edit-check`, `lic-usr-add-group`, `lic-usr-edit-group`) and `data-*`
+  attributes used by `_filterLicUserEditorOptions()`/`_saveLicUserEditor()` are unchanged, only their
+  inner markup restructured.
+
+#### Tests
+- `tests/license.test.js`: added tests locking in the exact search placeholder text; the row shell
+  structure (checkbox immediately followed by a `flex:1;min-width:0` body, name in its own title
+  `<div>`); + Add Manual License rendering exactly 3 independent detail lines (Plan/Project/Purchased-
+  Assigned-Remaining) instead of one merged line; and the modal shell's scroll/footer structure (the
+  options list carries `overflow-y:auto`/`flex:1`, Save/Cancel render as siblings after the options div
+  closes, not nested inside the scrollable area). All pre-existing Manage Licenses tests (grouping,
+  save-path, Fix 1/2/3 content assertions) pass unchanged since they match on text content, not exact
+  markup shape. Full suite: 491/491 passing (up from 488 before this hotfix).
+
+#### Remaining Work
+- None identified for this hotfix. Manually verified in the browser (real Supabase-backed data,
+  1440×900 viewport): rows render with no overlap (checked row bounding boxes — each row's bottom
+  edge sits strictly above the next row's top edge with the intended 8px gap), checkbox aligns with
+  the title line, the search placeholder renders the exact required text with reserved icon space,
+  and Save/Cancel remain on-screen after scrolling the options list to its very end.
+
+---
+
+### 2026-07-05 License Management — Manage Licenses Modal Hotfix (Current Licenses vs + Add Manual License Clarity)
+
+Scope: display/UX clarity hotfix for the Manage Licenses dialog (License Management > Users tab)
+only. No data model, override model, `licenseId` behavior, reconciliation math, Review Queue, Memo
+parsing, or export change. Budget/Device/Memo/Settings/Resource untouched.
+
+#### Fixed
+- **Current Licenses no longer shows Purchased/Assigned/Remaining seat counts**
+  (`_openLicUserEditor()`, `views/license.js`): those metrics belong to License Inventory/
+  Reconciliation, not a per-user assignment view, and were confusing PMO about which section they
+  applied to. An active assignment row now shows only Software/Plan/Source/Source Memo/Status (via
+  the existing, unchanged `_licUserAssignmentDetail()`), matching what the dialog is actually for.
+- **+ Add Manual License was a flat, project-less list of software names** — PMO could not tell
+  which Project's inventory record checking a box would actually pin. Every available row now shows
+  an explicit "Project: X" line plus its Purchased/Assigned/Remaining (moved here from Current
+  Licenses, still read as-is from the unchanged `computeLicReconciliation()`), and the list itself is
+  grouped by that Project (nested "▼ Project" sub-sections, one per resolved inventory project) —
+  preferring a match in the enclosing project section's own project, falling back to whichever
+  project's inventory actually has the software when it doesn't. No item is hidden: a not-yet-assigned
+  software with inventory in a different project than the section it's shown under still appears
+  (unchanged behavior, still assignable exactly as before), now correctly labeled with its real
+  Project instead of silently showing nothing.
+- **Search only matched software name** — now also matches Plan and Project
+  (`_filterLicUserEditorOptions()`), and hides a Project sub-group (as well as the outer project
+  section) when none of its rows match.
+
+#### Unchanged (verified)
+- `_saveLicUserEditor()`, the override read/write shape (legacy boolean and `{active, licenseId}`),
+  `_resolveInventoryIdentity()`, and `computeLicReconciliation()` are byte-for-byte untouched — this
+  is a rendering-only change to what `_openLicUserEditor()` displays, not what gets saved or how.
+
+#### Tests
+- `tests/license.test.js`: replaced the one test that had encoded seat counts as expected on an
+  *active* Current License row with two tests — one proving Current Licenses omits Purchased/
+  Assigned/Remaining while keeping Plan/Source/Source Memo/Status, one proving an available row
+  shows Project + the same seat math. Added tests for cross-project grouping (two available licenses
+  from different projects both appear, each under its own "▼ Project" heading with the correct
+  Project label) and for search matching Plan/Project and collapsing an unmatched Project sub-group.
+  All pre-existing Manage Licenses tests (multi-project independent checkbox scoping, combined
+  Current/Add Manual rendering, the save-path test) pass unchanged. Full suite: 488/488 passing (up
+  from 480 before this hotfix).
+
+#### Remaining Work
+- None identified for this hotfix. Reconciliation, Review Queue, Memo parsing, override model, and
+  exports were not touched and their existing tests pass unchanged.
+
+---
+
 ### 2026-07-05 License Management — Phase 1: Inventory ↔ Assignment Alignment
 
 Scope: architectural alignment between License Inventory (`getAllLicenses()`) and User Assignment

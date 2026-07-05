@@ -959,7 +959,12 @@ test('Manage Licenses groups a user\'s licenses by Project, with each project se
   assert.ok(slackGeo9 && !/checked/.test(slackGeo9), 'Slack must be unchecked within the Geo9 section — project scoping is independent');
 });
 
-test('Manage Licenses shows Purchased/Assigned/Remaining seats inline per software, read-only (Part 4/6)', () => {
+// Hotfix (2026-07-05): Current Licenses is a per-user assignment view — it
+// must NOT show Purchased/Assigned/Remaining (those are License Inventory /
+// Reconciliation context, not user-assignment detail). That seat context
+// moved to + Add Manual License instead, where it's genuinely useful (it
+// tells PMO how much room is left before checking the box).
+test('Manage Licenses: Current Licenses does NOT show Purchased/Assigned/Remaining seat counts (Fix 1)', () => {
   const { context } = createLicenseContext();
   context.DOMParser = FakeAcctDOMParser;
   context.initMultiSelect = () => {};
@@ -979,14 +984,112 @@ test('Manage Licenses shows Purchased/Assigned/Remaining seats inline per softwa
   context._openLicUserEditorForEmail('designer@orbit.co.th');
 
   const body = elements['lic-usr-editor-options'].innerHTML;
-  assert.match(body, /Purchased 5 · Assigned 1 · Remaining <span[^>]*>4<\/span>/, 'inline seat line must match computeLicReconciliation\'s own math (5 purchased, 1 assigned, 4 remaining)');
+  const figmaLabel = (body.match(/<label[^]*?<\/label>/g) || []).find(l => l.includes('>Figma<'));
+  assert.ok(figmaLabel, 'Figma (active/Current License) row must exist');
+  assert.doesNotMatch(figmaLabel, /Purchased/, 'a Current License row must not show Purchased seats');
+  assert.doesNotMatch(figmaLabel, /Assigned \d/, 'a Current License row must not show Assigned count');
+  assert.doesNotMatch(figmaLabel, /Remaining/, 'a Current License row must not show Remaining seats');
+  // Plan/Source/Source Memo/Status (the fields Fix 1 says Current Licenses
+  // should show) must still be present, unchanged.
+  assert.match(figmaLabel, /Plan: Professional/);
+  assert.match(figmaLabel, /Source: Memo/);
+  assert.match(figmaLabel, /ORB-2802-001/);
+  assert.match(figmaLabel, /Status:.*Active/s);
+});
+
+// Hotfix (2026-07-05): each not-yet-assigned "+ Add Manual License" row must
+// show Purchased/Assigned/Remaining AND which Project it belongs to (Fix 2)
+// — moved here from Current Licenses (see test above), read-only, still
+// sourced from computeLicReconciliation() as-is.
+test('Manage Licenses: + Add Manual License rows show Project and Purchased/Assigned/Remaining, read-only (Fix 2)', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  const memo = slMemo({
+    memoNo: 'ORB-2802-002', project: 'Geo9',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  context.storeMemos([memo]);
+  // Slack is purchased in Geo9's inventory (10 seats) but not yet assigned
+  // to anyone — must appear under + Add Manual License with Project + seats.
+  context.storeManualLicenses([{
+    id: 'man-slack-geo9', name: 'Slack', plan: '', vendor: '', seats: 10, pricePerMonth: 0,
+    owner: '', department: '', project: 'Geo9', licenseType: 'subscription',
+    purchaseDate: '2026-01-01', expiry: null, billingFreq: 'monthly',
+    statusOverride: null, memoNo: '', note: '', source: 'manual',
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  }]);
+
+  const elements = licUsersElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+  context._openLicUserEditorForEmail('designer@orbit.co.th');
+
+  const body = elements['lic-usr-editor-options'].innerHTML;
+  const slackLabel = (body.match(/<label[^]*?<\/label>/g) || []).find(l => l.includes('>Slack<'));
+  assert.ok(slackLabel, 'Slack (available/Add Manual License) row must exist');
+  assert.doesNotMatch(slackLabel, /checked/, 'not yet assigned to anyone, so it starts unchecked');
+  assert.match(slackLabel, /Project: Geo9/, 'available row must show which Project it belongs to');
+  assert.match(slackLabel, /Purchased 10 · Assigned 0 · Remaining <span[^>]*>10<\/span>/, 'inline seat line must match computeLicReconciliation\'s own math (10 purchased, 0 assigned, 10 remaining)');
 
   // Read-only: the seat line is plain text, no clickable/editable control of
   // its own (only the existing assignment checkbox is interactive).
-  const seatLine = (body.match(/Purchased 5[\s\S]*?<\/span>/) || [''])[0];
-  assert.doesNotMatch(seatLine, /onclick/);
-  assert.doesNotMatch(seatLine, /<input/);
-  assert.doesNotMatch(seatLine, /<button/);
+  assert.doesNotMatch(slackLabel, /onclick="(?!_toggleLicUserEditorGroup)/);
+  assert.doesNotMatch(slackLabel, /<button/);
+});
+
+// Hotfix (2026-07-05, Fix 2): + Add Manual License must be grouped by which
+// Project each available license's inventory match belongs to — previously
+// a flat list of software names with no project attribution at all.
+test('Manage Licenses: + Add Manual License is grouped by Project (Fix 2)', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  const memo = slMemo({
+    memoNo: 'ORB-2806-001', project: 'Geo9',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  context.storeMemos([memo]);
+  // Two not-yet-assigned licenses, purchased under two different projects —
+  // Notion Business under designer's own Geo9 group, Slack Pro under a
+  // completely different project (AOA-MP) designer has no account-table row
+  // in at all. Both must still be offered (Manage Licenses never gained an
+  // "Add User" affordance — out of scope), but grouped under their own
+  // Project so PMO can tell which inventory item each would pin.
+  context.storeManualLicenses([
+    { id: 'man-notion', name: 'Notion Business', plan: '', vendor: '', seats: 10, pricePerMonth: 0,
+      owner: '', department: '', project: 'Geo9', licenseType: 'subscription',
+      purchaseDate: '2026-01-01', expiry: null, billingFreq: 'monthly', statusOverride: null,
+      memoNo: '', note: '', source: 'manual', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+    { id: 'man-slack-aoa', name: 'Slack Pro', plan: '', vendor: '', seats: 15, pricePerMonth: 0,
+      owner: '', department: '', project: 'AOA-MP', licenseType: 'subscription',
+      purchaseDate: '2026-01-01', expiry: null, billingFreq: 'monthly', statusOverride: null,
+      memoNo: '', note: '', source: 'manual', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  ]);
+
+  const elements = licUsersElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+  context._openLicUserEditorForEmail('designer@orbit.co.th');
+
+  const body = elements['lic-usr-editor-options'].innerHTML;
+  const addManualSection = body.split('+ Add Manual License')[1] || '';
+  assert.match(addManualSection, /class="lic-usr-add-group"/, 'available rows must be wrapped in Project sub-groups');
+  assert.match(addManualSection, /▼ Geo9/, 'a Project sub-group heading for Geo9 must exist (Notion Business)');
+  assert.match(addManualSection, /▼ AOA-MP/, 'a Project sub-group heading for AOA-MP must exist (Slack Pro), even though it differs from the enclosing Geo9 section');
+
+  const notionLabel = (body.match(/<label[^]*?<\/label>/g) || []).find(l => l.includes('>Notion Business<'));
+  const slackLabel = (body.match(/<label[^]*?<\/label>/g) || []).find(l => l.includes('>Slack Pro<'));
+  assert.match(notionLabel, /Project: Geo9/, 'Notion Business must show its own (matching) Project');
+  assert.match(slackLabel, /Project: AOA-MP/, 'Slack Pro must show its actual inventory Project, not the enclosing Geo9 section');
 });
 
 test('Manage Licenses renders a realtime search box, and each software row carries a lowercase name for filtering (Part 2)', () => {
@@ -1013,7 +1116,145 @@ test('Manage Licenses renders a realtime search box, and each software row carri
   context._openLicUserEditorForEmail('designer@orbit.co.th');
   const body = elements['lic-usr-editor-options'].innerHTML;
   assert.match(body, /data-license-name="figma"/, 'each row must expose a lowercase, filterable software name');
+  assert.match(body, /data-project="geo9"/, 'each row must also expose a lowercase, filterable project name (Fix 3)');
   assert.equal(typeof context._filterLicUserEditorOptions, 'function');
+});
+
+// Hotfix (2026-07-05, Fix 3): search must match software name, plan, OR
+// project — previously name only, so typing a Project name (the main way
+// PMO would now navigate the Project-grouped + Add Manual License list)
+// found nothing.
+test('Manage Licenses search matches software name, plan, and project; hides a Project sub-group with no matches (Fix 3)', () => {
+  const { context } = createLicenseContext();
+  const rows = [
+    { dataset: { licenseName: 'notion business', plan: '', project: 'geo9' }, style: {} },
+    { dataset: { licenseName: 'slack pro', plan: '', project: 'aoa-mp' }, style: {} },
+  ];
+  const addGroups = [
+    { querySelectorAll: () => [rows[0]], style: {} },
+    { querySelectorAll: () => [rows[1]], style: {} },
+  ];
+  const editGroups = [
+    { querySelectorAll: () => rows, style: {} },
+  ];
+  const searchEl = { value: 'geo9' };
+  context.document.getElementById = id => (id === 'lic-usr-editor-search') ? searchEl : null;
+  context.document.querySelectorAll = sel => {
+    if (sel === '#lic-usr-editor-options .lic-usr-edit-row') return rows;
+    if (sel === '#lic-usr-editor-options .lic-usr-add-group') return addGroups;
+    if (sel === '#lic-usr-editor-options .lic-usr-edit-group') return editGroups;
+    return [];
+  };
+
+  context._filterLicUserEditorOptions();
+
+  assert.equal(rows[0].style.display, '', 'Notion Business row must stay visible — search matched its Project (Geo9)');
+  assert.equal(rows[1].style.display, 'none', 'Slack Pro row must hide — no match on name/plan/project');
+  assert.equal(addGroups[0].style.display, '', 'the Geo9 sub-group must stay visible (has a matching row)');
+  assert.equal(addGroups[1].style.display, 'none', 'the AOA-MP sub-group must hide (no matching row left)');
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Layout hotfix (2026-07-06) — the project-grouping change above left the
+// modal's rows/search/footer visually broken: overlapping/misaligned detail
+// lines, an inconsistent placeholder, and a footer that scrolled away with
+// the (potentially very long) options list. Business logic, override model,
+// licenseId behavior, and reconciliation math are unchanged — this is pure
+// markup/CSS restructuring, locked in here via the rendered class/structure.
+// ══════════════════════════════════════════════════════════════════
+
+test('Manage Licenses search input shows the required placeholder text (Layout hotfix)', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  context.storeMemos([slMemo({
+    memoNo: 'ORB-2900-001', project: 'Geo9',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  })]);
+
+  const elements = licUsersElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+
+  assert.match(elements['lic-content'].innerHTML, /placeholder="Search software, plan, or project\.\.\."/, 'search placeholder must be the exact required text, with no missing/blank rendering');
+});
+
+test('Manage Licenses row layout: checkbox + title on the first line, each detail on its own line beneath, no squashed single-line dump (Layout hotfix)', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  const memo = slMemo({
+    memoNo: 'ORB-2900-002', project: 'Geo9',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  context.storeMemos([memo]);
+  // A not-yet-assigned license with a known Plan, purchased in Geo9 — the
+  // available row must show Plan, Project, and Purchased/Assigned/Remaining
+  // as three independent lines (not one merged line missing Plan).
+  context.storeManualLicenses([{
+    id: 'man-notion', name: 'Notion Business', plan: 'Team', vendor: '', seats: 10, pricePerMonth: 0,
+    owner: '', department: '', project: 'Geo9', licenseType: 'subscription',
+    purchaseDate: '2026-01-01', expiry: null, billingFreq: 'monthly', statusOverride: null,
+    memoNo: '', note: '', source: 'manual', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  }]);
+
+  const elements = licUsersElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+  context._openLicUserEditorForEmail('designer@orbit.co.th');
+
+  const body = elements['lic-usr-editor-options'].innerHTML;
+
+  // Row shell: checkbox pinned to top/left, a flex body with min-width:0 so
+  // long text wraps instead of overflowing/overlapping the next row.
+  const figmaLabel = (body.match(/<label[^]*?<\/label>/g) || []).find(l => l.includes('>Figma<'));
+  assert.match(figmaLabel, /<input type="checkbox"[^>]*>\s*<div style="flex:1;min-width:0">/, 'checkbox must be immediately followed by a flex:1;min-width:0 body wrapper');
+  assert.match(figmaLabel, /<div style="font-size:12px;font-weight:600[^"]*">Figma<\/div>/, 'the software name must render in its own title div, not inline with details');
+
+  const notionLabel = (body.match(/<label[^]*?<\/label>/g) || []).find(l => l.includes('>Notion Business<'));
+  const detailDivs = notionLabel.match(/<div style="font-size:11px[^>]*>[\s\S]*?<\/div>/g) || [];
+  assert.ok(detailDivs.some(d => /^Plan: Team$/.test(d.replace(/<[^>]*>/g, ''))), 'Plan must render on its own line');
+  assert.ok(detailDivs.some(d => /^Project: Geo9$/.test(d.replace(/<[^>]*>/g, ''))), 'Project must render on its own line');
+  assert.ok(detailDivs.some(d => /^Purchased 10 · Assigned 0 · Remaining 10$/.test(d.replace(/<[^>]*>/g, ''))), 'Purchased/Assigned/Remaining must render on its own line');
+  assert.equal(detailDivs.length, 3, 'exactly 3 separate detail lines — Plan, Project, Purchased/Assigned/Remaining — not one merged line');
+});
+
+test('Manage Licenses modal shell: options list scrolls independently, Save/Cancel stay outside the scroll area (Layout hotfix)', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  context.storeMemos([slMemo({
+    memoNo: 'ORB-2900-003', project: 'Geo9',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  })]);
+
+  const elements = licUsersElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+
+  const shell = elements['lic-content'].innerHTML;
+  const optionsTag = shell.match(/<div id="lic-usr-editor-options"[^>]*>/)[0];
+  assert.match(optionsTag, /overflow-y:auto/, 'the options list must scroll on its own, not the whole modal');
+  assert.match(optionsTag, /flex:1/, 'the options list must be the flexible/growing region between the fixed header and footer');
+
+  // Save/Cancel must be siblings of, not inside, the scrollable options div.
+  const afterOptions = shell.slice(shell.indexOf(optionsTag) + optionsTag.length);
+  const optionsCloseIdx = afterOptions.indexOf('</div>');
+  const footerHtml = afterOptions.slice(optionsCloseIdx);
+  assert.match(footerHtml, /Save licenses/, 'Save licenses must appear after the options div closes (outside the scroll area)');
+  assert.match(footerHtml, />Cancel</, 'Cancel must appear after the options div closes (outside the scroll area)');
 });
 
 test('License Summary is split into Summary and Reconciliation sub-tabs — only one panel visible at a time (Part 3)', () => {

@@ -1148,20 +1148,25 @@ function _renderLicUsers() {
       </table>
     </div>
     <div id="lic-usr-editor" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:300;align-items:center;justify-content:center">
-      <div class="card" style="width:560px;max-width:94vw;max-height:85vh;overflow-y:auto;padding:20px">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px">
-          <div><div style="font-size:15px;font-weight:700">Manage Licenses</div><div id="lic-usr-editor-name" style="font-size:11px;color:var(--text-2);margin-top:2px"></div></div>
-          <button class="btn-sm" onclick="_closeLicUserEditor()">✕</button>
+      <div class="card" style="width:560px;max-width:94vw;max-height:85vh;padding:0;margin:0;display:flex;flex-direction:column;overflow:hidden">
+        <div style="flex-shrink:0;padding:20px 20px 0 20px">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px">
+            <div><div style="font-size:15px;font-weight:700">Manage Licenses</div><div id="lic-usr-editor-name" style="font-size:11px;color:var(--text-2);margin-top:2px"></div></div>
+            <button class="btn-sm" onclick="_closeLicUserEditor()">✕</button>
+          </div>
+          <div style="font-size:11px;color:var(--text-2);margin-bottom:10px">Current Licenses shows what this user has today, grouped by project. + Add Manual License is grouped by which Project each available license belongs to, with read-only Purchased/Assigned/Remaining context from License Inventory. Check an item to assign it; uncheck any Current License to remove it.</div>
+          <div style="position:relative;margin-bottom:10px">
+            <span aria-hidden="true" style="position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:11px;line-height:1;pointer-events:none">🔍</span>
+            <input type="text" id="lic-usr-editor-search" placeholder="Search software, plan, or project..." oninput="_filterLicUserEditorOptions()"
+              style="width:100%;box-sizing:border-box;font-family:inherit;font-size:12px;padding:6px 10px 6px 28px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);outline:none">
+          </div>
+          <div style="display:flex;gap:6px;margin-bottom:12px">
+            <button class="btn-sm" onclick="_setAllLicUserEditor(true)">✓ Select all</button>
+            <button class="btn-sm" onclick="_setAllLicUserEditor(false)">Clear all</button>
+          </div>
         </div>
-        <div style="font-size:11px;color:var(--text-2);margin-bottom:10px">Current Licenses shows what this user has today, grouped by project. Check an item under + Add Manual License to assign it; uncheck any item to remove it. Assigned Users/Remaining Seats are read-only context from License Inventory.</div>
-        <input type="text" id="lic-usr-editor-search" placeholder="🔍 Search software..." oninput="_filterLicUserEditorOptions()"
-          style="width:100%;box-sizing:border-box;font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);outline:none;margin-bottom:10px">
-        <div style="display:flex;gap:6px;margin-bottom:10px">
-          <button class="btn-sm" onclick="_setAllLicUserEditor(true)">✓ Select all</button>
-          <button class="btn-sm" onclick="_setAllLicUserEditor(false)">Clear all</button>
-        </div>
-        <div id="lic-usr-editor-options"></div>
-        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <div id="lic-usr-editor-options" style="flex:1;min-height:0;overflow-y:auto;padding:4px 20px 16px"></div>
+        <div style="flex-shrink:0;display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border)">
           <button class="btn-ghost" onclick="_closeLicUserEditor()">Cancel</button>
           <button class="btn-primary" onclick="_saveLicUserEditor()">Save licenses</button>
         </div>
@@ -1390,15 +1395,22 @@ function _openLicUserEditorForEmail(email) {
 // single-project dropdown switcher, so every project the user belongs to is
 // visible at once. Project selection lives only inside this dialog (via the
 // section headers); the Users table and its rows keep showing software names
-// only, never Project. For each software column, an active assignment shows
-// its Plan/Source/Source Memo/Status plus read-only Purchased/Assigned/
-// Remaining seat context (Part 4/6 — plain text, no input, no click-to-edit)
-// inline next to its (checked) checkbox under "Current Licenses"; every
-// not-yet-assigned software is listed, unchecked, under "+ Add Manual
-// License". Checking/unchecking is the exact same override write
-// _saveLicUserEditor() already performed — only the grouping/detail text is
-// new. The seat context reads computeLicReconciliation() as-is (no
-// reconciliation math re-derived here).
+// only, never Project.
+//
+// Hotfix (2026-07-05, display/UX clarity only): Current Licenses is a
+// per-user assignment view, not inventory context — it shows only Software/
+// Plan/Source/Source Memo/Status for each active assignment. Purchased/
+// Assigned/Remaining seat counts belong to License Inventory/Reconciliation,
+// not here, and were confusing PMO about which project's inventory record a
+// checkbox actually pins. Those seat counts (still read from
+// computeLicReconciliation() as-is — no reconciliation math re-derived here)
+// now live only under "+ Add Manual License", where every not-yet-assigned
+// row also shows explicitly which Project its inventory match belongs to,
+// and the list itself is grouped by that Project (nested "▼ Project"
+// sub-sections) so PMO can see at a glance which project each available
+// license would be assigned under. Checking/unchecking is still the exact
+// same override write _saveLicUserEditor() already performed — no override
+// model, licenseId, or save-path change.
 function _openLicUserEditor(key) {
   const row = window._licUsrMerged?.[key];
   const modal = document.getElementById('lic-usr-editor');
@@ -1413,28 +1425,64 @@ function _openLicUserEditor(key) {
   if (nameEl) nameEl.textContent = row.email;
 
   // Purchased/Assigned/Remaining per (project, software, plan) — the exact
-  // same canonical rows License Summary's Reconciliation tab renders.
+  // same canonical rows License Summary's Reconciliation tab renders. Only
+  // used below for + Add Manual License entries.
   const reconRows = computeLicReconciliation(loadMemos(), _getLicReviewState(), overrides);
-  const reconMap = new Map(reconRows.map(r => [`${r.project}||${r.name}||${r.plan}`, r]));
-  const findRecon = (project, name, plan) =>
-    reconMap.get(`${project}||${name}||${plan}`) || reconMap.get(`${project}||${name}||`);
+  const reconByName = new Map();
+  reconRows.forEach(r => {
+    if (!reconByName.has(r.name)) reconByName.set(r.name, []);
+    reconByName.get(r.name).push(r);
+  });
+  const findReconMatches = (name, plan) => (reconByName.get(name) || []).filter(r => !plan || r.plan === plan);
 
-  const optionRow = e => {
+  // Shared row shell — a fixed-layout card: checkbox pinned left/top, a
+  // flex:1 body (min-width:0 so long software names/Thai text wrap instead
+  // of overflowing and overlapping neighboring rows) with the software name
+  // on its own line and every detail on its own line beneath (Layout hotfix
+  // — previously several detail fields were squashed onto one <span> line,
+  // which visually overlapped/misaligned once rows started varying in length
+  // after the Project-grouping change).
+  const licRow = (e, checked, lines) => `<label class="lic-usr-edit-row" data-license-name="${esc(e.license.toLowerCase())}" data-plan="${esc((e.rowPlan||'').toLowerCase())}" data-project="${esc((e.rowProject||'').toLowerCase())}" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;margin-bottom:8px;background:var(--surface)">
+      <input type="checkbox" class="lic-usr-edit-check" data-group-key="${esc(e.groupKey)}" data-license-index="${e.index}"${checked ? ' checked' : ''} style="width:16px;height:16px;margin:2px 0 0;accent-color:var(--blue);flex-shrink:0">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600;line-height:1.4;word-break:break-word">${esc(e.license)}</div>
+        ${lines.join('')}
+      </div>
+    </label>`;
+
+  const detailLine = text => `<div style="font-size:11px;color:var(--text-2);line-height:1.5;margin-top:3px;word-break:break-word">${text}</div>`;
+  const metaLine = text => `<div style="font-size:11px;color:var(--text-3);line-height:1.5;margin-top:3px;word-break:break-word">${text}</div>`;
+
+  // Current Licenses row: Plan/Source/Source Memo/Status only — no
+  // Purchased/Assigned/Remaining (Fix 1, unchanged — that's inventory
+  // context, not user-assignment detail).
+  const currentRow = e => {
     // A composite "Name — Plan" identity already shows its plan in the label
     // itself — skip the redundant "Plan: X" line for those.
     const showPlanLine = e.detail?.plan && !e.license.includes(' — ');
-    const detailHtml = e.detail ? `<span style="font-size:11px;color:var(--text-2);display:block;margin-top:2px">
-        ${showPlanLine ? `Plan: ${esc(e.detail.plan)} · ` : ''}Source: ${esc(e.detail.sources.length > 1 ? 'Multiple memos' : e.detail.sources.length === 1 ? 'Memo' : 'Manual')}
-        ${e.detail.sources.length ? ` · Source Memo: ${esc(e.detail.sources.join(', '))}` : ''}
-        ${e.detail.status ? ` · Status: ${esc(e.detail.status.label)}` : ''}
-      </span>` : '';
-    const seatHtml = e.recon ? `<span style="font-size:11px;color:var(--text-3);display:block;margin-top:2px">
-        Purchased ${e.recon.purchased} · Assigned ${e.recon.assignedCount} · Remaining <span style="${e.recon.remaining < 0 ? 'color:var(--red);font-weight:600' : ''}">${e.recon.remaining}</span>
-      </span>` : '';
-    return `<label class="lic-usr-edit-row" data-license-name="${esc(e.license.toLowerCase())}" style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;margin-bottom:6px">
-      <input type="checkbox" class="lic-usr-edit-check" data-group-key="${esc(e.groupKey)}" data-license-index="${e.index}"${e.active ? ' checked' : ''} style="width:17px;height:17px;accent-color:var(--blue);margin-top:1px;flex-shrink:0">
-      <span style="flex:1"><span style="font-size:12px;font-weight:600">${esc(e.license)}</span>${detailHtml}${seatHtml}</span>
-    </label>`;
+    const parts = [];
+    if (showPlanLine) parts.push(`Plan: ${esc(e.detail.plan)}`);
+    parts.push(`Source: ${esc(e.detail.sources.length > 1 ? 'Multiple memos' : e.detail.sources.length === 1 ? 'Memo' : 'Manual')}`);
+    if (e.detail.sources.length) parts.push(`Source Memo: ${esc(e.detail.sources.join(', '))}`);
+    if (e.detail.status) parts.push(`Status: ${esc(e.detail.status.label)}`);
+    e.rowPlan = e.detail?.plan || ''; e.rowProject = e.groupProject;
+    return licRow(e, true, [detailLine(parts.join(' · '))]);
+  };
+
+  // Available (not-yet-assigned) row: Plan (its own line, when known), then
+  // Project (which inventory record this would pin — preferring this
+  // group's own project, else whichever project actually has it in
+  // inventory), then Purchased/Assigned/Remaining — never Source/Status
+  // (nothing assigned yet).
+  const availableRow = e => {
+    const lines = [];
+    if (e.recon?.plan) lines.push(detailLine(`Plan: ${esc(e.recon.plan)}`));
+    lines.push(metaLine(`Project: ${esc(e.project)}`));
+    if (e.recon) {
+      lines.push(metaLine(`Purchased ${e.recon.purchased} · Assigned ${e.recon.assignedCount} · Remaining <span style="${e.recon.remaining < 0 ? 'color:var(--red);font-weight:600' : ''}">${e.recon.remaining}</span>`));
+    }
+    e.rowPlan = e.recon?.plan || ''; e.rowProject = e.project;
+    return licRow(e, false, lines);
   };
 
   const sectionsHtml = groups.map((group, gIdx) => {
@@ -1443,24 +1491,43 @@ function _openLicUserEditor(key) {
       const ovKey = `${groupKey}|${license}`;
       const ov = overrides[ovKey];
       const active = _ovIsActive(ov, group.licenses[license] === true);
-      const detail = active ? _licUserAssignmentDetail(group, license, allLicenses, ov) : null;
+      if (active) {
+        const detail = _licUserAssignmentDetail(group, license, allLicenses, ov);
+        return { license, index, active, detail, groupKey, groupProject: group.project };
+      }
       const parsed = _parseLicIdentity(license);
-      const plan = detail?.plan || parsed.plan;
-      const recon = findRecon(group.project, parsed.name, plan);
-      return { license, index, active, detail, recon, groupKey };
+      const matches = findReconMatches(parsed.name, parsed.plan);
+      const recon = matches.find(r => r.project === group.project) || matches[0] || null;
+      const project = recon ? recon.project : (group.project || '(ไม่ระบุ)');
+      return { license, index, active, recon, project, groupKey };
     });
     const activeEntries = entries.filter(e => e.active);
     const inactiveEntries = entries.filter(e => !e.active);
 
-    return `<div class="lic-usr-edit-group" data-group-idx="${gIdx}" style="margin-bottom:14px">
-      <div style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 4px;font-size:12px;font-weight:700;border-bottom:1px solid var(--border);margin-bottom:8px" onclick="_toggleLicUserEditorGroup(${gIdx})">
+    // Group Manual License options by the Project their inventory match
+    // belongs to, so PMO can see at a glance which project each available
+    // license would be assigned under (Fix 2 — was a flat, project-less list).
+    const byProject = new Map();
+    inactiveEntries.forEach(e => {
+      if (!byProject.has(e.project)) byProject.set(e.project, []);
+      byProject.get(e.project).push(e);
+    });
+    const addManualHtml = [...byProject.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([proj, list]) => `<div class="lic-usr-add-group" style="margin-bottom:10px">
+        <div style="font-size:11px;font-weight:700;color:var(--text-2);padding:2px 2px 6px">▼ ${esc(proj)}</div>
+        ${list.map(availableRow).join('')}
+      </div>`).join('');
+
+    return `<div class="lic-usr-edit-group" data-group-idx="${gIdx}" style="margin-bottom:18px">
+      <div style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 4px;font-size:12px;font-weight:700;border-bottom:1px solid var(--border);margin-bottom:10px" onclick="_toggleLicUserEditorGroup(${gIdx})">
         <span id="lic-usr-edit-caret-${gIdx}">▼</span> ${esc(group.project || '(ไม่ระบุ)')}
       </div>
       <div id="lic-usr-edit-group-body-${gIdx}">
-        <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.02em;margin-bottom:6px">Current Licenses (${activeEntries.length})</div>
-        ${activeEntries.length ? activeEntries.map(optionRow).join('') : '<div style="font-size:12px;color:var(--text-3);padding:2px 2px 10px">No active licenses</div>'}
-        <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.02em;margin:10px 0 6px">+ Add Manual License</div>
-        ${inactiveEntries.length ? inactiveEntries.map(optionRow).join('') : '<div style="font-size:12px;color:var(--text-3);padding:2px">All available software already assigned</div>'}
+        <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.02em;margin-bottom:8px">Current Licenses (${activeEntries.length})</div>
+        ${activeEntries.length ? activeEntries.map(currentRow).join('') : '<div style="font-size:12px;color:var(--text-3);padding:2px 2px 10px">No active licenses</div>'}
+        <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.02em;margin:12px 0 8px">+ Add Manual License</div>
+        ${inactiveEntries.length ? addManualHtml : '<div style="font-size:12px;color:var(--text-3);padding:2px">All available software already assigned</div>'}
       </div>
     </div>`;
   }).join('');
@@ -1481,13 +1548,23 @@ function _toggleLicUserEditorGroup(gIdx) {
 }
 
 // Part 2 — realtime search across every project section's software list.
-// Filters by name only (hide/show via CSS, no re-render), and collapses a
-// project section entirely when none of its rows match.
+// Matches software name, plan, or project (hotfix — previously name only),
+// hide/show via CSS, no re-render. Collapses a Project sub-group (under
+// + Add Manual License) or an outer project section entirely when none of
+// its rows match.
 function _filterLicUserEditorOptions() {
   const q = (document.getElementById('lic-usr-editor-search')?.value || '').trim().toLowerCase();
   document.querySelectorAll('#lic-usr-editor-options .lic-usr-edit-row').forEach(row => {
-    const match = !q || (row.dataset.licenseName || '').includes(q);
+    const match = !q
+      || (row.dataset.licenseName || '').includes(q)
+      || (row.dataset.plan || '').includes(q)
+      || (row.dataset.project || '').includes(q);
     row.style.display = match ? '' : 'none';
+  });
+  document.querySelectorAll('#lic-usr-editor-options .lic-usr-add-group').forEach(sub => {
+    if (!q) { sub.style.display = ''; return; }
+    const rows = [...sub.querySelectorAll('.lic-usr-edit-row')];
+    sub.style.display = rows.some(r => r.style.display !== 'none') ? '' : 'none';
   });
   document.querySelectorAll('#lic-usr-editor-options .lic-usr-edit-group').forEach(group => {
     if (!q) { group.style.display = ''; return; }
