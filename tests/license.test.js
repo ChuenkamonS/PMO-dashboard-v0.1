@@ -1213,18 +1213,23 @@ test('Manage Licenses row layout: checkbox + title on the first line, each detai
 
   const body = elements['lic-usr-editor-options'].innerHTML;
 
-  // Row shell: checkbox pinned to top/left, a flex body with min-width:0 so
-  // long text wraps instead of overflowing/overlapping the next row.
+  // Row shell: [checkbox] [content] two-column layout, explicit class hooks
+  // so structure is testable/CSS-target-able without relying on exact inline
+  // style strings. Search/save still key off the pre-existing
+  // lic-usr-edit-row/lic-usr-edit-check classes and data-* attrs (unchanged
+  // — verified by the pre-existing search/save tests still passing).
   const figmaLabel = (body.match(/<label[^]*?<\/label>/g) || []).find(l => l.includes('>Figma<'));
-  assert.match(figmaLabel, /<input type="checkbox"[^>]*>\s*<div style="flex:1;min-width:0">/, 'checkbox must be immediately followed by a flex:1;min-width:0 body wrapper');
-  assert.match(figmaLabel, /<div style="font-size:12px;font-weight:600[^"]*">Figma<\/div>/, 'the software name must render in its own title div, not inline with details');
+  assert.match(figmaLabel, /class="lic-usr-edit-row lic-option-row"/, 'row keeps its pre-existing search/save class AND gains the new lic-option-row structural class');
+  assert.match(figmaLabel, /<input type="checkbox"[^>]*flex:0 0 auto[^>]*>\s*<div class="lic-option-content"[^>]*flex:1;min-width:0/, 'checkbox (flex:0 0 auto, so it never grows/shrinks/overlaps) must be immediately followed by a flex:1;min-width:0 lic-option-content body');
+  assert.match(figmaLabel, /<div class="lic-option-title"[^>]*>Figma<\/div>/, 'the software name must render in its own lic-option-title div, not inline with details');
+  assert.doesNotMatch(figmaLabel, /white-space:nowrap/, 'title/detail text must be allowed to wrap (no nowrap that could force it to escape the row)');
 
   const notionLabel = (body.match(/<label[^]*?<\/label>/g) || []).find(l => l.includes('>Notion Business<'));
-  const detailDivs = notionLabel.match(/<div style="font-size:11px[^>]*>[\s\S]*?<\/div>/g) || [];
-  assert.ok(detailDivs.some(d => /^Plan: Team$/.test(d.replace(/<[^>]*>/g, ''))), 'Plan must render on its own line');
-  assert.ok(detailDivs.some(d => /^Project: Geo9$/.test(d.replace(/<[^>]*>/g, ''))), 'Project must render on its own line');
-  assert.ok(detailDivs.some(d => /^Purchased 10 · Assigned 0 · Remaining 10$/.test(d.replace(/<[^>]*>/g, ''))), 'Purchased/Assigned/Remaining must render on its own line');
-  assert.equal(detailDivs.length, 3, 'exactly 3 separate detail lines — Plan, Project, Purchased/Assigned/Remaining — not one merged line');
+  const detailDivs = notionLabel.match(/<div class="lic-option-meta"[^>]*>[\s\S]*?<\/div>/g) || [];
+  assert.ok(detailDivs.some(d => /^Plan: Team$/.test(d.replace(/<[^>]*>/g, ''))), 'Plan must render on its own lic-option-meta line');
+  assert.ok(detailDivs.some(d => /^Project: Geo9$/.test(d.replace(/<[^>]*>/g, ''))), 'Project must render on its own lic-option-meta line');
+  assert.ok(detailDivs.some(d => /^Purchased 10 · Assigned 0 · Remaining 10$/.test(d.replace(/<[^>]*>/g, ''))), 'Purchased/Assigned/Remaining must render on its own lic-option-meta line');
+  assert.equal(detailDivs.length, 3, 'exactly 3 separate meta lines — Plan, Project, Purchased/Assigned/Remaining — not one merged line');
 });
 
 test('Manage Licenses modal shell: options list scrolls independently, Save/Cancel stay outside the scroll area (Layout hotfix)', () => {

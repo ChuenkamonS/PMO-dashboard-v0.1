@@ -1435,38 +1435,43 @@ function _openLicUserEditor(key) {
   });
   const findReconMatches = (name, plan) => (reconByName.get(name) || []).filter(r => !plan || r.plan === plan);
 
-  // Shared row shell — a fixed-layout card: checkbox pinned left/top, a
-  // flex:1 body (min-width:0 so long software names/Thai text wrap instead
-  // of overflowing and overlapping neighboring rows) with the software name
-  // on its own line and every detail on its own line beneath (Layout hotfix
-  // — previously several detail fields were squashed onto one <span> line,
-  // which visually overlapped/misaligned once rows started varying in length
-  // after the Project-grouping change).
-  const licRow = (e, checked, lines) => `<label class="lic-usr-edit-row" data-license-name="${esc(e.license.toLowerCase())}" data-plan="${esc((e.rowPlan||'').toLowerCase())}" data-project="${esc((e.rowProject||'').toLowerCase())}" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;margin-bottom:8px;background:var(--surface)">
-      <input type="checkbox" class="lic-usr-edit-check" data-group-key="${esc(e.groupKey)}" data-license-index="${e.index}"${checked ? ' checked' : ''} style="width:16px;height:16px;margin:2px 0 0;accent-color:var(--blue);flex-shrink:0">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:12px;font-weight:600;line-height:1.4;word-break:break-word">${esc(e.license)}</div>
+  // Shared row shell — a stable two-column layout that cannot overlap:
+  // [checkbox] [content], content is a flex:1;min-width:0 column with the
+  // software name in its own title line and every other field in its own
+  // "meta" line beneath. `lic-option-row`/`lic-option-content`/
+  // `lic-option-title`/`lic-option-meta` are the new, explicit structural
+  // class hooks (Layout hotfix, 2026-07-06) added ALONGSIDE the pre-existing
+  // `lic-usr-edit-row`/`lic-usr-edit-check` classes/`data-*` attributes that
+  // _filterLicUserEditorOptions()/_saveLicUserEditor() already query — search
+  // and save selectors are unchanged, only additive classes for layout/tests.
+  const licRow = (e, checked, lines) => `<label class="lic-usr-edit-row lic-option-row" data-license-name="${esc(e.license.toLowerCase())}" data-plan="${esc((e.rowPlan||'').toLowerCase())}" data-project="${esc((e.rowProject||'').toLowerCase())}" style="display:flex;align-items:flex-start;gap:12px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;margin-bottom:8px;background:var(--surface);box-sizing:border-box;overflow:hidden">
+      <input type="checkbox" class="lic-usr-edit-check" data-group-key="${esc(e.groupKey)}" data-license-index="${e.index}"${checked ? ' checked' : ''} style="flex:0 0 auto;width:16px;height:16px;margin:2px 0 0;accent-color:var(--blue)">
+      <div class="lic-option-content" style="flex:1;min-width:0">
+        <div class="lic-option-title" style="font-size:12px;font-weight:600;line-height:1.4;white-space:normal;word-break:break-word;overflow-wrap:anywhere">${esc(e.license)}</div>
         ${lines.join('')}
       </div>
     </label>`;
 
-  const detailLine = text => `<div style="font-size:11px;color:var(--text-2);line-height:1.5;margin-top:3px;word-break:break-word">${text}</div>`;
-  const metaLine = text => `<div style="font-size:11px;color:var(--text-3);line-height:1.5;margin-top:3px;word-break:break-word">${text}</div>`;
+  const metaLineStyled = (text, color) => `<div class="lic-option-meta" style="display:block;font-size:11px;color:${color};line-height:1.5;margin-top:3px;white-space:normal;word-break:break-word;overflow-wrap:anywhere">${text}</div>`;
+  const detailLine = text => metaLineStyled(text, 'var(--text-2)');
+  const metaLine = text => metaLineStyled(text, 'var(--text-3)');
 
-  // Current Licenses row: Plan/Source/Source Memo/Status only — no
-  // Purchased/Assigned/Remaining (Fix 1, unchanged — that's inventory
-  // context, not user-assignment detail).
+  // Current Licenses row: Plan (own line, when known) then Source/Source
+  // Memo/Status together (one coherent provenance line) — no Purchased/
+  // Assigned/Remaining (Fix 1, unchanged — that's inventory context, not
+  // user-assignment detail).
   const currentRow = e => {
     // A composite "Name — Plan" identity already shows its plan in the label
     // itself — skip the redundant "Plan: X" line for those.
     const showPlanLine = e.detail?.plan && !e.license.includes(' — ');
-    const parts = [];
-    if (showPlanLine) parts.push(`Plan: ${esc(e.detail.plan)}`);
-    parts.push(`Source: ${esc(e.detail.sources.length > 1 ? 'Multiple memos' : e.detail.sources.length === 1 ? 'Memo' : 'Manual')}`);
-    if (e.detail.sources.length) parts.push(`Source Memo: ${esc(e.detail.sources.join(', '))}`);
-    if (e.detail.status) parts.push(`Status: ${esc(e.detail.status.label)}`);
+    const lines = [];
+    if (showPlanLine) lines.push(detailLine(`Plan: ${esc(e.detail.plan)}`));
+    const sourceParts = [`Source: ${esc(e.detail.sources.length > 1 ? 'Multiple memos' : e.detail.sources.length === 1 ? 'Memo' : 'Manual')}`];
+    if (e.detail.sources.length) sourceParts.push(`Source Memo: ${esc(e.detail.sources.join(', '))}`);
+    if (e.detail.status) sourceParts.push(`Status: ${esc(e.detail.status.label)}`);
+    lines.push(detailLine(sourceParts.join(' · ')));
     e.rowPlan = e.detail?.plan || ''; e.rowProject = e.groupProject;
-    return licRow(e, true, [detailLine(parts.join(' · '))]);
+    return licRow(e, true, lines);
   };
 
   // Available (not-yet-assigned) row: Plan (its own line, when known), then

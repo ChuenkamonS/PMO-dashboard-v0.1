@@ -22,6 +22,52 @@
 
 ## Current Baseline
 
+### 2026-07-06 License Management — Manage Licenses Modal Layout Hotfix (Round 2, explicit structural classes)
+
+Scope: further markup/CSS-only follow-up to the same-day layout hotfix below, adding explicit
+structural class hooks and defensive wrap/overflow guards per a stricter spec. No data model,
+override logic, reconciliation logic, search logic, save behavior, exports, Review Queue, or other
+module change.
+
+#### Fixed
+- **Row markup now carries explicit structural classes** (`_openLicUserEditor()`'s `licRow()` helper,
+  `views/license.js`): every option row is `<label class="lic-usr-edit-row lic-option-row">` with a
+  `<div class="lic-option-content">` body containing a `<div class="lic-option-title">` (software
+  name) and one `<div class="lic-option-meta">` per detail field — added ALONGSIDE the pre-existing
+  `lic-usr-edit-row`/`lic-usr-edit-check` classes and `data-license-name`/`data-plan`/`data-project`
+  attributes that `_filterLicUserEditorOptions()` and `_saveLicUserEditor()` already query, so search
+  and save selectors did not need to change.
+- **Checkbox sizing hardened**: `flex:0 0 auto` (explicit, not just `flex-shrink:0`) so the checkbox
+  can never grow/shrink and drift from the title line regardless of how much text wraps beside it.
+- **Text overflow/escape hardened**: title and every meta line now set `white-space:normal;
+  word-break:break-word;overflow-wrap:anywhere` explicitly (previously `word-break:break-word` alone),
+  and the row itself gained `box-sizing:border-box;overflow:hidden` so content is guaranteed to stay
+  within the card even for pathological input (e.g. one long unbroken token).
+- **Current Licenses now splits Plan onto its own meta line** (previously merged into the same line as
+  Source/Source Memo/Status) — consistent with + Add Manual License's existing Plan/Project/Purchased
+  three-line pattern, per this round's explicit per-field-line requirement.
+
+#### Unchanged (verified)
+- `_filterLicUserEditorOptions()`, `_saveLicUserEditor()`, the override read/write shape,
+  `_resolveInventoryIdentity()`, and `computeLicReconciliation()` are untouched. All pre-existing
+  content/search/save tests pass unchanged (they match on visible text and the pre-existing classes,
+  not exact style strings).
+
+#### Tests
+- `tests/license.test.js`: updated the prior round's row-structure test to assert the new
+  `lic-option-row`/`lic-option-content`/`lic-option-title`/`lic-option-meta` classes and the
+  `flex:0 0 auto`/`flex:1;min-width:0` pairing explicitly, plus a `white-space:nowrap` absence check.
+  Full suite: 491/491 passing.
+- Manually verified in the browser at both 1440×900 and a 375×812 mobile viewport with real
+  Supabase-backed data containing long values (e.g. `Source Memo: TEST-CREATE-SL-001`): measured
+  every consecutive row-pair's bounding boxes — zero overlap, consistent 8px gaps — and confirmed text
+  wraps inside the card instead of escaping it, at both sizes.
+
+#### Remaining Work
+- None identified for this hotfix.
+
+---
+
 ### 2026-07-06 License Management — Manage Licenses Modal Layout Hotfix
 
 Scope: pure markup/CSS restructuring of the Manage Licenses dialog (License Management > Users tab)
