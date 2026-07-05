@@ -22,6 +22,64 @@
 
 ## Current Baseline
 
+### 2026-07-06 License Management — Manage Licenses Modal Simplify Hotfix (seat metrics removed, flat list)
+
+Scope: further, explicitly-requested simplification of the Manage Licenses dialog (License
+Management > Users tab) on top of the two same-day layout hotfixes below. New business decision:
+Purchased/Assigned/Remaining are removed from this modal entirely — they now live only in License
+Summary > Reconciliation. No data model, override logic, reconciliation logic, search logic, save
+behavior, exports, Review Queue, or other module change.
+
+#### Changed
+- **Removed all seat context from Manage Licenses** (`_openLicUserEditor()`, `views/license.js`):
+  the `computeLicReconciliation()` call and its Purchased/Assigned/Remaining rendering are gone from
+  this dialog. + Add Manual License's Project grouping now resolves purely from `getAllLicenses()`
+  (which project a not-yet-assigned identity's own inventory record belongs to) — no assignment
+  counting needed here at all, since nothing about seats is displayed.
+- **Rows are now a single flat, borderless line**: `[checkbox] [name] [at most one <small> detail
+  line]`. Current Licenses shows `Plan: X · Source: Y` (Source Memo numbers and Status dropped from
+  this view — still available via License Summary > Reconciliation's Assigned Users drill-down).
+  + Add Manual License shows `Plan: X` only (no Project text inside the row — Project is shown once,
+  as the enclosing group's header). This replaces the two prior rounds' card-bordered,
+  multi-meta-line rows, which were reported as still visually broken/overly complex.
+- **+ Add Manual License Project grouping is now a plain `<div class="project-group">Project:
+  X</div>` text header**, not a bordered card with a collapsible caret. The collapse/expand mechanism
+  (`_toggleLicUserEditorGroup()`) is removed as dead code — sections are always expanded now.
+- **The outer per-user-project wrapper only renders when a user belongs to more than one project.**
+  For the common single-project case, Current Licenses and + Add Manual License render as a flat
+  list with no redundant "Project: X" heading above them — matching the requested layout exactly.
+  For a genuine multi-project user, each of their groups still gets its own "Project: X" heading (so
+  the pre-existing independent-checkbox-scoping guarantee, tested since Phase 2A, is unaffected).
+- New structural class hook: `lic-simple-row` (added alongside the pre-existing
+  `lic-usr-edit-row`/`lic-usr-edit-check` classes and `data-license-name`/`data-plan`/`data-project`
+  attributes that `_filterLicUserEditorOptions()`/`_saveLicUserEditor()` already query — search/save
+  selectors are unchanged).
+- Modal intro text and the helper copy above the search box updated to match: no longer claims seat
+  context is shown in this dialog; points to License Summary > Reconciliation instead.
+
+#### Unchanged (verified)
+- `_filterLicUserEditorOptions()`, `_saveLicUserEditor()`, the override read/write shape,
+  `_resolveInventoryIdentity()`, and `computeLicReconciliation()` (still used unchanged by License
+  Summary > Reconciliation itself) are untouched. Modal footer (Save/Cancel, sticky/always-visible)
+  from the prior layout hotfix is unchanged, as explicitly requested.
+
+#### Tests
+- `tests/license.test.js`: rewrote 5 tests whose assertions encoded now-removed content (Source
+  Memo/Status on Current Licenses; Purchased/Assigned/Remaining and per-row Project text on + Add
+  Manual License; the old card-styled/`lic-option-row` structure) to match the simplified behavior,
+  and added a new test proving the single-project case renders with no redundant outer "Project: X"
+  heading. The pre-existing multi-project independent-checkbox-scoping test (Part 1/5) and the
+  save-path test both pass unchanged. Full suite: 492/492 passing (up from 491).
+- Manually verified in the browser (real Supabase-backed data) at 1440×900 and a 375×812 mobile
+  viewport: Current Licenses and + Add Manual License render as a flat list with plain "Project: X"
+  text headers, no seat numbers anywhere in the modal, checkboxes align with their title line, and
+  measured every consecutive row pair's bounding boxes — zero overlap across all 31 rendered rows.
+
+#### Remaining Work
+- None identified for this hotfix.
+
+---
+
 ### 2026-07-06 License Management — Manage Licenses Modal Layout Hotfix (Round 2, explicit structural classes)
 
 Scope: further markup/CSS-only follow-up to the same-day layout hotfix below, adding explicit
