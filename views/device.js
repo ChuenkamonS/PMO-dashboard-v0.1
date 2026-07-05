@@ -867,6 +867,9 @@ function openDeviceModal(id) {
     setVal('dev-warranty', d.warranty);
     setVal('dev-status', d.status||'not_identified'); setVal('dev-note', d.note);
     setVal('dev-qa-owner', d.qaOwner);
+    // Audit follow-up: a device created from a PO/Hardware Memo arrival (source
+    // === 'memo') keeps its memo link read-only; manual devices stay editable.
+    _setDeviceMemoLinkUI(d.source === 'memo' && !!d.memoNo, d.memoNo);
   } else {
     document.getElementById('dev-modal-title').textContent = 'Add Device';
     document.getElementById('dev-edit-id').value = '';
@@ -877,6 +880,19 @@ function openDeviceModal(id) {
     setVal('dev-pbx-number',''); setVal('dev-os-version',''); setVal('dev-position',''); setVal('dev-qa-owner','');
     setVal('dev-status','not_identified');
     setVal('dev-assigned-date', new Date().toISOString().slice(0,10));
+    _setDeviceMemoLinkUI(false, '');
+  }
+}
+
+// Toggles the Link HW Memo field between read-only (PO/memo-sourced device) and
+// editable (manual device), and shows/hides the View Source Memo action.
+function _setDeviceMemoLinkUI(readOnly, memoNo) {
+  const memoRefInput = document.getElementById('dev-memo-ref');
+  const viewBtn = document.getElementById('dev-view-source-memo-btn');
+  if (memoRefInput) memoRefInput.readOnly = !!readOnly;
+  if (viewBtn) {
+    viewBtn.style.display = readOnly ? '' : 'none';
+    viewBtn.dataset.memoNo = memoNo || '';
   }
 }
 function closeDeviceModal() { document.getElementById('device-modal').style.display='none'; }
@@ -921,13 +937,21 @@ function saveDevice() {
     updatedAt:    now,
     // Milestone 2 Task 2.3 — Created By / Updated By metadata.
     updatedBy:    currentUser(),
-    source:       'manual',
   };
   if(editId) {
     const allDevs = loadDevices();
     const idx = allDevs.findIndex(d => String(d.id) === String(editId));
     const orig = idx >= 0 ? allDevs[idx] : {};
-    const updated = { ...orig, ...data, id: editId, auditLog: [...(orig.auditLog||[])] };
+    // Device source memo linkage: a PO/Hardware-Memo-sourced device's Link HW
+    // Memo field is read-only in the UI; keep memoNo/source authoritative from
+    // the original record here too, not from the (possibly stale) form field.
+    const isMemoSourced = orig.source === 'memo';
+    const updated = {
+      ...orig, ...data, id: editId,
+      memoNo: isMemoSourced ? orig.memoNo : data.memoNo,
+      source: orig.source || 'manual',
+      auditLog: [...(orig.auditLog||[])],
+    };
     appendDeviceAuditLog(updated, 'Edited', { statusBefore: orig.status||null, statusAfter: updated.status||null });
     saveDeviceAsync(updated).catch(e => console.warn('Device save failed', e));
   } else {
@@ -937,11 +961,17 @@ function saveDevice() {
       const dup = allDevs[dupIdx];
       const matchField = (data.assetTag && data.assetTag === dup.assetTag) ? `Asset: ${data.assetTag}` : `Serial: ${data.serial}`;
       if(!confirm(`พบอุปกรณ์ซ้ำ (${matchField})\nอัปเดตข้อมูลอันเดิมแทน?`)) return;
-      const merged = { ...dup, ...data, auditLog: [...(dup.auditLog||[])] };
+      const isMemoSourced = dup.source === 'memo';
+      const merged = {
+        ...dup, ...data,
+        memoNo: isMemoSourced ? dup.memoNo : data.memoNo,
+        source: dup.source || 'manual',
+        auditLog: [...(dup.auditLog||[])],
+      };
       appendDeviceAuditLog(merged, 'Edited', { comment: `Merged duplicate (${matchField})`, statusBefore: dup.status||null, statusAfter: merged.status||null });
       saveDeviceAsync(merged).catch(e => console.warn('Device save failed', e));
     } else {
-      const created = { id: nextDeviceId(), ...data, createdAt: now, createdBy: currentUser(), auditLog: [] };
+      const created = { id: nextDeviceId(), ...data, source: 'manual', createdAt: now, createdBy: currentUser(), auditLog: [] };
       appendDeviceAuditLog(created, 'Created');
       saveDeviceAsync(created).catch(e => console.warn('Device save failed', e));
     }
@@ -1039,7 +1069,7 @@ function openDeviceDetail(id) {
       </div>
       <div style="display:flex;gap:6px;align-items:center">
         <span class="badge ${statusB.cls}" style="font-size:10px">${esc(statusB.label)}</span>
-        <button class="btn-sm" onclick="openDeviceModal('${idStr}')" style="font-size:11px;padding:3px 8px">✎ Edit</button>
+        <button class="btn-sm" onclick="document.getElementById('dev-detail-modal').style.display='none';openDeviceModal('${idStr}')" style="font-size:11px;padding:3px 8px">✎ Edit</button>
         <button class="btn-sm" onclick="document.getElementById('dev-detail-modal').style.display='none'" style="font-size:11px;padding:3px 8px">✕</button>
       </div>
     </div>
@@ -1194,7 +1224,42 @@ const PO_STATUS_BADGE = {
   awaiting:       `<span style="font-size:10px;background:#FAEEDA;color:#633806;padding:2px 8px;border-radius:100px">Awaiting</span>`,
   partial_arrived:`<span style="font-size:10px;background:#FAEEDA;color:#633806;padding:2px 8px;border-radius:100px">Partial arrived</span>`,
   fulfilled:      `<span style="font-size:10px;background:#EAF3DE;color:#27500A;padding:2px 8px;border-radius:100px">Fulfilled</span>`,
+  // Voided Hardware Memo downstream PO handling: terminal status applied when
+  // the PO's source memo is voided before any devices have arrived. Never
+  // deleted — kept visible for audit, same as a Voided memo itself.
+  voided_source:  `<span style="font-size:10px;background:#F6E4E1;color:#7A2E20;padding:2px 8px;border-radius:100px">Voided (source memo)</span>`,
 };
+
+// Reason recorded on a PO's own audit trail when its source memo was voided —
+// read back for display (e.g. a tooltip) without needing a dedicated column.
+function poVoidReason(po) {
+  if (po.status !== 'voided_source' || !Array.isArray(po.auditLog)) return '';
+  const entry = [...po.auditLog].reverse().find(e => e.action === 'Voided (source memo voided)');
+  return entry?.comment || '';
+}
+
+// Voided Hardware Memo downstream PO handling: mark every PO tied to the
+// just-voided memo as a terminal 'voided_source' status. Never deletes a PO —
+// only reachable POs have zero arrived devices (any arrived device already
+// blocks the memo Void itself via memoHasIrreversibleDownstreamRecords()), so
+// this only affects pending_order/ordered/awaiting POs in practice.
+function cancelPurchaseOrdersForVoidedMemo(memoNo, reason) {
+  const pos = loadPurchaseOrders();
+  const affected = pos.filter(po => po.memoNo === memoNo && !['fulfilled', 'voided_source'].includes(po.status));
+  affected.forEach(po => {
+    const prevStatus = po.status;
+    po.status = 'voided_source';
+    po.updatedAt = new Date().toISOString();
+    appendDeviceAuditLog(po, 'Voided (source memo voided)', {
+      comment: reason || '',
+      statusBefore: prevStatus,
+      statusAfter: 'voided_source',
+    });
+    savePurchaseOrderAsync(po).catch(e => console.warn('PO void-cascade update failed', e));
+  });
+  if (affected.length) storePurchaseOrders(pos);
+  return affected;
+}
 
 function poActionBtn(po) {
   const s = po.status;
@@ -1227,7 +1292,7 @@ function _renderPOTable() {
   const pos = loadPurchaseOrders();
 
   // KPIs
-  const active    = pos.filter(p => p.status !== 'fulfilled').length;
+  const active    = pos.filter(p => !['fulfilled', 'voided_source'].includes(p.status)).length;
   const awaitingUnits = pos.filter(p => ['ordered','awaiting'].includes(p.status)).reduce((s,p) => s+p.orderedQty,0);
   const partial   = pos.filter(p => p.status === 'partial_arrived').length;
   const fulfilled = pos.filter(p => p.status === 'fulfilled').length;
@@ -1248,14 +1313,15 @@ function _renderPOTable() {
     return;
   }
 
-  // Sort: active first (by status order), then fulfilled
-  const statusOrder = { pending_order:0, ordered:1, awaiting:2, partial_arrived:3, fulfilled:4 };
+  // Sort: active first (by status order), then fulfilled, then voided source
+  const statusOrder = { pending_order:0, ordered:1, awaiting:2, partial_arrived:3, fulfilled:4, voided_source:5 };
   const sorted = [...pos].sort((a,b) => (statusOrder[a.status]||99) - (statusOrder[b.status]||99));
 
   tbody.innerHTML = sorted.map(po => {
     const pct = po.orderedQty > 0 ? Math.round(po.arrivedQty / po.orderedQty * 100) : 0;
     const barColor = pct >= 100 ? '#3B6D11' : '#185FA5';
-    return `<tr style="${po.status==='fulfilled'?'opacity:0.7':''}">
+    const voidReason = poVoidReason(po);
+    return `<tr style="${po.status==='fulfilled'||po.status==='voided_source'?'opacity:0.7':''}">
       <td style="color:#185FA5;font-weight:500;cursor:pointer;padding:9px 12px" onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly('${esc(po.memoNo)}')">${esc(po.memoNo)}</td>
       <td style="padding:9px 12px;font-size:12px">${esc(po.itemName)}</td>
       <td style="padding:9px 12px;font-size:12px">${esc(po.project||'—')}</td>
@@ -1269,7 +1335,7 @@ function _renderPOTable() {
           <span style="font-size:10px;color:var(--text-3)">${po.arrivedQty}/${po.orderedQty}</span>
         </div>
       </td>
-      <td style="padding:9px 12px">${PO_STATUS_BADGE[po.status]||`<span style="font-size:10px;background:#F1EFE8;color:#444441;padding:2px 8px;border-radius:100px">${esc(po.status)}</span>`}</td>
+      <td style="padding:9px 12px"${voidReason ? ` title="${esc(voidReason)}"` : ''}>${PO_STATUS_BADGE[po.status]||`<span style="font-size:10px;background:#F1EFE8;color:#444441;padding:2px 8px;border-radius:100px">${esc(po.status)}</span>`}</td>
       <td style="padding:9px 12px;white-space:nowrap">${poActionBtn(po)}</td>
     </tr>`;
   }).join('');

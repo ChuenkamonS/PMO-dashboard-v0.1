@@ -22,6 +22,148 @@
 
 ## Current Baseline
 
+### 2026-07-05 Final Audit Follow-up (Round 2) — Hardware Duplicate Restore, Void Rule Confirmation, Device Detail Modal Stacking
+
+Scope: fix the three confirmed functional issues from the second final-audit follow-up review
+(Hardware memo Duplicate restore, Hardware memo Void rule clarification/enforcement, Device Detail
+→ Edit modal stacking). No Settings/Resource work, no UI redesign, no PO-creation logic changes.
+
+#### Fixed
+- **Hardware memo Duplicate restore**: `populateMemoTypeDetail()`'s hw branch (views/create.js)
+  only ever restored hardware rows from the structured `memo.hwItems` array. Legacy/test Hardware
+  memos that predate the "Memo Detail Restore" hotfix (or otherwise have `hwItems` empty/missing)
+  but still have their original line items captured in the printable "รายการ Hardware" HTML table
+  had nothing to restore from — Duplicating them left the Create Memo form's hardware rows empty.
+  New `_hwItemsForFormRestore(memo)` (views/create.js) prefers structured `hwItems` (newer memos,
+  unchanged behavior) and falls back to scraping that HTML table (name/price/qty) when `hwItems` is
+  empty, mirroring views/device.js's own `_hwLineItemsFromMemo()` legacy-scrape pattern used for PO
+  creation — kept as an independent helper since form restore also needs price (which PO creation
+  does not) and the fix must not touch PO-creation logic at all. `populateMemoTypeDetail()` now calls
+  this helper instead of checking `memo.hwItems.length` directly.
+- **Hardware memo Void rule**: reviewed and confirmed (no code change needed to the guard itself —
+  it was already correct) that `memoHasIrreversibleDownstreamRecords()` (app.js) blocks Void only
+  when a non-deleted Device Registry record exists for the memo (`loadDevices()` already excludes
+  soft-deleted rows via `_excludeDeletedDevices()`), and that a PO with zero arrivals never blocks
+  Void — it instead cascades to `voided_source` per the prior audit-follow-up fix. Added explicit
+  end-to-end regression coverage for the specific cases named in this review: a real Partial Arrival
+  (`partial_arrived` PO with real device records) blocks Void; a fully `fulfilled` PO blocks Void; a
+  PO-only memo (zero arrivals) is never blocked and cascades to `voided_source`; and a memo whose
+  only device record has since been soft-deleted becomes voidable again.
+- **Device Detail → Edit modal stacking**: clicking "Edit" inside the Device Detail modal
+  (`openDeviceDetail()`, views/device.js) called `openDeviceModal(id)` directly, leaving the Detail
+  modal open underneath. Both modals share `z-index:200`; since the Detail modal is appended to
+  `document.body` after the static Edit Device modal markup already in `index.html`, equal z-index
+  falls back to DOM order and the Detail modal rendered on top, hiding the newly-opened Edit modal
+  behind it. The Edit button now closes the Detail modal
+  (`document.getElementById('dev-detail-modal').style.display='none'`) before opening Edit Device, so
+  Edit renders correctly on top — no z-index or modal-markup changes.
+
+#### Tests
+- `tests/workflow.test.js`: new test for `_hwItemsForFormRestore()` proving it prefers structured
+  `hwItems` and falls back to the legacy Hardware HTML table (name/price/qty) when `hwItems` is
+  empty/missing, with a clean empty result when neither is present. Updated the existing
+  `populateMemoTypeDetail` structural test to check for `_hwItemsForFormRestore(memo)` instead of a
+  literal `memo.hwItems` reference (the literal reference moved into the new helper).
+- `tests/device.test.js`: four new end-to-end Void-rule regression tests (Partial Arrival blocks,
+  Fulfilled blocks, PO-only never blocks + cascades to `voided_source`, soft-deleted device unblocks)
+  and one new test confirming the Device Detail "Edit" button's onclick closes `dev-detail-modal`
+  before calling `openDeviceModal()`.
+- Full regression suite: 458/458 passing (up from 452 before this pass).
+- Manually verified in the browser against the live app: duplicating a real legacy Hardware memo
+  (`memoNo: 'TEST-PDF-HW-MQZ3LBGP'`, `hwItems: []`, HTML-only) into a Draft restored its hardware row
+  ("Test Laptop", ฿30,000, qty 2, Total ฿60,000) into the Create Memo form; opening a real device's
+  Detail panel and clicking Edit now closes the Detail modal and shows Edit Device correctly on top
+  (previously hidden behind it).
+
+#### Remaining Issues
+- None new. No `docs/TECHNICAL_DEBT.md` entry was needed for this pass — the Void-rule review
+  confirmed existing behavior was already correct (see TD-AUDIT-05 for the one already-documented,
+  unrelated Void-guard cache-staleness gap), and the other two fixes are self-contained with no
+  residual limitation.
+
+---
+
+### 2026-07-05 Final Audit Follow-up — Device/PO Void Handling, Forecast Plan Column
+
+Scope: fix the three confirmed functional issues from the final audit follow-up review (Device
+Registry source memo linkage, Voided Hardware Memo downstream PO handling, Forecast Plan column).
+No UX redesign, no Settings/Resource work, no broad filter refactor — the three remaining items
+from the same review (License User view, All Memo Voided visibility, multi-select filters) are
+documented as future UX/interaction work only, see `docs/TECHNICAL_DEBT.md`.
+
+#### Fixed
+- **Device Registry source memo linkage**: `openDeviceModal()`/`saveDevice()` (views/device.js)
+  treated every device's "Link HW Memo" field identically regardless of origin, even though the
+  device record already distinguishes `source: 'memo'` (created via PO/Hardware Memo arrival) from
+  `source: 'manual'`. Edit Device now makes the Link HW Memo field read-only and shows a "View
+  Source Memo" button (reusing the existing `openMemoReadOnly()`) whenever the device's `source` is
+  `'memo'`; manual devices remain fully editable with the button hidden. Also fixed a related latent
+  bug: `saveDevice()` unconditionally wrote `source: 'manual'` into every saved record, so editing a
+  memo-sourced device (e.g. just to update its Assignee) would silently flip its `source` to
+  `'manual'` on the very next save, defeating the read-only guard on the following Edit open.
+  `saveDevice()` now preserves the original record's `source` (and, defensively, its `memoNo`) across
+  an edit/dedupe-merge instead of trusting the form's own fields for those two values.
+- **Voided Hardware Memo downstream PO handling**: `voidMemoAsync()` (app.js) previously only ever
+  touched the `memos` table — a Purchase Order tied to the voided memo was left completely
+  untouched (still `pending_order`/`ordered`/`awaiting`, still fully actionable) with nothing on the
+  PO itself indicating its source memo was voided; only `markArrived()`'s existing reactive
+  memo-status check (added in a prior audit pass) stood between it and creating new Device Registry
+  records. `voidMemoAsync()` now calls a new `cancelPurchaseOrdersForVoidedMemo()`
+  (views/device.js), which marks every open PO for that memo with a new terminal
+  `voided_source` status — never deletes a PO — and records the memo's void reason on the PO's own
+  `auditLog` (reusing the existing `appendDeviceAuditLog()`/`audit_log` column, so no new Supabase
+  migration is required). The PO table shows a "Voided (source memo)" badge with the void reason as
+  a tooltip, excludes `voided_source` POs from the Active KPI, and (since `poActionBtn()` only wires
+  buttons for the pre-existing statuses) no action button renders for it — Mark Ordered/Awaiting/
+  Arrived are all structurally unreachable, not just reactively blocked. `markArrived()`'s existing
+  voided/rejected/cancelled-source-memo block (prior audit pass) and `openMarkArrivedModal()`'s
+  status guard both remain unchanged and continue to apply.
+- **Forecast Plan column**: `_renderForecastTable()` (views/budget.js) now renders a "Plan" column
+  immediately after "Program", sourced from the same software line item the row's Program/Type
+  already come from. `forecastLineItems()` and `calculateForecast()` (app.js) now carry the line
+  item's `plan` field (already captured at Create Memo and already present on canonical Actual
+  Spend `detailLines`, just previously dropped when building Forecast rows) through as a
+  display-only field — it is not part of the row-grouping key, so it does not change which rows get
+  merged, and Actual Spend / Budget vs Actual (which still read the full canonical record) are
+  unaffected. `forecastExportDataset()` gained the matching "Plan" export column so CSV export
+  continues to match the on-screen table (MASTER_SPEC.md Export Rules).
+
+#### Documented, not implemented (future UX/interaction work — see docs/TECHNICAL_DEBT.md)
+- License User view becoming hard to read for a user with many licenses — future direction is a
+  user-centric view (one row/card per user with license chips), not the current project-centric
+  matrix. Not implemented — a display/interaction redesign, out of this pass's scope.
+- All Memo has no dedicated Voided tab/filter (re-confirms the same gap noted in the 2026-07-05
+  Functional Audit entry below) — open question is a dedicated Voided tab vs. replacing status tabs
+  with All + Status filter. Not implemented — needs a UX decision first.
+- Most filters across the app allow only a single selected value (project/type/status/license) —
+  future direction is multi-select, applied consistently. Not implemented — a broad, cross-module
+  filter refactor, explicitly out of scope for a functional-fix pass.
+
+#### Tests
+- `tests/device.test.js`: new tests for `openDeviceModal()` making Link HW Memo read-only and
+  showing "View Source Memo" for a `source: 'memo'` device, keeping it editable/hidden for a
+  manual device, resetting correctly when Add Device is opened right after a memo-sourced Edit, and
+  `saveDevice()` preserving `source`/`memoNo` across a routine edit. New tests for
+  `cancelPurchaseOrdersForVoidedMemo()`/`voidMemoAsync()`: a PO is marked `voided_source` (never
+  deleted) with the void reason on its audit trail; the cascade covers every open PO for the memo
+  without touching an unrelated memo's fulfilled PO; `markArrived()` stays blocked for a PO already
+  flagged `voided_source`.
+- `tests/financial-models.test.js`: new tests proving Forecast rows/export carry the correct `plan`
+  per line item without affecting calculation totals or grouping, and that a Plan-less row (e.g.
+  Infra) renders an empty Plan instead of throwing. Updated the existing Forecast export-headers
+  test to include the new "Plan" column.
+- Full regression suite: 452/452 passing (up from 443 before this pass).
+- Manually verified in the browser against the live app: opening Edit Device on a real memo-sourced
+  device (`memoNo: 'DEVTEST-M041'`) shows Link HW Memo as read-only with a working "View Source
+  Memo" button that opens the real memo detail; a manual device (`id: 116`) remains fully editable
+  with the button hidden; voiding a real test Hardware memo (`memoNo: 'test'`) cascaded all 3 of its
+  open Purchase Orders to the new "Voided (source memo)" status with the void reason visible as a
+  tooltip, no action button, and excluded from the Active KPI; the Forecast tab shows the Plan
+  column populated per software line item, and `forecastExportDataset()` matches the on-screen
+  table.
+
+---
+
 ### 2026-07-05 Final Functional Audit — 8-Flow End-to-End Stabilization Pass
 
 Scope: final pre-feature-complete functional audit of all 8 core business flows (Memo lifecycle;

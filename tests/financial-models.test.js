@@ -881,12 +881,12 @@ test('forecast carries the latest coverage monthly cost into future months and e
 
   const exported = ctx.forecastExportDataset(forecast);
   assert.deepEqual(Array.from(exported.headers), [
-    'Project','Program','Spend Type',
+    'Project','Program','Plan','Spend Type',
     ...forecast.months.map(month => `${month.key} ${month.kind}`),
     'Total',
   ]);
   assert.deepEqual(Array.from(exported.rows[0]), [
-    row.project, row.program, row.spendType,
+    row.project, row.program, row.plan || '', row.spendType,
     ...forecast.months.map(month => row.values[month.key] || 0),
     row.total,
   ]);
@@ -921,6 +921,41 @@ test('canonical Software detail lines expand into independent Forecast rows (one
   // canonical record per memo (MASTER_SPEC.md Single Source of Truth).
   assert.equal(ctx.calculateBudgetVsActualDataset([], [withDetails], { year:'2569' }).totals.actual, 2550);
   assert.equal(ctx.calculateActualSpend([withDetails]), 2550);
+});
+
+test('Final audit follow-up: Forecast rows carry the software line item\'s Plan for display, without affecting calculation/grouping or export totals', () => {
+  const ctx = context();
+  const input = { ...base, amount:2550, startDate:'2026-01', endDate:'2026-12', vendorProgram:'Product A, Product B' };
+  const withDetails = ctx.createActualSpendRecord({ ...input, detailLines:[
+    { program:'Product A', plan:'Business', quantity:2, unitCost:100, monthlyCost:200, coverageStart:'2026-01', coverageEnd:'2026-12', coverageMonths:12, lineAmount:2400 },
+    { program:'Product B', plan:'Pro', quantity:1, unitCost:50, monthlyCost:50, coverageStart:'2026-01', coverageEnd:'2026-03', coverageMonths:3, lineAmount:150 },
+  ] });
+
+  const forecast = ctx.calculateForecast([withDetails], new Date(2026, 6, 15));
+  const rowA = forecast.rows.find(row => row.program === 'Product A');
+  const rowB = forecast.rows.find(row => row.program === 'Product B');
+  assert.equal(rowA.plan, 'Business');
+  assert.equal(rowB.plan, 'Pro');
+  // Calculation/grouping and totals are unaffected by the added display field.
+  assert.equal(rowA.total, 2400);
+  assert.equal(rowB.total, 400);
+
+  const exported = ctx.forecastExportDataset(forecast);
+  const exportedA = exported.rows.find(row => row[1] === 'Product A');
+  const exportedB = exported.rows.find(row => row[1] === 'Product B');
+  assert.equal(exportedA[2], 'Business', 'exported Plan column must sit right after Program');
+  assert.equal(exportedB[2], 'Pro');
+});
+
+test('Final audit follow-up: a Forecast row with no software line items (e.g. Infra, or a Software memo without detailLines) has an empty Plan, not a crash', () => {
+  const ctx = context();
+  const record = ctx.createActualSpendRecord({
+    ...base, source:'Infra Cost', spendType:'Infra', amount:6000, startDate:'2026-01', endDate:'2026-06', vendorProgram:'Cloud',
+  });
+  const forecast = ctx.calculateForecast([record], new Date(2026, 6, 15));
+  assert.equal(forecast.rows[0].plan, '');
+  const exported = ctx.forecastExportDataset(forecast);
+  assert.equal(exported.rows[0][2], '');
 });
 
 test('a single Software line item still produces exactly one Forecast row (no over-splitting)', () => {

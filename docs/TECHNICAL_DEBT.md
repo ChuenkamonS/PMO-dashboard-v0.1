@@ -1617,6 +1617,152 @@ Exit Criteria
 
 ---
 
+# TD-AUDIT-07
+
+Title
+
+License User View Becomes Hard to Read With Many Licenses Per User (UX backlog)
+
+Status
+
+OPEN (documented only — UX/future interaction item, not implemented)
+
+Priority
+
+Low
+
+Introduced
+
+2026-07-05 Final Audit Follow-up
+
+Owner Phase
+
+License Management (future UX phase)
+
+Reason
+
+The current License Management > User view is a project-centric matrix. For a user holding many
+licenses, the matrix becomes hard to read/scan.
+
+Future Direction (not implemented)
+
+- Move to a user-centric view: one row/card per user, with license chips or expandable detail,
+  instead of the current matrix layout.
+- Consider removing the Project column from the main display (project stays available underneath
+  for audit/filtering, just not a primary matrix axis).
+- Keep the underlying per-project license data intact for audit/filtering even if the primary
+  display groups by user.
+
+Risk
+
+None today — purely a readability/scalability concern as the number of licenses per user grows, not
+a data-correctness or audit gap.
+
+Exit Criteria
+
+- PMO/BA + design decision on the target user-centric layout (rows vs. cards, chip design,
+  expand/collapse behavior).
+- Implement as its own reviewed UX phase — explicitly out of scope for the 2026-07-05 Final Audit
+  Follow-up, which was fix-functional-bugs-only.
+
+---
+
+# TD-AUDIT-08
+
+Title
+
+All Memo Has No Dedicated Voided Tab/Filter (UX backlog)
+
+Status
+
+OPEN (documented only — UX/future interaction item, not implemented)
+
+Priority
+
+Low
+
+Introduced
+
+Originally noted in the 2026-07-05 Final Functional Audit; restated as an explicit backlog item in
+the 2026-07-05 Final Audit Follow-up
+
+Owner Phase
+
+All Memo / History (future UX phase)
+
+Reason
+
+SYSTEM_OVERVIEW.md §3.3 lists Voided as one of the tracked memo statuses. Voided memos are fully
+visible and correctly labeled today under the "All" tab — this is a missing filter convenience, not
+a data-visibility or data-correctness bug.
+
+Future Direction (not implemented) — open question, needs a decision, not just an implementation
+
+- Option A: add a dedicated "Voided" status tab alongside the existing status tabs.
+- Option B: replace the current status tabs with a single "All" view plus a Status filter dropdown/
+  chips (which would also naturally cover Voided without a dedicated tab).
+
+Risk
+
+None today — Voided memos are not hidden or hard to find, just not filterable as their own tab.
+
+Exit Criteria
+
+- PMO/BA decision on Option A vs. Option B (or another approach) before implementation.
+- Implement as its own reviewed UX phase — explicitly out of scope for a functional-fix-only pass.
+
+---
+
+# TD-AUDIT-09
+
+Title
+
+Most Filters Are Single-Select Only (UX backlog)
+
+Status
+
+OPEN (documented only — UX/future interaction item, not implemented)
+
+Priority
+
+Low
+
+Introduced
+
+2026-07-05 Final Audit Follow-up
+
+Owner Phase
+
+Cross-module (future UX phase) — Memo/History, Budget & Spend, License, Device
+
+Reason
+
+Most filters across the app (project, type, status, license, etc.) allow only a single selected
+value at a time. A PMO user wanting to see, e.g., two specific projects together must currently
+filter one at a time or fall back to "All".
+
+Future Direction (not implemented)
+
+- Multi-select project/type/status/license filters, applied consistently across modules (Memo/
+  History, Budget & Spend, License, Device) rather than module-by-module ad hoc.
+
+Risk
+
+None today — a convenience/efficiency gap, not a data-correctness issue. Existing single-select
+filters correctly narrow their respective datasets.
+
+Exit Criteria
+
+- PMO/BA + design decision on the target multi-select UI pattern (chips, checkboxes-in-dropdown,
+  etc.) and which filters it applies to first.
+- Implement as its own reviewed, cross-module UX phase — explicitly out of scope for a
+  functional-fix-only pass. Related to the already-tracked TD-7A-07 (Project Dropdown fragmentation),
+  which should be considered together with this item once both are scheduled, since unifying a
+  dropdown's data source and making it multi-select are two independent axes of the same UI
+  surfaces.
+
+---
+
 # Before Release Checklist
 
 Review every OPEN Technical Debt.

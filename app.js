@@ -659,6 +659,7 @@ function forecastLineItems(record = {}) {
   if (lines.length) {
     return lines.map(line => ({
       program: line.program,
+      plan: line.plan || '',
       amount: Number(line.lineAmount) || 0,
       startDate: line.coverageStart,
       endDate: line.coverageEnd,
@@ -667,6 +668,7 @@ function forecastLineItems(record = {}) {
   }
   return [{
     program: record.vendorProgram || record.description || record.referenceNo || record.spendType,
+    plan: '',
     amount: Number(record.amount) || 0,
     startDate: record.startDate,
     endDate: record.endDate,
@@ -697,6 +699,11 @@ function calculateForecast(records = [], asOfDate = new Date(), filters = {}) {
       if (!grouped.has(key)) grouped.set(key, {
         project: record.project,
         program: item.program,
+        // Display-only — Forecast Plan column. Not part of the grouping key,
+        // so it does not affect row aggregation/calculation (MASTER_SPEC.md
+        // Forecast Rules unchanged). First line item's plan wins if two
+        // same-named lines in the group carry different plans.
+        plan: item.plan || '',
         spendType: record.spendType,
         values: Object.fromEntries(months.map(month => [month.key, 0])),
       });
@@ -727,9 +734,9 @@ function forecastExportDataset(forecast = { months:[], rows:[] }) {
   const months = forecast.months || [];
   const rows = forecast.rows || [];
   return {
-    headers: ['Project','Program','Spend Type', ...months.map(month => `${month.key} ${month.kind}`), 'Total'],
+    headers: ['Project','Program','Plan','Spend Type', ...months.map(month => `${month.key} ${month.kind}`), 'Total'],
     rows: rows.map(row => [
-      row.project, row.program, row.spendType,
+      row.project, row.program, row.plan || '', row.spendType,
       ...months.map(month => row.values[month.key] || 0),
       row.total,
     ]),
@@ -1739,6 +1746,17 @@ async function voidMemoAsync(memoNo, reason, evidenceUrl = '') {
     voidEvidenceUrl: evidenceUrl || null,
     auditLog: updatedAuditLog,
   });
+
+  // Voided Hardware Memo downstream PO handling: never delete a related
+  // Purchase Order — mark it as a terminal 'voided_source' status instead,
+  // carrying the memo's void reason onto the PO's own audit trail. Only
+  // reachable when no devices have arrived yet (memoHasIrreversibleDownstream
+  // Records() above already blocks Void once any have).
+  if (typeof cancelPurchaseOrdersForVoidedMemo === 'function') {
+    try { cancelPurchaseOrdersForVoidedMemo(memoNo, trimmedReason); }
+    catch (e) { console.warn('PO void-cascade failed', e); }
+  }
+
   return { ok: true, memo: updated };
 }
 

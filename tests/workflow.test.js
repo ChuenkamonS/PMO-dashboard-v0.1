@@ -845,8 +845,10 @@ test('populateMemoTypeDetail restores Software/HW/INT/ENT/DEP sections from the 
   assert.match(fn, /memo\.acctCols/);
   assert.match(fn, /memo\.acctRows/);
 
-  // Hardware.
-  assert.match(fn, /memo\.hwItems/);
+  // Hardware — restored via _hwItemsForFormRestore(), which prefers structured
+  // memo.hwItems but falls back to scraping the legacy Hardware HTML table
+  // (see the dedicated fallback test below).
+  assert.match(fn, /_hwItemsForFormRestore\(memo\)/);
   assert.match(fn, /memo\.hwOwner/);
   assert.match(fn, /calcHW\(\)/);
 
@@ -865,6 +867,55 @@ test('populateMemoTypeDetail restores Software/HW/INT/ENT/DEP sections from the 
 
   // Totals must come from recalculation, never a direct patch of the total.
   assert.doesNotMatch(fn, /\.total\s*=/, 'must restore source data and let calc*() recompute totals, not patch totals directly');
+});
+
+// Root cause: Duplicating/Re-editing a Hardware memo sometimes failed to restore
+// hardware rows into the Create Memo form. populateMemoTypeDetail()'s hw branch
+// only ever restored from memo.hwItems — legacy/test memos with hwItems empty
+// or missing (predating the "Memo Detail Restore" hotfix) but with the original
+// line items still captured in the printable "รายการ Hardware" HTML table had
+// nothing to restore from. _hwItemsForFormRestore() (views/create.js) now
+// prefers structured hwItems and falls back to scraping that HTML table.
+test('_hwItemsForFormRestore() prefers structured hwItems, and falls back to scraping the legacy Hardware HTML table when hwItems is empty/missing', () => {
+  const createCode = fs.readFileSync(path.join(root, 'views/create.js'), 'utf8');
+  const fnSrc = createCode.match(/function _hwItemsForFormRestore\(memo\) \{[\s\S]*?\n\}\n/)?.[0];
+  assert.ok(fnSrc, '_hwItemsForFormRestore must be defined');
+
+  // Minimal HTML-table parser standing in for the browser's DOMParser, mirroring
+  // tests/device.test.js's FakeDOMParser convention for the same legacy shape.
+  class FakeDOMParser {
+    parseFromString(html) {
+      const tbodyMatch = html.match(/<tbody>([\s\S]*?)<\/tbody>/);
+      const scope = tbodyMatch ? tbodyMatch[1] : html;
+      const rows = [...scope.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map(rm => {
+        const cells = [...rm[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(cm => ({ textContent: cm[1].trim() }));
+        return { querySelectorAll: sel => sel === 'td' ? cells : [] };
+      });
+      return { querySelectorAll: sel => sel === 'tbody tr' ? rows : [] };
+    }
+  }
+  const sandbox = { DOMParser: FakeDOMParser, console };
+  vm.createContext(sandbox);
+  vm.runInContext(`${fnSrc}\nthis._hwItemsForFormRestore = _hwItemsForFormRestore;`, sandbox);
+
+  // Newer memo: structured hwItems present -> used directly, legacy section ignored.
+  const withStructured = sandbox._hwItemsForFormRestore({
+    hwItems: [{ name: 'Dell Monitor', price: 12000, qty: 3 }],
+    sections: [{ title: 'รายการ Hardware', html: '<table><tbody><tr><td>1</td><td>Should Not Be Used</td><td>99</td><td>1</td></tr></tbody></table>' }],
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(withStructured)), [{ name: 'Dell Monitor', price: 12000, qty: 3 }]);
+
+  // Legacy/test memo: hwItems empty -> falls back to the HTML table, extracting name/price/qty.
+  const legacyOnly = sandbox._hwItemsForFormRestore({
+    hwItems: [],
+    sections: [{ title: 'รายการ Hardware', html:
+      '<table><thead><tr><th>#</th><th>ชื่ออุปกรณ์</th><th>ราคา/ชิ้น</th><th>จำนวน</th><th>รวม</th></tr></thead>' +
+      '<tbody><tr><td>1</td><td>Legacy Laptop</td><td>฿30,000</td><td>4</td><td>฿120,000</td></tr></tbody></table>' }],
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(legacyOnly)), [{ name: 'Legacy Laptop', price: 30000, qty: 4 }]);
+
+  // Neither structured hwItems nor a matching legacy section -> empty, no throw.
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox._hwItemsForFormRestore({ hwItems: [], sections: [] }))), []);
 });
 
 test('collectMemoData captures raw structured detail (hwItems, hwOwner, acctCols, acctRows, intNames, depItems) alongside the existing HTML sections', () => {

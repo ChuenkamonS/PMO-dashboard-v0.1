@@ -1391,6 +1391,36 @@ async function applyDraftEdit() {
   } catch(e) { console.error('applyDraftEdit error', e); }
 }
 
+// Final audit follow-up: Duplicate/Re-edit Hardware row restore. Prefers the
+// structured memo.hwItems array (newer memos, populated by collectMemoData()
+// since the "Memo Detail Restore" hotfix). Falls back to scraping the
+// printable "รายการ Hardware" HTML table for legacy/test memos that only have
+// hwItems empty/missing — mirrors views/device.js's own _hwLineItemsFromMemo()
+// legacy-scrape pattern, but kept independent (Create Memo form restore needs
+// price too, which the PO-creation helper does not; PO-creation logic itself
+// is untouched).
+function _hwItemsForFormRestore(memo) {
+  const structured = (memo.hwItems || [])
+    .map(it => ({ name: (it.name || '').trim(), price: it.price || 0, qty: it.qty || 0 }))
+    .filter(it => it.name && it.name !== '-');
+  if (structured.length) return structured;
+
+  const section = (memo.sections || []).find(s => s.title === 'รายการ Hardware');
+  if (!section || typeof DOMParser === 'undefined') return [];
+  const doc = new DOMParser().parseFromString(section.html, 'text/html');
+  const legacyItems = [];
+  doc.querySelectorAll('tbody tr').forEach(row => {
+    const cells = row.querySelectorAll('td');
+    if (cells.length < 4) return;
+    const name  = cells[1]?.textContent?.trim();
+    const price = parseFloat(String(cells[2]?.textContent || '').replace(/[^0-9.]/g, '')) || 0;
+    const qty   = parseInt(cells[3]?.textContent, 10) || 1;
+    if (!name || name === '-') return;
+    legacyItems.push({ name, price, qty });
+  });
+  return legacyItems;
+}
+
 // ── Restore memo-type-specific detail sections from a saved/duplicated memo ──
 // Runs after the type button + header/approver fields are populated above.
 function populateMemoTypeDetail(memo) {
@@ -1439,11 +1469,12 @@ function populateMemoTypeDetail(memo) {
 
   if (memo.type === 'hw') {
     const hwRowsC = document.getElementById('hw-rows');
-    if (hwRowsC && (memo.hwItems||[]).length) {
+    const hwItems = _hwItemsForFormRestore(memo);
+    if (hwRowsC && hwItems.length) {
       hwRowsC.innerHTML = '';
-      memo.hwItems.forEach(() => addHWRow());
+      hwItems.forEach(() => addHWRow());
       const rowEls = hwRowsC.querySelectorAll('.item-row');
-      memo.hwItems.forEach((item, i) => {
+      hwItems.forEach((item, i) => {
         const row = rowEls[i];
         if (!row) return;
         const inputs = row.querySelectorAll('input');

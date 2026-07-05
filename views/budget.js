@@ -1354,6 +1354,7 @@ function _renderForecastTable() {
   thead.innerHTML = `<tr>
     <th style="${thS};text-align:left;min-width:90px">Project</th>
     <th style="${thS};text-align:left;min-width:80px">Program</th>
+    <th style="${thS};text-align:left;min-width:70px">Plan</th>
     <th style="${thS};text-align:center;min-width:60px">Type</th>
     ${months.map(m => `<th style="${m.kind === 'forecast' ? thFS : thS}">${esc(monthLbl(m))}${m.kind === 'forecast' ? '<br><span style="font-size:9px;opacity:.7">F</span>' : ''}</th>`).join('')}
     <th style="${thS};color:var(--blue)">Total</th>
@@ -1380,6 +1381,7 @@ function _renderForecastTable() {
       rows += `<tr>
         <td style="${tdS};text-align:left;font-weight:500">${esc(proj)}</td>
         <td style="${tdS};text-align:left">${esc(row.program)}</td>
+        <td style="${tdS};text-align:left">${esc(row.plan || '—')}</td>
         <td style="${tdS};text-align:center"><span style="font-size:10px;background:${row.spendType === 'Infra' ? '#FAEEDA' : '#E6F1FB'};color:${row.spendType === 'Infra' ? '#633806' : '#0C447C'};padding:1px 6px;border-radius:3px">${esc(row.spendType)}</span></td>
         ${cells}
         <td style="${tdS};font-weight:600;color:var(--blue)">${money(Math.round(rowTotal))}</td>
@@ -1388,15 +1390,15 @@ function _renderForecastTable() {
 
     // Subtotal row
     rows += `<tr style="background:var(--bg)">
-      <td style="${subS};text-align:left" colspan="2">${esc(proj)} — Subtotal</td>
+      <td style="${subS};text-align:left" colspan="3">${esc(proj)} — Subtotal</td>
       <td style="${subS}"></td>
       ${projMonthTotals.map((v, mi) => `<td style="${months[mi].kind === 'forecast' ? subFS : subS}">${money(Math.round(v))}</td>`).join('')}
       <td style="${subS};color:var(--blue)">${money(Math.round(projTotal))}</td>
     </tr>
-    <tr style="height:6px"><td colspan="${months.length+4}" style="background:var(--color-background-tertiary,#F4F3EF)"></td></tr>`;
+    <tr style="height:6px"><td colspan="${months.length+5}" style="background:var(--color-background-tertiary,#F4F3EF)"></td></tr>`;
   });
 
-  body.innerHTML = rows || `<tr><td colspan="${months.length+4}" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล</td></tr>`;
+  body.innerHTML = rows || `<tr><td colspan="${months.length+5}" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล</td></tr>`;
 }
 
 function exportForecastCSV() {

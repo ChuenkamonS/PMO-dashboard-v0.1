@@ -639,3 +639,198 @@ test('markArrived still works normally for a PO whose source memo is completed (
   assert.equal(po.arrivedQty, 1);
   assert.equal(context.loadDevices().filter(d => d.memoNo === 'HW-961').length, 1);
 });
+
+// ══════════════════════════════════════════════════════════════════
+// Final Audit Follow-up — Device Registry source memo linkage
+// ══════════════════════════════════════════════════════════════════
+
+test('openDeviceModal() makes Link HW Memo read-only and shows View Source Memo for a device created from a PO/Hardware Memo (source: "memo")', () => {
+  const { context } = createDeviceContext();
+  context.storeDevices([{ id: 'dev-990', name: 'iPhone 13', memoNo: 'HW-990', source: 'memo', status: 'available', auditLog: [] }]);
+  context.openDeviceModal('dev-990');
+  const memoInput = context.document.getElementById('dev-memo-ref');
+  const viewBtn = context.document.getElementById('dev-view-source-memo-btn');
+  assert.equal(memoInput.readOnly, true);
+  assert.equal(viewBtn.style.display, '');
+  assert.equal(viewBtn.dataset.memoNo, 'HW-990');
+});
+
+test('openDeviceModal() keeps Link HW Memo editable for a manually-added device and hides View Source Memo', () => {
+  const { context } = createDeviceContext();
+  context.storeDevices([{ id: 'dev-991', name: 'iPad', memoNo: 'HW-991', source: 'manual', status: 'available', auditLog: [] }]);
+  context.openDeviceModal('dev-991');
+  const memoInput = context.document.getElementById('dev-memo-ref');
+  const viewBtn = context.document.getElementById('dev-view-source-memo-btn');
+  assert.equal(memoInput.readOnly, false);
+  assert.equal(viewBtn.style.display, 'none');
+});
+
+test('opening Add Device (no id) resets Link HW Memo to editable and hides View Source Memo, even right after a prior memo-sourced Edit', () => {
+  const { context } = createDeviceContext();
+  context.storeDevices([{ id: 'dev-993', name: 'iPhone 13', memoNo: 'HW-993', source: 'memo', status: 'available', auditLog: [] }]);
+  context.openDeviceModal('dev-993'); // leaves memo-ref read-only
+  context.openDeviceModal(); // Add Device
+  const memoInput = context.document.getElementById('dev-memo-ref');
+  const viewBtn = context.document.getElementById('dev-view-source-memo-btn');
+  assert.equal(memoInput.readOnly, false);
+  assert.equal(viewBtn.style.display, 'none');
+});
+
+test('saveDevice() preserves source across an edit, so a memo-sourced device does not silently become "manual" and lose its read-only guard', () => {
+  const { context } = createDeviceContext();
+  context.storeDevices([{ id: 'dev-992', name: 'iPhone 13', memoNo: 'HW-992', source: 'memo', status: 'available', auditLog: [] }]);
+  context.openDeviceModal('dev-992');
+  context.saveDevice(); // routine re-save (no field changes) must not flip source to 'manual'
+  const device = context.loadDevices().find(d => d.id === 'dev-992');
+  assert.equal(device.source, 'memo');
+  assert.equal(device.memoNo, 'HW-992');
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Final Audit Follow-up — Voided Hardware Memo downstream PO handling
+// ══════════════════════════════════════════════════════════════════
+
+test('voidMemoAsync marks the related Purchase Order as voided_source (never deletes it) and records the void reason on the PO audit trail', async () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = [${JSON.stringify({
+    memoNo: 'HW-970', type: 'hw', status: 'completed',
+    requesterProfileId: 3, requesterName: 'PMO Admin', approvers: [], auditLog: [],
+  })}]`, context);
+  context.storePurchaseOrders([{ id: 'po-970', memoNo: 'HW-970', itemName: 'Laptop', orderedQty: 2, arrivedQty: 0, status: 'awaiting', auditLog: [] }]);
+
+  const result = await context.voidMemoAsync('HW-970', 'wrong vendor pricing');
+  assert.equal(result.ok, true);
+
+  const pos = context.loadPurchaseOrders();
+  assert.equal(pos.length, 1, 'PO must be preserved, never deleted');
+  const po = pos[0];
+  assert.equal(po.status, 'voided_source');
+  const entry = po.auditLog.at(-1);
+  assert.equal(entry.action, 'Voided (source memo voided)');
+  assert.equal(entry.comment, 'wrong vendor pricing');
+  assert.equal(entry.statusBefore, 'awaiting');
+  assert.equal(entry.statusAfter, 'voided_source');
+});
+
+test('voidMemoAsync cascades to every open PO for the memo, leaving an unrelated memo\'s fulfilled PO untouched', async () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = [${JSON.stringify({
+    memoNo: 'HW-971', type: 'hw', status: 'completed',
+    requesterProfileId: 3, requesterName: 'PMO Admin', approvers: [], auditLog: [],
+  })}]`, context);
+  context.storePurchaseOrders([
+    { id: 'po-971a', memoNo: 'HW-971', itemName: 'Laptop', orderedQty: 2, arrivedQty: 0, status: 'pending_order', auditLog: [] },
+    { id: 'po-971b', memoNo: 'HW-971', itemName: 'Monitor', orderedQty: 1, arrivedQty: 0, status: 'ordered', auditLog: [] },
+    { id: 'po-other', memoNo: 'HW-999', itemName: 'Keyboard', orderedQty: 1, arrivedQty: 1, status: 'fulfilled', auditLog: [] },
+  ]);
+
+  await context.voidMemoAsync('HW-971', 'duplicate request');
+
+  const pos = context.loadPurchaseOrders();
+  assert.equal(pos.find(p => p.id === 'po-971a').status, 'voided_source');
+  assert.equal(pos.find(p => p.id === 'po-971b').status, 'voided_source');
+  assert.equal(pos.find(p => p.id === 'po-other').status, 'fulfilled', "an unrelated memo's PO must not be touched");
+});
+
+test('markArrived remains blocked for a PO already flagged voided_source by the void cascade', async () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = [${JSON.stringify({
+    memoNo: 'HW-972', type: 'hw', status: 'voided', voidedAt: '2026-07-05T00:00:00.000Z', voidedBy: 'PMO Admin',
+  })}]`, context);
+  context.storePurchaseOrders([{ id: 'po-972', memoNo: 'HW-972', itemName: 'Laptop', orderedQty: 1, arrivedQty: 0, status: 'voided_source', auditLog: [] }]);
+  await context.markArrived('po-972', 1, ['SN1']);
+  const po = context.loadPurchaseOrders().find(p => p.id === 'po-972');
+  assert.equal(po.arrivedQty, 0);
+  assert.equal(context.loadDevices().filter(d => d.memoNo === 'HW-972').length, 0);
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Final Audit Follow-up (round 2) — Hardware memo Void rule clarification
+// ══════════════════════════════════════════════════════════════════
+
+test('Void rule: a Partial Arrival (partial_arrived PO) implies real Device Registry records, so Void must be blocked end-to-end', async () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = [${JSON.stringify({
+    memoNo: 'HW-980', type: 'hw', status: 'completed',
+    requesterProfileId: 3, requesterName: 'PMO Admin', approvers: [], auditLog: [],
+  })}]`, context);
+  context.storePurchaseOrders([{ id: 'po-980', memoNo: 'HW-980', itemName: 'Laptop', orderedQty: 5, arrivedQty: 0, status: 'awaiting', auditLog: [] }]);
+
+  await context.markArrived('po-980', 3, ['SN1', 'SN2', 'SN3']); // 3 of 5 arrive -> partial_arrived + 3 device records
+  const po = context.loadPurchaseOrders().find(p => p.id === 'po-980');
+  assert.equal(po.status, 'partial_arrived');
+  assert.equal(context.loadDevices().filter(d => d.memoNo === 'HW-980').length, 3);
+
+  const result = await context.voidMemoAsync('HW-980', 'reason');
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'downstream_blocked');
+  assert.equal(context.loadPurchaseOrders().find(p => p.id === 'po-980').status, 'partial_arrived', 'a blocked void must not cascade/alter the PO');
+});
+
+test('Void rule: a fully Fulfilled PO implies real Device Registry records, so Void must be blocked end-to-end', async () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = [${JSON.stringify({
+    memoNo: 'HW-981', type: 'hw', status: 'completed',
+    requesterProfileId: 3, requesterName: 'PMO Admin', approvers: [], auditLog: [],
+  })}]`, context);
+  context.storePurchaseOrders([{ id: 'po-981', memoNo: 'HW-981', itemName: 'Monitor', orderedQty: 2, arrivedQty: 0, status: 'awaiting', auditLog: [] }]);
+
+  await context.markArrived('po-981', 2, ['SN1', 'SN2']); // full arrival -> fulfilled + 2 device records
+  assert.equal(context.loadPurchaseOrders().find(p => p.id === 'po-981').status, 'fulfilled');
+
+  const result = await context.voidMemoAsync('HW-981', 'reason');
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'downstream_blocked');
+  assert.equal(context.loadPurchaseOrders().find(p => p.id === 'po-981').status, 'fulfilled', 'a blocked void must not cascade/alter the PO');
+});
+
+test('Void rule: PO-only downstream (no arrivals yet) never blocks Void, and the PO itself cascades to voided_source — the "usually blocked" cases above are specifically about device arrival, not PO existence', async () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = [${JSON.stringify({
+    memoNo: 'HW-982', type: 'hw', status: 'completed',
+    requesterProfileId: 3, requesterName: 'PMO Admin', approvers: [], auditLog: [],
+  })}]`, context);
+  context.storePurchaseOrders([{ id: 'po-982', memoNo: 'HW-982', itemName: 'Laptop', orderedQty: 3, arrivedQty: 0, status: 'ordered', auditLog: [] }]);
+
+  const result = await context.voidMemoAsync('HW-982', 'reason');
+  assert.equal(result.ok, true, 'a PO with zero arrivals must never block Void');
+  assert.equal(context.loadPurchaseOrders().find(p => p.id === 'po-982').status, 'voided_source');
+});
+
+test('Void rule: once the only device(s) tied to a memo are soft-deleted, Void is allowed again (soft-deleted devices never block Void)', async () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = [${JSON.stringify({
+    memoNo: 'HW-983', type: 'hw', status: 'completed',
+    requesterProfileId: 3, requesterName: 'PMO Admin', approvers: [], auditLog: [],
+  })}]`, context);
+  context.storePurchaseOrders([{ id: 'po-983', memoNo: 'HW-983', itemName: 'Tablet', orderedQty: 1, arrivedQty: 0, status: 'awaiting', auditLog: [] }]);
+
+  await context.markArrived('po-983', 1, ['SN1']);
+  const device = context.loadDevices().find(d => d.memoNo === 'HW-983');
+  assert.ok(device, 'sanity check: arrival created a real device record');
+
+  // Still blocked while the device is active.
+  let result = await context.voidMemoAsync('HW-983', 'reason');
+  assert.equal(result.ok, false);
+
+  await context.deleteDeviceAsync(device.id); // soft delete — the only real downstream record
+
+  result = await context.voidMemoAsync('HW-983', 'reason');
+  assert.equal(result.ok, true, 'a memo whose only device record is soft-deleted must be voidable');
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Final Audit Follow-up (round 2) — Device Detail -> Edit modal stacking
+// ══════════════════════════════════════════════════════════════════
+
+test('Device Detail "Edit" button closes the Detail modal before opening Edit Device, so Edit Device renders on top instead of behind it', () => {
+  const { context } = createDeviceContext();
+  context.storeDevices([{ id: 'dev-994', name: 'Detail Stack Test', status: 'available', auditLog: [] }]);
+  context.openDeviceDetail('dev-994');
+  const panelHtml = context.document.getElementById('dev-detail-modal').innerHTML;
+  assert.match(
+    panelHtml,
+    /onclick="document\.getElementById\('dev-detail-modal'\)\.style\.display='none';openDeviceModal\('dev-994'\)"/,
+    'Edit button must close the Detail modal (dev-detail-modal) before opening Edit Device (openDeviceModal)'
+  );
+});

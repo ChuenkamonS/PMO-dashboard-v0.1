@@ -2259,7 +2259,12 @@ svg.icon { display: inline-block; vertical-align: middle; }
       <div class="fg"><label>QA Owner</label><input type="text" id="dev-qa-owner" placeholder="เช่น Best IT"></div>
       <div class="fg"><label>วันที่รับอุปกรณ์</label><input type="date" id="dev-assigned-date"></div>
       <div class="fg"><label>Return Date</label><input type="date" id="dev-return-date"></div>
-      <div class="fg"><label>Link HW Memo</label><input type="text" id="dev-memo-ref" placeholder="เช่น ORB-2605-004"></div>
+      <div class="fg"><label>Link HW Memo</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="text" id="dev-memo-ref" placeholder="เช่น ORB-2605-004" style="flex:1">
+          <button type="button" id="dev-view-source-memo-btn" class="btn-sm" style="display:none;white-space:nowrap" onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly(this.dataset.memoNo)">View Source Memo</button>
+        </div>
+      </div>
     </div>
     <div class="form-grid" style="margin-bottom:10px">
       <div class="fg"><label>Warranty Expiry</label><input type="date" id="dev-warranty"></div>
