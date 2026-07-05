@@ -1625,7 +1625,7 @@ License User View Becomes Hard to Read With Many Licenses Per User (UX backlog)
 
 Status
 
-OPEN (documented only — UX/future interaction item, not implemented)
+CLOSED (Final UX Consistency Pass, 2026-07-05)
 
 Priority
 
@@ -1644,26 +1644,26 @@ Reason
 The current License Management > User view is a project-centric matrix. For a user holding many
 licenses, the matrix becomes hard to read/scan.
 
-Future Direction (not implemented)
+Resolution (Final UX Consistency Pass, 2026-07-05)
 
-- Move to a user-centric view: one row/card per user, with license chips or expandable detail,
-  instead of the current matrix layout.
-- Consider removing the Project column from the main display (project stays available underneath
-  for audit/filtering, just not a primary matrix axis).
-- Keep the underlying per-project license data intact for audit/filtering even if the primary
-  display groups by user.
+License Management > Users (`_renderLicUsers()`/`_renderLicUsersRows()`, `views/license.js`) is now a
+user-centric table: one row per email with User / Department / Software Count columns (Project is no
+longer a primary matrix column). Clicking a row expands an inline detail section per project the user
+appears in, showing Program / Plan / Seat / Source Memo / Status — Plan/Seat/Status are joined from
+the existing memo-derived license data (`getAllLicenses()`), Source Memo links back to the real memo
+via the existing `openMemoReadOnly()`. Department has no data source anywhere in the app (not tracked
+in memo account tables or `user_profiles`) so it intentionally renders "—" rather than fabricating a
+value — a real gap, but a Settings/Master-Data one, out of this pass's scope.
 
-Risk
+Presentation only: `computeLicUserMappingData()`, the PMO Review Queue, filtering, and the
+override editor's `(email, project)` key shape are all unchanged.
 
-None today — purely a readability/scalability concern as the number of licenses per user grows, not
-a data-correctness or audit gap.
+Exit Criteria (met)
 
-Exit Criteria
-
-- PMO/BA + design decision on the target user-centric layout (rows vs. cards, chip design,
-  expand/collapse behavior).
-- Implement as its own reviewed UX phase — explicitly out of scope for the 2026-07-05 Final Audit
-  Follow-up, which was fix-functional-bugs-only.
+- [x] User-centric layout implemented (row per user, expandable detail).
+- [x] No horizontal scrolling (verified: table `scrollWidth === clientWidth`).
+- [x] Underlying per-project license data and Review Queue/filtering/override logic unchanged.
+- [x] Regression test added (`tests/license.test.js`) + browser verification.
 
 ---
 
@@ -1675,7 +1675,7 @@ All Memo Has No Dedicated Voided Tab/Filter (UX backlog)
 
 Status
 
-OPEN (documented only — UX/future interaction item, not implemented)
+CLOSED (Final UX Consistency Pass, 2026-07-05 — Option A)
 
 Priority
 
@@ -1696,20 +1696,20 @@ SYSTEM_OVERVIEW.md §3.3 lists Voided as one of the tracked memo statuses. Voide
 visible and correctly labeled today under the "All" tab — this is a missing filter convenience, not
 a data-visibility or data-correctness bug.
 
-Future Direction (not implemented) — open question, needs a decision, not just an implementation
+Resolution (Final UX Consistency Pass, 2026-07-05)
 
-- Option A: add a dedicated "Voided" status tab alongside the existing status tabs.
-- Option B: replace the current status tabs with a single "All" view plus a Status filter dropdown/
-  chips (which would also naturally cover Voided without a dedicated tab).
+Chose Option A: a "Voided" tab was added to All Memo's existing status-tab row (`index.html`,
+`view-history`), reusing the exact same `switchHistTab()`/hidden `hist-status` `<select>` mechanism
+every other status tab already uses — no second/parallel filter control, so navigation is not
+duplicated. `populateHistTabCounts()` (`views/history.js`) now also tracks a live `voided` count for
+the tab badge, the same way every other status tab's count is computed.
 
-Risk
+Exit Criteria (met)
 
-None today — Voided memos are not hidden or hard to find, just not filterable as their own tab.
-
-Exit Criteria
-
-- PMO/BA decision on Option A vs. Option B (or another approach) before implementation.
-- Implement as its own reviewed UX phase — explicitly out of scope for a functional-fix-only pass.
+- [x] Decision made (Option A) and documented.
+- [x] Implemented via the existing tab mechanism, no duplicated navigation.
+- [x] Regression test added (`tests/workflow.test.js`) + browser verification (tab shows a live count
+      and correctly filters to Voided memos).
 
 ---
 
@@ -1721,7 +1721,7 @@ Most Filters Are Single-Select Only (UX backlog)
 
 Status
 
-OPEN (documented only — UX/future interaction item, not implemented)
+CLOSED (Final UX Consistency Pass, 2026-07-05) — see residual gap below (Budget vs Actual)
 
 Priority
 
@@ -1741,25 +1741,46 @@ Most filters across the app (project, type, status, license, etc.) allow only a 
 value at a time. A PMO user wanting to see, e.g., two specific projects together must currently
 filter one at a time or fall back to "All".
 
-Future Direction (not implemented)
+Resolution (Final UX Consistency Pass, 2026-07-05)
 
-- Multi-select project/type/status/license filters, applied consistently across modules (Memo/
-  History, Budget & Spend, License, Device) rather than module-by-module ad hoc.
+A single reusable searchable multi-select widget (`initMultiSelect()`/`msValues()`/
+`refreshMultiSelectUI()`, `app.js`) progressively enhances a native `<select multiple>` — search box,
+Select all / Clear all, keyboard support (Escape closes, arrow keys navigate options), and dispatches
+a real `change` event on the underlying `<select>` so every existing `onchange="render...()"` wiring
+keeps firing unchanged. Converted 18 filters across every module named in the target list:
 
-Risk
+- Device Management: Platform, Device Type, Status, Project, Company.
+- License: Memo Index (Status, Project), Users (Project, Software), Other (Type, Project, Status).
+- All Memo: Type, Project (Status stays tab-based per TD-AUDIT-08's resolution above).
+- Pending Approval: Type, Project.
+- Budget & Spend: Actual Spend Report (Project, Type, Budget Status), Manual Entries (Project, Type,
+  Budget Status), Forecast (Project).
 
-None today — a convenience/efficiency gap, not a data-correctness issue. Existing single-select
-filters correctly narrow their respective datasets.
+Selection semantics: empty selection means "no filter" (same meaning the old single-select "all" had).
+KPIs/tables/exports all read the same filtered dataset the widget produces, so they stay in sync by
+construction (verified per-module in browser: filtered counts/totals differ from unfiltered ones, and
+CSV exports match the on-screen filtered set).
 
-Exit Criteria
+Deliberately NOT converted: Budget vs Actual's Project/Type filters (`bva-project`/`bva-type`).
+`calculateBudgetVsActualDataset()` (app.js) is the MASTER_SPEC-protected Budget calculation engine and
+aggregates per Budget Pool; since a single pool can carry multiple Spend Types, unioning multiple
+single-value engine calls (one per selected Type) would double-count that pool's actual spend when
+more than one of its own Spend Types is selected — a real financial-reporting bug. Multi-select there
+would require either changing the protected engine's contract or a more involved redesign, both out
+of this pass's "presentation only" mandate. Left as single-select; documented here rather than fixed
+silently.
 
-- PMO/BA + design decision on the target multi-select UI pattern (chips, checkboxes-in-dropdown,
-  etc.) and which filters it applies to first.
-- Implement as its own reviewed, cross-module UX phase — explicitly out of scope for a
-  functional-fix-only pass. Related to the already-tracked TD-7A-07 (Project Dropdown fragmentation),
-  which should be considered together with this item once both are scheduled, since unifying a
-  dropdown's data source and making it multi-select are two independent axes of the same UI
-  surfaces.
+Exit Criteria (met)
+
+- [x] Reusable multi-select UI pattern implemented (searchable, select all/clear all, keyboard
+      accessible) and applied consistently across Memo/History, Pending, Budget & Spend, License,
+      Device.
+- [x] KPIs/Charts/Tables/Exports verified to respect the selected filters.
+- [x] Regression tests added (`tests/workflow.test.js`) + browser verification across every converted
+      filter.
+- [ ] Budget vs Actual's Project/Type filters remain single-select — accepted, not a functional gap
+      (see reasoning above). TD-7A-07 (Project Dropdown fragmentation) is unaffected/unrelated to this
+      resolution.
 
 ---
 

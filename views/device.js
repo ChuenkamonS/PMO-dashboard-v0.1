@@ -714,6 +714,11 @@ async function importDeviceBulk(file) {
 }
 
 function renderDevice() {
+  // Part 8 (UX consistency pass) — Platform/Type/Status/Project/Company are
+  // now multi-select filters; initMultiSelect() is idempotent (no-op past
+  // the first call) so it's safe to call on every render.
+  ['dev-filter-platform','dev-filter-type','dev-filter-status','dev-filter-project','dev-filter-company']
+    .forEach(id => initMultiSelect(id));
   // Load fresh from Supabase then render
   loadDevicesAsync().then(() => _renderDeviceTable()).catch(() => _renderDeviceTable());
 }
@@ -723,20 +728,23 @@ function renderDevice() {
 // previously only inlined inside _renderDeviceTable(), so Export CSV
 // (exportDeviceCsv()) always read the full unfiltered list, disagreeing with
 // what was on screen (MASTER_SPEC.md "Export Rules"). Reused by both.
+// Part 8 (UX consistency pass): each dropdown is now multi-select — an empty
+// selection means "no filter" (matches the old single-select "all"), a
+// non-empty selection matches any of the checked values.
 function _filteredDevices(allDevices) {
   const search     = (document.getElementById('dev-search')?.value||'').toLowerCase();
-  const platFilter = val('#dev-filter-platform') || 'all';
-  const typeFilter = val('#dev-filter-type')     || 'all';
-  const statFilter = val('#dev-filter-status')   || 'all';
-  const projFilter = val('#dev-filter-project')  || 'all';
-  const compFilter = val('#dev-filter-company')  || 'all';
+  const platFilter = msValues('dev-filter-platform');
+  const typeFilter = msValues('dev-filter-type');
+  const statFilter = msValues('dev-filter-status');
+  const projFilter = msValues('dev-filter-project');
+  const compFilter = msValues('dev-filter-company');
 
   let devices = allDevices;
-  if(platFilter !== 'all') devices = devices.filter(d => (d.platform||'other') === platFilter);
-  if(typeFilter !== 'all') devices = devices.filter(d => (d.type||'other') === typeFilter);
-  if(statFilter !== 'all') devices = devices.filter(d => d.status === statFilter);
-  if(projFilter !== 'all') devices = devices.filter(d => d.project === projFilter);
-  if(compFilter !== 'all') devices = devices.filter(d => d.company === compFilter);
+  if(platFilter.length) devices = devices.filter(d => platFilter.includes(d.platform||'other'));
+  if(typeFilter.length) devices = devices.filter(d => typeFilter.includes(d.type||'other'));
+  if(statFilter.length) devices = devices.filter(d => statFilter.includes(d.status));
+  if(projFilter.length) devices = devices.filter(d => projFilter.includes(d.project));
+  if(compFilter.length) devices = devices.filter(d => compFilter.includes(d.company));
   if(search) devices = devices.filter(d => [
     d.name, d.brand, d.serial, d.assetTag, d.pbxNumber,
     d.owner, d.position, d.project, d.company, d.osVersion,
@@ -776,11 +784,11 @@ function _renderDeviceTable() {
   // Reset visible count when filters change
   const filterKey = JSON.stringify({
     search,
-    platFilter: val('#dev-filter-platform') || 'all',
-    typeFilter: val('#dev-filter-type')     || 'all',
-    statFilter: val('#dev-filter-status')   || 'all',
-    projFilter: val('#dev-filter-project')  || 'all',
-    compFilter: val('#dev-filter-company')  || 'all',
+    platFilter: msValues('dev-filter-platform'),
+    typeFilter: msValues('dev-filter-type'),
+    statFilter: msValues('dev-filter-status'),
+    projFilter: msValues('dev-filter-project'),
+    compFilter: msValues('dev-filter-company'),
   });
   if(typeof _devLastFilter !== 'undefined' && _devLastFilter !== filterKey) _devVisibleCount = DEV_PAGE_SIZE;
   window._devLastFilter = filterKey;
@@ -816,8 +824,8 @@ function _renderDeviceTable() {
       <td style="text-align:center"><span class="badge ${statusB.cls}" style="font-size:10px">${esc(statusB.label)}</span></td>
       <td style="font-size:11px;color:var(--text-3)">${updDate}</td>
       <td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">
-        <button class="btn-sm" onclick="event.stopPropagation();openDeviceModal('${esc(String(d.id))}')" style="padding:3px 7px;font-size:11px">✎</button>
-        <button class="btn-sm" onclick="event.stopPropagation();deleteDevice('${esc(String(d.id))}')" style="padding:3px 7px;font-size:11px;color:var(--red)">✕</button>
+        <button class="btn-sm" onclick="event.stopPropagation();openDeviceModal('${esc(String(d.id))}')" style="padding:3px 7px;font-size:11px" title="แก้ไข">✎</button>
+        <button class="btn-sm" onclick="event.stopPropagation();deleteDevice('${esc(String(d.id))}')" style="padding:3px 7px;font-size:11px;color:var(--red)" title="ลบ">✕</button>
       </td>
     </tr>`;
   }).join('');
@@ -1247,15 +1255,29 @@ const PO_STATUS_BADGE = {
   // Voided Hardware Memo downstream PO handling: terminal status applied when
   // the PO's source memo is voided before any devices have arrived. Never
   // deleted — kept visible for audit, same as a Voided memo itself.
-  voided_source:  `<span style="font-size:10px;background:#F6E4E1;color:#7A2E20;padding:2px 8px;border-radius:100px">Voided (source memo)</span>`,
+  voided_source:  `<span style="font-size:10px;background:#F6E4E1;color:#7A2E20;padding:2px 8px;border-radius:100px">Voided</span>`,
 };
 
-// Reason recorded on a PO's own audit trail when its source memo was voided —
-// read back for display (e.g. a tooltip) without needing a dedicated column.
+// Reason + timestamp recorded on a PO's own audit trail when its source memo
+// was voided — read back to build the "Voided" badge tooltip without needing
+// a dedicated column.
+function poVoidAuditEntry(po) {
+  if (po.status !== 'voided_source' || !Array.isArray(po.auditLog)) return null;
+  return [...po.auditLog].reverse().find(e => e.action === 'Voided (source memo voided)') || null;
+}
 function poVoidReason(po) {
-  if (po.status !== 'voided_source' || !Array.isArray(po.auditLog)) return '';
-  const entry = [...po.auditLog].reverse().find(e => e.action === 'Voided (source memo voided)');
-  return entry?.comment || '';
+  return poVoidAuditEntry(po)?.comment || '';
+}
+// Full tooltip text for a voided-source PO's status badge (Part 2, UX
+// consistency pass): explains why every action is hidden and cannot be
+// resumed, without needing a dedicated detail view.
+function poVoidTooltip(po) {
+  const entry = poVoidAuditEntry(po);
+  if (!entry) return '';
+  const lines = ['Source memo was voided', ''];
+  lines.push('Reason:', entry.comment || '—', '');
+  lines.push('Date:', entry.timestamp ? shortDate(entry.timestamp) : '—');
+  return lines.join('\n');
 }
 
 // Voided Hardware Memo downstream PO handling: mark every PO tied to the
@@ -1340,7 +1362,7 @@ function _renderPOTable() {
   tbody.innerHTML = sorted.map(po => {
     const pct = po.orderedQty > 0 ? Math.round(po.arrivedQty / po.orderedQty * 100) : 0;
     const barColor = pct >= 100 ? '#3B6D11' : '#185FA5';
-    const voidReason = poVoidReason(po);
+    const voidTooltip = poVoidTooltip(po);
     return `<tr style="${po.status==='fulfilled'||po.status==='voided_source'?'opacity:0.7':''}">
       <td style="color:#185FA5;font-weight:500;cursor:pointer;padding:9px 12px" onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly('${esc(po.memoNo)}')">${esc(po.memoNo)}</td>
       <td style="padding:9px 12px;font-size:12px">${esc(po.itemName)}</td>
@@ -1355,7 +1377,7 @@ function _renderPOTable() {
           <span style="font-size:10px;color:var(--text-3)">${po.arrivedQty}/${po.orderedQty}</span>
         </div>
       </td>
-      <td style="padding:9px 12px"${voidReason ? ` title="${esc(voidReason)}"` : ''}>${PO_STATUS_BADGE[po.status]||`<span style="font-size:10px;background:#F1EFE8;color:#444441;padding:2px 8px;border-radius:100px">${esc(po.status)}</span>`}</td>
+      <td style="padding:9px 12px"${voidTooltip ? ` title="${esc(voidTooltip)}"` : ''}>${PO_STATUS_BADGE[po.status]||`<span style="font-size:10px;background:#F1EFE8;color:#444441;padding:2px 8px;border-radius:100px">${esc(po.status)}</span>`}</td>
       <td style="padding:9px 12px;white-space:nowrap">${poActionBtn(po)}</td>
     </tr>`;
   }).join('');

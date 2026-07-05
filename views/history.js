@@ -128,6 +128,7 @@ function populateHistTabCounts() {
     completed: all.filter(m => m.status === 'completed').length,
     rejected:  all.filter(m => m.status === 'rejected').length,
     cancelled: all.filter(m => m.status === 'cancelled').length,
+    voided:    all.filter(m => m.status === 'voided').length,
   };
   document.querySelectorAll('.hist-tab-btn').forEach(btn => {
     const countEl = btn.querySelector('.hist-tab-count');
@@ -139,8 +140,8 @@ function populateHistTabCounts() {
 
 function filteredHistoryMemos() {
   const status = val('#hist-status') || 'all';
-  const type = val('#hist-type') || 'all';
-  const project = val('#hist-project') || 'all';
+  const type = msValues('hist-type');
+  const project = msValues('hist-project');
   const range = val('#hist-range') || 'month';
   const search = (val('#hist-search') || '').toLowerCase().trim();
   const requester = val('#hist-requester') || 'all';
@@ -155,8 +156,8 @@ function filteredHistoryMemos() {
   let memos = getHistoryMemos().filter(memo => {
     const sk = memoStatusKey(memo);
     if (status !== 'all' && sk !== status) return false;
-    if (type !== 'all' && memo.type !== type) return false;
-    if (project !== 'all' && memo.project !== project) return false;
+    if (type.length && !type.includes(memo.type)) return false;
+    if (project.length && !project.includes(memo.project)) return false;
     if (!useCustomDates && !histInPresetRange(memo, range)) return false;
     if (useCustomDates && !histInDateRange(memo, dateFrom, dateTo)) return false;
     if (!histMatchesAmount(memo, amtPreset, amtMin, amtMax)) return false;
@@ -200,7 +201,15 @@ function populateHistFilterOptions() {
   };
   fill('hist-requester', requesters);
   fill('hist-approver', approvers);
-  fill('hist-project', projects);
+
+  // Project is a multi-select filter (Part 8, UX consistency pass).
+  const projSel = document.getElementById('hist-project');
+  if (projSel) {
+    const curSelected = msValues('hist-project');
+    projSel.innerHTML = projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+    Array.from(projSel.options).forEach(o => { if (curSelected.includes(o.value)) o.selected = true; });
+    refreshMultiSelectUI('hist-project');
+  }
 }
 
 function toggleHistFilters() {
@@ -1019,6 +1028,11 @@ function handleHistoryTableClick(e) {
 if (typeof window._histVisible === 'undefined') window._histVisible = 20;
 
 function renderHistoryMemos() {
+  // Part 8 (UX consistency pass) — Type/Project are multi-select filters.
+  // initMultiSelect() is idempotent, and must run before
+  // populateHistFilterOptions() populates hist-project's options.
+  initMultiSelect('hist-type', 'ทุกประเภท');
+  initMultiSelect('hist-project', 'ทั้งหมด');
   populateHistFilterOptions();
   populateHistTabCounts();
   const body = document.getElementById('history-body');

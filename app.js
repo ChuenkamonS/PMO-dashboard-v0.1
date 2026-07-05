@@ -1810,6 +1810,153 @@ const todayISO = bangkokTodayISO();
 // ── Shared utils ──
 function esc(v) { return String(v ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch])); }
 function val(sel, root=document) { return root.querySelector(sel)?.value?.trim() || ''; }
+
+// ── Multi-select filter widget (UX consistency pass, Part 8) ───────────────
+// Progressively enhances a native <select id="..."> into a searchable
+// checkbox dropdown (Select all / Clear all, keyboard accessible) while the
+// hidden native <select multiple> stays the single source of truth for
+// selected values. Toggling a checkbox dispatches a real 'change' event on
+// that same <select>, so every existing onchange="render...()" wiring on it
+// keeps firing completely unchanged — call sites only need to swap
+// val(id)/single-equality filtering for msValues(id)/.includes() filtering.
+//
+// Selection semantics: an empty selection (nothing checked) means "no
+// filter" (show everything) — the same meaning the old single-select "all"
+// option had. Selecting every individual option produces the same visible
+// result, which matches how most multi-select filter UIs behave (e.g. Jira,
+// Linear filter chips).
+function msValues(id) {
+  const el = document.getElementById(id);
+  if (!el) return [];
+  // Real <select multiple> in the browser exposes selectedOptions; simplified
+  // test-double DOM stubs (see tests/device.test.js) only implement a plain
+  // `.value` — fall back to that (single value, same as the old select)
+  // rather than silently reporting "no filter" in those environments.
+  if (el.selectedOptions) return Array.from(el.selectedOptions).map(o => o.value);
+  return el.value ? [el.value] : [];
+}
+
+function initMultiSelect(id, placeholder) {
+  const select = document.getElementById(id);
+  if (!select) return;
+  const alreadyMultiple = select.multiple;
+  select.multiple = true;
+  select.style.display = 'none';
+  // A plain (non-multiple) <select> always has its first <option> selected
+  // by default; that stale single-selection must not survive the upgrade to
+  // multi-select (it would show as an active filter nobody chose) — but only
+  // clear it the first time this select is enhanced, never on a later
+  // (idempotent) re-init call, or the user's own selection would be wiped
+  // out on every re-render.
+  if (!alreadyMultiple) Array.from(select.options).forEach(o => o.selected = false);
+  let wrap = document.querySelector(`[data-ms-for="${id}"]`);
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.className = 'ms-wrap';
+    wrap.dataset.msFor = id;
+    select.insertAdjacentElement('afterend', wrap);
+    wrap.innerHTML = `
+      <button type="button" class="ms-trigger" aria-haspopup="listbox" aria-expanded="false"></button>
+      <div class="ms-panel" role="listbox" aria-multiselectable="true" style="display:none">
+        <input type="text" class="ms-search" placeholder="ค้นหา...">
+        <div class="ms-actions">
+          <button type="button" class="ms-all">Select all</button>
+          <button type="button" class="ms-clear">Clear all</button>
+        </div>
+        <div class="ms-options"></div>
+      </div>`;
+    const trigger = wrap.querySelector('.ms-trigger');
+    const panel   = wrap.querySelector('.ms-panel');
+    const search  = wrap.querySelector('.ms-search');
+    const closeAllPanels = () => {
+      document.querySelectorAll('.ms-panel').forEach(p => p.style.display = 'none');
+      document.querySelectorAll('.ms-trigger').forEach(t => t.setAttribute('aria-expanded', 'false'));
+    };
+    trigger.addEventListener('click', e => {
+      e.stopPropagation();
+      const isOpen = panel.style.display !== 'none';
+      closeAllPanels();
+      panel.style.display = isOpen ? 'none' : 'block';
+      trigger.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+      if (!isOpen) { search.value = ''; _msFilterOptions(id); search.focus(); }
+    });
+    wrap.querySelector('.ms-all').addEventListener('click', e => {
+      e.stopPropagation();
+      Array.from(select.options).forEach(o => o.selected = true);
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      refreshMultiSelectUI(id);
+    });
+    wrap.querySelector('.ms-clear').addEventListener('click', e => {
+      e.stopPropagation();
+      Array.from(select.options).forEach(o => o.selected = false);
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      refreshMultiSelectUI(id);
+    });
+    search.addEventListener('input', () => _msFilterOptions(id));
+    search.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { panel.style.display = 'none'; trigger.setAttribute('aria-expanded','false'); trigger.focus(); }
+      if (e.key === 'ArrowDown') { e.preventDefault(); wrap.querySelector('.ms-option:not(.ms-hidden) input')?.focus(); }
+    });
+    panel.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { panel.style.display = 'none'; trigger.setAttribute('aria-expanded','false'); trigger.focus(); }
+    });
+    document.addEventListener('click', e => { if (!wrap.contains(e.target)) closeAllPanels(); });
+  }
+  wrap.dataset.msPlaceholder = placeholder || 'ทั้งหมด';
+  refreshMultiSelectUI(id);
+}
+
+function _msFilterOptions(id) {
+  const wrap = document.querySelector(`[data-ms-for="${id}"]`);
+  if (!wrap) return;
+  const q = (wrap.querySelector('.ms-search')?.value || '').toLowerCase();
+  wrap.querySelectorAll('.ms-option').forEach(row => {
+    const label = row.dataset.label || '';
+    row.classList.toggle('ms-hidden', !!q && !label.includes(q));
+  });
+}
+
+// Re-renders the checkbox list + trigger label from the hidden select's
+// current <option> list and selected state. Call this after any code
+// repopulates a multi-select-backed <select>'s options (e.g. a project list
+// derived from live data), so the visible widget stays in sync.
+function refreshMultiSelectUI(id) {
+  const select = document.getElementById(id);
+  const wrap = document.querySelector(`[data-ms-for="${id}"]`);
+  if (!select || !wrap) return;
+  const optionsBox = wrap.querySelector('.ms-options');
+  const selected = new Set(msValues(id));
+  const opts = Array.from(select.options);
+  optionsBox.innerHTML = opts.map((o, i) => `
+    <label class="ms-option" data-label="${esc(o.textContent.toLowerCase())}">
+      <input type="checkbox" data-idx="${i}"${selected.has(o.value) ? ' checked' : ''}>
+      <span>${esc(o.textContent)}</span>
+    </label>`).join('');
+  optionsBox.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      opts[Number(cb.dataset.idx)].selected = cb.checked;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      _msUpdateTriggerLabel(id);
+    });
+    cb.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); cb.closest('label').nextElementSibling?.querySelector('input')?.focus(); }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); cb.closest('label').previousElementSibling?.querySelector('input')?.focus(); }
+    });
+  });
+  _msUpdateTriggerLabel(id);
+}
+
+function _msUpdateTriggerLabel(id) {
+  const select = document.getElementById(id);
+  const wrap = document.querySelector(`[data-ms-for="${id}"]`);
+  if (!select || !wrap) return;
+  const trigger = wrap.querySelector('.ms-trigger');
+  const values = msValues(id);
+  const placeholder = wrap.dataset.msPlaceholder || 'ทั้งหมด';
+  if (!values.length) { trigger.textContent = placeholder; return; }
+  const labels = Array.from(select.selectedOptions).map(o => o.textContent);
+  trigger.textContent = labels.length <= 2 ? labels.join(', ') : `${labels.slice(0,2).join(', ')} +${labels.length - 2}`;
+}
 // Milestone 2 Task 2.1 — currency-aware, backward compatible: every existing
 // call site that omits `currency` keeps returning the same THB-prefixed
 // string as before. USD must never display the ฿ symbol.

@@ -524,6 +524,43 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
   background: var(--surface); color: var(--text);
   cursor: pointer; outline: none;
 }
+
+/* ── MULTI-SELECT FILTER WIDGET (UX consistency pass, Part 8) ── */
+.ms-wrap { position: relative; display: inline-block; }
+.ms-trigger {
+  font-family: 'IBM Plex Sans Thai', 'Noto Sans Thai', Sarabun, system-ui, sans-serif;
+  font-size: 12px; padding: 6px 10px; min-width: 110px; max-width: 220px;
+  border: 1px solid var(--border-md); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--text);
+  cursor: pointer; outline: none; text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ms-trigger:focus, .ms-trigger:hover { border-color: var(--blue); }
+.ms-panel {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 60;
+  min-width: 220px; max-height: 300px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border-md);
+  border-radius: var(--r-sm); box-shadow: 0 6px 20px rgba(0,0,0,.12);
+  padding: 8px;
+}
+.ms-panel .ms-search {
+  width: 100%; box-sizing: border-box; font-size: 12px; padding: 6px 8px;
+  border: 1px solid var(--border-md); border-radius: var(--r-sm); outline: none;
+  margin-bottom: 6px;
+}
+.ms-actions { display: flex; gap: 6px; margin-bottom: 6px; }
+.ms-actions button {
+  font-size: 11px; padding: 3px 8px; border: 1px solid var(--border-md);
+  border-radius: var(--r-sm); background: var(--bg); color: var(--text-2); cursor: pointer;
+}
+.ms-actions button:hover { background: var(--blue-50, #E6F1FB); color: var(--blue); }
+.ms-option {
+  display: flex; align-items: center; gap: 8px; padding: 5px 6px;
+  border-radius: var(--r-sm); font-size: 12px; cursor: pointer;
+}
+.ms-option:hover { background: var(--bg); }
+.ms-option input { width: 14px; height: 14px; accent-color: var(--blue); cursor: pointer; }
+.ms-option.ms-hidden { display: none; }
 .btn-export {
   font-family: 'IBM Plex Sans Thai', 'Noto Sans Thai', Sarabun, system-ui, sans-serif;
   font-size: 12px; font-weight: 500;
@@ -1302,13 +1339,10 @@ svg.icon { display: inline-block; vertical-align: middle; }
             style="min-width:220px;flex:1 1 200px"
             oninput="_pendingSearch=this.value;renderPendingContent()">
           <select id="pend-filter-type" onchange="renderPendingContent()">
-            <option value="all">ทุกประเภท</option>
             <option value="sl">SL</option><option value="hw">HW</option>
             <option value="int">INT</option><option value="ent">ENT</option><option value="dep">DEP</option>
           </select>
-          <select id="pend-filter-project" onchange="renderPendingContent()">
-            <option value="all">ทุกโครงการ</option>
-          </select>
+          <select id="pend-filter-project" onchange="renderPendingContent()"></select>
           <select id="pend-sort" onchange="renderPendingContent()">
             <option value="wait-desc">รอนานสุด</option>
             <option value="date-desc">วันที่ล่าสุด</option>
@@ -1349,6 +1383,9 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <button class="hist-tab-btn" data-status="cancelled" onclick="switchHistTab('cancelled',this)" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
               Cancelled <span class="hist-tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
             </button>
+            <button class="hist-tab-btn" data-status="voided" onclick="switchHistTab('voided',this)" style="font-family:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:none;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-2)">
+              Voided <span class="hist-tab-count" style="margin-left:4px;font-size:10px;background:var(--bg);color:var(--text-3);padding:1px 6px;border-radius:10px"></span>
+            </button>
           </div>
         </div>
         <div class="filter-row" style="margin-bottom:12px">
@@ -1363,9 +1400,10 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <option value="draft">Draft</option>
             <option value="cancelled">Cancelled</option>
             <option value="expired">Expired</option>
+            <option value="voided">Voided</option>
           </select>
-          <select id="hist-type" onchange="renderHistoryMemos()"><option value="all">ทุกประเภท</option><option value="sl">SL</option><option value="hw">HW</option><option value="int">INT</option><option value="ent">ENT</option><option value="dep">DEP</option></select>
-          <select id="hist-project" onchange="renderHistoryMemos()"><option value="all">ทุกโครงการ</option></select>
+          <select id="hist-type" onchange="renderHistoryMemos()"><option value="sl">SL</option><option value="hw">HW</option><option value="int">INT</option><option value="ent">ENT</option><option value="dep">DEP</option></select>
+          <select id="hist-project" onchange="renderHistoryMemos()"></select>
           <select id="hist-range" onchange="renderHistoryMemos()"><option value="month">เดือนนี้</option><option value="last-month">เดือนที่แล้ว</option><option value="3-months">3 เดือน</option><option value="all">ทั้งหมด</option></select>
           <select id="hist-sort" onchange="renderHistoryMemos()">
             <option value="updated-desc">อัปเดตล่าสุด</option>
@@ -1540,10 +1578,8 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 <input type="month" id="as-to" onchange="renderActualSpend()">
               </div>
               <select id="as-project" onchange="renderActualSpend()">
-                <option value="all">ทุกโปรเจค</option>
               </select>
               <select id="as-type" onchange="renderActualSpend()">
-                <option value="all">ทุกประเภท</option>
                 <option value="sl">Software License</option>
                 <option value="hw">Hardware</option>
                 <option value="int">Team Activity</option>
@@ -1559,7 +1595,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 <option value="infra">Infra Cost</option>
               </select>
               <select id="as-budget-status" onchange="renderActualSpend()">
-                <option value="all">ทุก Budget Status</option>
                 <option value="Mapped">Mapped</option>
                 <option value="Manual Override">Manual Override</option>
                 <option value="Needs PMO Review">Needs PMO Review</option>
@@ -1581,12 +1616,12 @@ svg.icon { display: inline-block; vertical-align: middle; }
             </div>
             <div class="filter-row">
               <input id="as-manual-search" class="ri" type="search" placeholder="Search reference or description..." oninput="renderManualEntries()" style="max-width:300px">
-              <select id="as-manual-project" onchange="renderManualEntries()"><option value="all">All projects</option></select>
-              <select id="as-manual-type" onchange="renderManualEntries()"><option value="all">All spend types</option></select>
+              <select id="as-manual-project" onchange="renderManualEntries()"></select>
+              <select id="as-manual-type" onchange="renderManualEntries()"></select>
               <select id="as-manual-frequency" onchange="renderManualEntries()"><option value="all">All frequencies</option><option value="one_time">One-time</option><option value="monthly">Monthly</option></select>
               <input id="as-manual-from" type="month" onchange="renderManualEntries()" aria-label="Coverage from">
               <input id="as-manual-to" type="month" onchange="renderManualEntries()" aria-label="Coverage to">
-              <select id="as-manual-budget-status" onchange="renderManualEntries()"><option value="all">All budget statuses</option><option value="Mapped">Mapped</option><option value="Manual Override">Manual Override</option><option value="Needs PMO Review">Needs PMO Review</option><option value="Unbudgeted">Unbudgeted</option></select>
+              <select id="as-manual-budget-status" onchange="renderManualEntries()"><option value="Mapped">Mapped</option><option value="Manual Override">Manual Override</option><option value="Needs PMO Review">Needs PMO Review</option><option value="Unbudgeted">Unbudgeted</option></select>
             </div>
             <div id="as-manual-content"></div>
           </div>
@@ -1842,7 +1877,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
             style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px;outline:none"
             oninput="renderDevice()">
           <select id="dev-filter-platform" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุก Platform</option>
             <option value="ios">iOS</option>
             <option value="android">Android</option>
             <option value="huawei">Huawei</option>
@@ -1850,14 +1884,12 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <option value="other">Other</option>
           </select>
           <select id="dev-filter-type" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกประเภท</option>
             <option value="mobile">Mobile Phone</option>
             <option value="tablet">Tablet</option>
             <option value="laptop">Laptop</option>
             <option value="other">Other</option>
           </select>
           <select id="dev-filter-status" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกสถานะ</option>
             <option value="not_identified">Not Identified</option>
             <option value="in-use">In Use</option>
             <option value="available">Available</option>
@@ -1865,12 +1897,10 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <option value="retired">Retired</option>
           </select>
           <select id="dev-filter-project" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุกโครงการ</option>
             <option>AOA-MP</option><option>TTB</option><option>Geo9</option>
             <option>Release 2.1</option><option>Release 3</option>
           </select>
           <select id="dev-filter-company" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-            <option value="all">ทุก Company</option>
             <option value="BBIK">BBIK</option>
             <option value="Orbit Digital">Orbit Digital</option>
           </select>

@@ -1207,3 +1207,63 @@ test('Milestone 2: saveBudgetTag() writes a Budget tag changed audit entry via t
   assert.match(fn, /updateActualSpendBudgetOverride/);
   assert.match(fn, /canonicalPool\.project && memo\.project && canonicalPool\.project !== memo\.project/);
 });
+
+// ══════════════════════════════════════════════════════════════════
+// Final UX Consistency Pass — Part 8: multi-select filter widget (msValues)
+// ══════════════════════════════════════════════════════════════════
+// msValues() is the single read path every converted filter (Device, License,
+// All Memo, Pending, Budget & Spend) now uses instead of val(id)/single
+// equality — it must return every checked <option>'s value, and an empty
+// array means "no filter" (same meaning the old single-select "all" option
+// had), never throw for a missing element.
+test('msValues() reads every selected option from a real multi-select element, and [] when none are selected', () => {
+  const { context } = createAppContext();
+  const makeOption = (value, selected) => ({ value, selected, textContent: value });
+  const options = [makeOption('sl', true), makeOption('hw', false), makeOption('int', true)];
+  const fakeSelect = {
+    get selectedOptions() { return options.filter(o => o.selected); },
+    options,
+  };
+  vm.runInContext(`this.document.getElementById = id => id === 'multi-filter' ? this.__fakeSelect : null;`, context);
+  context.__fakeSelect = fakeSelect;
+  assert.deepEqual(JSON.parse(JSON.stringify(context.msValues('multi-filter'))), ['sl', 'int']);
+
+  options.forEach(o => { o.selected = false; });
+  assert.deepEqual(JSON.parse(JSON.stringify(context.msValues('multi-filter'))), [], 'nothing checked means no filter, matching the old single-select "all"');
+
+  assert.deepEqual(JSON.parse(JSON.stringify(context.msValues('does-not-exist'))), [], 'a missing element must return [], not throw');
+});
+
+// Simplified test-double DOM stubs elsewhere in this suite (tests/device.test.js)
+// only implement a plain `.value`, not `.selectedOptions` — msValues() must
+// still return a single-item array from that `.value` rather than silently
+// reporting "no filter", so existing single-value test fixtures keep working
+// unmodified against every converted filter's read path.
+test('msValues() falls back to a plain .value when .selectedOptions is not implemented (test-double DOM stubs)', () => {
+  const { context } = createAppContext();
+  vm.runInContext(`this.document.getElementById = id => id === 'plain-select' ? { value: 'AOA-MP' } : id === 'empty-select' ? { value: '' } : null;`, context);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.msValues('plain-select'))), ['AOA-MP']);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.msValues('empty-select'))), []);
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Final UX Consistency Pass — Part 7: All Memo gets a dedicated Voided tab
+// ══════════════════════════════════════════════════════════════════
+// TD-AUDIT-08 (docs/TECHNICAL_DEBT.md): Voided memos were only reachable via
+// the "All" tab. A dedicated "Voided" tab/count was added instead of a second
+// filter control, per the "avoid duplicated navigation, prefer the simplest
+// UX" guideline — it must reuse the exact same switchHistTab()/hist-status
+// mechanism every other status tab already uses, not a parallel one.
+test('All Memo has a dedicated Voided tab wired through the existing switchHistTab()/hist-status mechanism, and its count is tracked', () => {
+  const indexHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const historyCode = fs.readFileSync(path.join(root, 'views/history.js'), 'utf8');
+
+  assert.match(indexHtml, /data-status="voided" onclick="switchHistTab\('voided',this\)"/,
+    'Voided tab must reuse switchHistTab(), the same mechanism as every other status tab');
+  assert.match(indexHtml, /<option value="voided">Voided<\/option>/,
+    'the hidden hist-status <select> (read by filteredHistoryMemos()) must accept "voided"');
+
+  const countsFn = historyCode.match(/function populateHistTabCounts\(\) \{([\s\S]*?)\n\}\n/)?.[0] || '';
+  assert.ok(countsFn, 'populateHistTabCounts must be defined');
+  assert.match(countsFn, /voided:\s*all\.filter\(m => m\.status === 'voided'\)\.length/);
+});

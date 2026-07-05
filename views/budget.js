@@ -541,21 +541,28 @@ function actualSpendRecordInRange(record, fromMonth, toMonth) {
   return (!fromMonth || !end || end >= fromMonth) && (!toMonth || !start || start <= toMonth);
 }
 
+// Part 8 (UX consistency pass) — Project/Type/Budget Status are multi-select
+// filters. queryActualSpend() itself is left untouched (still single-value,
+// still the shared canonical filter used elsewhere per MASTER_SPEC "Shared
+// calculation functions only") — called here with no project/spendType/
+// budgetStatus so it's a pass-through, and the multi-select matching is
+// layered on as an additional .filter() step instead.
 function filteredActualSpendRecords(records = loadActualSpendRecords()) {
   const from = document.getElementById('as-from')?.value || '';
   const to = document.getElementById('as-to')?.value || '';
-  const project = document.getElementById('as-project')?.value || 'all';
-  const type = document.getElementById('as-type')?.value || 'all';
+  const project = msValues('as-project');
+  const type = msValues('as-type');
   const source = document.getElementById('as-source')?.value || 'all';
-  const budgetStatus = document.getElementById('as-budget-status')?.value || 'all';
+  const budgetStatus = msValues('as-budget-status');
   const year = document.getElementById('as-year')?.value || '';
   const sourceMap = { memo:ACTUAL_SPEND_SOURCES.APPROVED_MEMO, manual:ACTUAL_SPEND_SOURCES.MANUAL_EXPENSE, infra:ACTUAL_SPEND_SOURCES.INFRA_COST };
+  const spendTypes = type.map(spendTypeFromMemoType);
   return queryActualSpend({
-    project: project === 'all' ? '' : project,
-    spendType: type === 'all' ? '' : spendTypeFromMemoType(type),
     source: source === 'all' ? '' : sourceMap[source],
-    budgetStatus: budgetStatus === 'all' ? '' : budgetStatus,
   }, records).filter(record =>
+    (!project.length || project.includes(record.project)) &&
+    (!spendTypes.length || spendTypes.includes(record.spendType)) &&
+    (!budgetStatus.length || budgetStatus.includes(record.budgetStatus)) &&
     actualSpendRecordInRange(record, from, to) && (!year || actualSpendRecordInYear(record, year))
   );
 }
@@ -1326,22 +1333,24 @@ function _renderForecastTable() {
   const forecast = calculateForecast(loadActualSpendRecords(), new Date());
   const allProjects = [...new Set(forecast.rows.map(row => row.project))].sort();
 
-  // Project dropdown
+  // Project dropdown — Part 8 (UX consistency pass): multi-select filter.
+  initMultiSelect('sl-forecast-proj', 'ทุกโปรเจค');
   const projSel = document.getElementById('sl-forecast-proj');
   if(projSel) {
-    const selected = projSel.value || 'all';
-    projSel.innerHTML = '<option value="all">ทุกโปรเจค</option>';
+    const curSelected = msValues('sl-forecast-proj');
+    projSel.innerHTML = '';
     allProjects.forEach(p => {
       const opt = document.createElement('option');
       opt.value = opt.textContent = p;
       projSel.appendChild(opt);
     });
-    projSel.value = allProjects.includes(selected) ? selected : 'all';
+    Array.from(projSel.options).forEach(o => { if (curSelected.includes(o.value)) o.selected = true; });
+    refreshMultiSelectUI('sl-forecast-proj');
   }
-  const selProj = projSel?.value || 'all';
+  const selProj = msValues('sl-forecast-proj');
   _forecastView = {
     months: forecast.months,
-    rows: forecast.rows.filter(row => selProj === 'all' || row.project === selProj),
+    rows: forecast.rows.filter(row => !selProj.length || selProj.includes(row.project)),
   };
   const months = _forecastView.months;
   const monthDate = key => new Date(`${key}-01T00:00:00`);
@@ -1985,12 +1994,12 @@ async function saveManualExpenseFromModal() {
 
 async function voidManualExpense(id) {
   if (!isPMO()) { alert('เฉพาะ PMO เท่านั้นที่ลบรายการได้'); return; }
-  if (!confirm('This will remove the record from reports but keep audit history. Continue?')) return;
+  if (!confirm('การดำเนินการนี้จะลบรายการออกจากรายงาน แต่ยังคงประวัติ audit ไว้\nต้องการดำเนินการต่อหรือไม่?')) return;
   try {
     await voidManualExpenseAsync(id, 'Deleted from Manual Entries');
     document.getElementById('actual-manual-panel')?.remove();
     await renderActualSpend();
-  } catch(e) { alert('Delete failed. No changes were made: ' + e.message); }
+  } catch(e) { alert('ลบไม่สำเร็จ ไม่มีการเปลี่ยนแปลงใดๆ: ' + e.message); }
 }
 
 function manualEntryViewModel(expense) {
@@ -2022,31 +2031,38 @@ function renderManualEntries() {
   if (!container) return;
   const value = id => document.getElementById(id)?.value || '';
   const search = value('as-manual-search').trim().toLowerCase();
-  const selectedProject = value('as-manual-project') || 'all';
-  const selectedType = value('as-manual-type') || 'all';
+  // Part 8 (UX consistency pass) — Project/Type/Budget Status are
+  // multi-select filters; initMultiSelect() is idempotent and must run
+  // before updateSelect() repopulates as-manual-project/-type's options.
+  initMultiSelect('as-manual-project', 'All projects');
+  initMultiSelect('as-manual-type', 'All spend types');
+  initMultiSelect('as-manual-budget-status', 'All budget statuses');
+  const selectedProject = msValues('as-manual-project');
+  const selectedType = msValues('as-manual-type');
   const frequency = value('as-manual-frequency') || 'all';
   const from = value('as-manual-from');
   const to = value('as-manual-to');
-  const budgetStatus = value('as-manual-budget-status') || 'all';
+  const budgetStatus = msValues('as-manual-budget-status');
   const active = activeManualExpenses();
-  const updateSelect = (id, values, label, selected) => {
+  const updateSelect = (id, values, selected) => {
     const select = document.getElementById(id);
     if (!select) return;
-    select.innerHTML = `<option value="all">${label}</option>` + values.map(item => `<option value="${esc(item)}">${esc(item)}</option>`).join('');
-    select.value = values.includes(selected) ? selected : 'all';
+    select.innerHTML = values.map(item => `<option value="${esc(item)}">${esc(item)}</option>`).join('');
+    Array.from(select.options).forEach(o => { if (selected.includes(o.value)) o.selected = true; });
+    refreshMultiSelectUI(id);
   };
-  updateSelect('as-manual-project', [...new Set(active.map(item => item.project).filter(Boolean))].sort(), 'All projects', selectedProject);
-  updateSelect('as-manual-type', [...new Set(active.map(item => manualExpenseToActualSpend(item).spendType))].sort(), 'All spend types', selectedType);
+  updateSelect('as-manual-project', [...new Set(active.map(item => item.project).filter(Boolean))].sort(), selectedProject);
+  updateSelect('as-manual-type', [...new Set(active.map(item => manualExpenseToActualSpend(item).spendType))].sort(), selectedType);
   const rows = active.map(manualEntryViewModel).filter(({ expense, record }) => {
     const haystack = [expense.referenceNo, expense.description, expense.vendorProgram, expense.program, expense.notes].filter(Boolean).join(' ').toLowerCase();
     const start = String(expense.frequency === 'monthly' ? expense.startMonth : expense.expenseDate || '').slice(0, 7);
     const end = String(expense.frequency === 'monthly' ? expense.endMonth : expense.expenseDate || '').slice(0, 7);
     return (!search || haystack.includes(search))
-      && (selectedProject === 'all' || expense.project === selectedProject)
-      && (selectedType === 'all' || record.spendType === selectedType)
+      && (!selectedProject.length || selectedProject.includes(expense.project))
+      && (!selectedType.length || selectedType.includes(record.spendType))
       && (frequency === 'all' || expense.frequency === frequency)
       && (!from || !end || end >= from) && (!to || !start || start <= to)
-      && (budgetStatus === 'all' || record.budgetStatus === budgetStatus);
+      && (!budgetStatus.length || budgetStatus.includes(record.budgetStatus));
   }).sort((a, b) => String(b.expense.updatedAt || b.expense.createdAt || '').localeCompare(String(a.expense.updatedAt || a.expense.createdAt || '')));
   if (!rows.length) { container.innerHTML = '<div class="card" style="padding:32px;text-align:center;color:var(--text-3)">No manual entries found</div>'; return; }
   const cell = 'padding:8px 10px;border-bottom:1px solid var(--border);font-size:11px;vertical-align:top';
@@ -2223,13 +2239,18 @@ async function renderActualSpend() {
     yearSel.value = years.includes(current) ? current : years[0];
   }
 
+  // Part 8 (UX consistency pass): Project is a multi-select filter.
+  initMultiSelect('as-project', 'ทุกโปรเจค');
+  initMultiSelect('as-type', 'ทุกประเภท');
+  initMultiSelect('as-budget-status', 'ทุก Budget Status');
   const projSel = document.getElementById('as-project');
   if (projSel) {
-    const current = projSel.value;
+    const curSelected = msValues('as-project');
     const projs = [...new Set(canonical.map(record => record.project).filter(Boolean))].sort();
-    projSel.innerHTML = '<option value="all">ทุกโปรเจค</option>';
+    projSel.innerHTML = '';
     projs.forEach(p => { const o = document.createElement('option'); o.value = o.textContent = p; projSel.appendChild(o); });
-    projSel.value = projs.includes(current) ? current : 'all';
+    Array.from(projSel.options).forEach(o => { if (curSelected.includes(o.value)) o.selected = true; });
+    refreshMultiSelectUI('as-project');
   }
 
   // Display-only (Phase 7A-9B): every use below is a label, never a filter value, so it's safe to
@@ -3307,8 +3328,8 @@ async function renderBudgetSettings() {
             <td style="${tdS};font-size:11px;color:var(--text-3)">${formatMonthBE(p.startMonth) || '—'} → ${formatMonthBE(p.endMonth) || '—'}</td>
             <td style="${tdS};text-align:right;font-weight:600">${money(p.budget || 0)}</td>
             <td style="${tdS};text-align:center">
-              <button class="btn-sm" style="font-size:11px;padding:2px 7px" onclick="openBudgetPoolModal('${p.id}')">✎</button>
-              <button class="btn-sm" style="font-size:11px;padding:2px 7px;color:var(--red)" onclick="deleteBudgetPool('${p.id}')">✕</button>
+              <button class="btn-sm" style="font-size:11px;padding:2px 7px" onclick="openBudgetPoolModal('${p.id}')" title="แก้ไข">✎</button>
+              <button class="btn-sm" style="font-size:11px;padding:2px 7px;color:var(--red)" onclick="deleteBudgetPool('${p.id}')" title="ลบ">✕</button>
             </td>
           </tr>`).join('')}
         </tbody>

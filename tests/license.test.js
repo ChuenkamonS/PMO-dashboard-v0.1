@@ -289,3 +289,87 @@ test('parseLicenseFromMemo still computes the correct 12-month expiry when start
   const [license] = context.parseLicenseFromMemo(memo);
   assert.equal(license.expiry.slice(0, 10), '2027-01-01', 'a 12-month term from Jan must expire exactly one year later');
 });
+
+// ══════════════════════════════════════════════════════════════════
+// Final UX Consistency Pass — Part 6: License User Mapping becomes a
+// user-centric view (User / Department / Software Count, expandable to
+// Program / Plan / Seat / Source Memo / Status), replacing the old wide
+// per-project matrix. Presentation only — computeLicUserMappingData(),
+// the Review Queue, and the override editor's (email, project) key shape
+// are unchanged (already covered by the tests above); this locks the new
+// render shape itself.
+// ══════════════════════════════════════════════════════════════════
+class FakeAcctDOMParser {
+  parseFromString(html) {
+    const theadMatch = html.match(/<thead>([\s\S]*?)<\/thead>/);
+    const ths = theadMatch
+      ? [...theadMatch[1].matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)].map(m => ({ textContent: m[1].trim() }))
+      : [];
+    const tbodyMatch = html.match(/<tbody>([\s\S]*?)<\/tbody>/);
+    const scope = tbodyMatch ? tbodyMatch[1] : '';
+    const rows = [...scope.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map(rm => {
+      const cells = [...rm[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(cm => ({ textContent: cm[1].trim() }));
+      return { querySelectorAll: sel => sel === 'td' ? cells : [] };
+    });
+    return { querySelectorAll: sel => sel === 'thead th' ? ths : sel === 'tbody tr' ? rows : [] };
+  }
+}
+
+test('License Users tab renders a user-centric table (User / Department / Software Count) with an expandable Program/Plan/Seat/Source Memo/Status detail per project', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  const memo = slMemo({
+    memoNo: 'ORB-2611-001',
+    project: 'AOA-MP',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12, startMonth: '2026-01', endMonth: '2026-12' }],
+    sections: [{
+      title: 'ตาราง Account',
+      html: '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+            '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td></tr></tbody></table>',
+    }],
+  });
+  context.storeMemos([memo]);
+
+  const licContent = { innerHTML: '' };
+  const licUsrBody = { innerHTML: '' };
+  const elements = { 'lic-content': licContent, 'lic-usr-body': licUsrBody };
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+
+  context._renderLicUsers();
+
+  // Top-level columns: User / Department / Software Count — no per-license
+  // matrix column, no Project column (Part 6 + TD-AUDIT-07).
+  assert.match(licContent.innerHTML, /<th[^>]*>User<\/th>/);
+  assert.match(licContent.innerHTML, /<th[^>]*>Department<\/th>/);
+  assert.match(licContent.innerHTML, />Software Count<\/th>/);
+  assert.doesNotMatch(licContent.innerHTML, /<th[^>]*>Project<\/th>/, 'Project must not remain a primary matrix column');
+
+  // Row: one per user (email), with a Software Count reflecting the memo's
+  // active license(s), and Department showing "—" (no data source exists
+  // for it, so it must not fabricate a value).
+  assert.match(licUsrBody.innerHTML, /designer@orbit\.co\.th/);
+  const rowMatch = licUsrBody.innerHTML.match(/<tr[^>]*onclick="_toggleLicUserRow\('[^']*'\)">([\s\S]*?)<\/tr>/);
+  assert.ok(rowMatch, 'the user row must be clickable via _toggleLicUserRow');
+  assert.match(rowMatch[1], />—<\/td>/, 'Department has no data source yet and must show "—", not a fabricated value');
+  assert.match(rowMatch[1], />1<\/td>/, 'Software Count must be 1 for a single active license');
+
+  // Expand the row (mirrors clicking it) and confirm the detail view exposes
+  // exactly Program / Plan / Seat / Source Memo / Status, sourced from the
+  // memo's own slItems (Plan/Seat) and account table (Source Memo), not
+  // fabricated.
+  context._toggleLicUserRow(encodeURIComponent('designer@orbit.co.th'));
+  assert.match(licUsrBody.innerHTML, />Program<\/th>/);
+  assert.match(licUsrBody.innerHTML, />Plan<\/th>/);
+  assert.match(licUsrBody.innerHTML, />Seat<\/th>/);
+  assert.match(licUsrBody.innerHTML, />Source Memo<\/th>/);
+  assert.match(licUsrBody.innerHTML, />Status<\/th>/);
+  assert.match(licUsrBody.innerHTML, />Figma<\/td>/);
+  assert.match(licUsrBody.innerHTML, />Professional<\/td>/);
+  assert.match(licUsrBody.innerHTML, />5<\/td>/);
+  assert.match(licUsrBody.innerHTML, /ORB-2611-001/, 'Source Memo must link back to the real memo, not a placeholder');
+  // Edit licenses still opens the exact same (email, project) keyed editor
+  // the override mechanism already depends on (Part 6 explicitly keeps this
+  // logic unchanged).
+  assert.match(licUsrBody.innerHTML, /_openLicUserEditor\(decodeURIComponent\('[^']*designer%40orbit\.co\.th%7CAOA-MP[^']*'\)\)/);
+});

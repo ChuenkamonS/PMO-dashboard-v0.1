@@ -822,6 +822,30 @@ test('voidMemoAsync marks the related Purchase Order as voided_source (never del
   assert.equal(entry.statusAfter, 'voided_source');
 });
 
+// Part 2 (UX consistency pass): the voided_source badge was relabeled from
+// "Voided (source memo)" to plain "Voided", with the explanatory detail
+// (source memo voided / reason / date) moved into a tooltip built by
+// poVoidTooltip() instead — this locks that tooltip's exact content shape.
+test('poVoidTooltip() reports "Source memo was voided", the reason, and the void date for a voided_source PO', async () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = [${JSON.stringify({
+    memoNo: 'HW-975', type: 'hw', status: 'completed',
+    requesterProfileId: 3, requesterName: 'PMO Admin', approvers: [], auditLog: [],
+  })}]`, context);
+  context.storePurchaseOrders([{ id: 'po-975', memoNo: 'HW-975', itemName: 'Laptop', orderedQty: 1, arrivedQty: 0, status: 'awaiting', auditLog: [] }]);
+
+  await context.voidMemoAsync('HW-975', 'budget cut');
+
+  const po = context.loadPurchaseOrders().find(p => p.id === 'po-975');
+  assert.match(deviceCode, />Voided<\/span>/, 'badge label must be plain "Voided", not "Voided (source memo)"');
+  const tooltip = context.poVoidTooltip(po);
+  assert.match(tooltip, /^Source memo was voided/);
+  assert.match(tooltip, /Reason:\nbudget cut/);
+  assert.match(tooltip, /Date:\n/);
+  // A PO that is not voided_source has nothing to explain.
+  assert.equal(context.poVoidTooltip({ status: 'awaiting', auditLog: [] }), '');
+});
+
 test('voidMemoAsync cascades to every open PO for the memo, leaving an unrelated memo\'s fulfilled PO untouched', async () => {
   const { context } = createDeviceContext();
   vm.runInContext(`_memCache = [${JSON.stringify({

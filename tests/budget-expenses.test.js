@@ -1232,7 +1232,7 @@ test('failed Manual Entries Delete keeps the record active and reports a clear e
   context.supaFetch = async () => { throw new Error('remote update failed'); };
   await context.voidManualExpense('manual-delete-failure');
   assert.equal(context.activeManualExpenses().some(row => row.id === 'manual-delete-failure'), true);
-  assert.match(messages.at(-1), /Delete failed\. No changes were made: remote update failed/);
+  assert.match(messages.at(-1), /ลบไม่สำเร็จ ไม่มีการเปลี่ยนแปลงใดๆ: remote update failed/);
 });
 
 test('cancelling Manual Entries Delete leaves the record unchanged without an error', async () => {

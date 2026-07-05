@@ -299,11 +299,11 @@ function _renderLicTab(tab) {
 function _populateLicenseFilters(allLicenses) {
   const projSel = document.getElementById('lic-filter-project');
   if (projSel) {
-    const cur = projSel.value;
+    const curSelected = msValues('lic-filter-project'); // preserve selection across repopulation
     const projects = [...new Set(allLicenses.map(l => l.project).filter(Boolean))].sort();
-    projSel.innerHTML = `<option value="all">ทุกโครงการ</option>` +
-      projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
-    if ([...projSel.options].some(o => o.value === cur)) projSel.value = cur;
+    projSel.innerHTML = projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+    Array.from(projSel.options).forEach(o => { if (curSelected.includes(o.value)) o.selected = true; });
+    refreshMultiSelectUI('lic-filter-project');
   }
   const modalProj = document.getElementById('lic-project');
   if (modalProj) {
@@ -334,7 +334,6 @@ function _renderLicMemoIndex() {
         style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px;outline:none"
         oninput="_renderLicMemoIndexRows()">
       <select id="lic-filter-status" onchange="_renderLicMemoIndexRows()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-        <option value="all">ทุกสถานะ</option>
         <option value="active">Active</option>
         <option value="expiring">Expiring (≤30d)</option>
         <option value="expiring-7">≤ 7 วัน</option>
@@ -344,7 +343,6 @@ function _renderLicMemoIndex() {
         <option value="cancelled">Cancelled</option>
       </select>
       <select id="lic-filter-project" onchange="_renderLicMemoIndexRows()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
-        <option value="all">ทุกโครงการ</option>
       </select>
       <select id="lic-sort" onchange="_renderLicMemoIndexRows()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
         <option value="expiry-asc">หมดอายุใกล้สุด</option>
@@ -389,6 +387,9 @@ function _renderLicMemoIndex() {
       <button onclick="loadMoreLicense()">Load more</button>
     </div>`;
 
+  // Part 8 (UX consistency pass) — Status/Project are multi-select filters.
+  initMultiSelect('lic-filter-status', 'ทุกสถานะ');
+  initMultiSelect('lic-filter-project', 'ทุกโครงการ');
   _renderLicMemoIndexRows();
 }
 
@@ -396,8 +397,8 @@ function _renderLicMemoIndexRows() {
   const allLicenses = getAllLicenses();
   _populateLicenseFilters(allLicenses);
   const search     = (document.getElementById('lic-search')?.value || '').toLowerCase();
-  const filterSt   = document.getElementById('lic-filter-status')?.value || 'all';
-  const filterProj = document.getElementById('lic-filter-project')?.value || 'all';
+  const filterSt   = msValues('lic-filter-status');
+  const filterProj = msValues('lic-filter-project');
   const sort       = document.getElementById('lic-sort')?.value || 'expiry-asc';
 
   // Metrics
@@ -427,11 +428,10 @@ function _renderLicMemoIndexRows() {
 
   let filtered = allLicenses.filter(lic => {
     const s = getLicenseStatus(lic);
-    if (filterSt !== 'all') {
-      if (filterSt === 'expiring' && !['expiring-7', 'expiring-15', 'expiring-30'].includes(s.key)) return false;
-      if (filterSt !== 'expiring' && s.key !== filterSt) return false;
-    }
-    if (filterProj !== 'all' && lic.project !== filterProj) return false;
+    if (filterSt.length && !filterSt.some(f => f === 'expiring'
+      ? ['expiring-7', 'expiring-15', 'expiring-30'].includes(s.key)
+      : f === s.key)) return false;
+    if (filterProj.length && !filterProj.includes(lic.project)) return false;
     if (search) {
       const hay = `${lic.name} ${lic.plan} ${lic.project} ${lic.owner} ${lic.vendor} ${lic.department}`.toLowerCase();
       if (!hay.includes(search)) return false;
@@ -486,8 +486,8 @@ function _renderLicMemoIndexRows() {
       <td style="text-align:center"><span class="badge ${s.badge}">${esc(s.label)}</span></td>
       <td style="text-align:center">${sourceBadge}</td>
       <td style="text-align:center;white-space:nowrap">
-        <button class="btn-sm" data-action="edit" data-idx="${_idx}" style="padding:3px 7px;font-size:11px" title="${lic.source === 'memo' ? 'แก้ไข owner/dept/note' : 'Edit'}">✎</button>
-        ${lic.source !== 'memo' ? `<button class="btn-sm" data-action="delete" data-idx="${_idx}" style="padding:3px 7px;font-size:11px;color:var(--red)" title="Delete">✕</button>` : ''}
+        <button class="btn-sm" data-action="edit" data-idx="${_idx}" style="padding:3px 7px;font-size:11px" title="${lic.source === 'memo' ? 'แก้ไข owner/dept/note' : 'แก้ไข'}">✎</button>
+        ${lic.source !== 'memo' ? `<button class="btn-sm" data-action="delete" data-idx="${_idx}" style="padding:3px 7px;font-size:11px;color:var(--red)" title="ลบ">✕</button>` : ''}
       </td>
     </tr>`;
   }).join('');
@@ -796,27 +796,23 @@ function _renderLicUsers() {
     <div class="filter-row" style="margin-bottom:12px">
       <input id="lic-usr-search" type="text" placeholder="ค้นหา email..."
         oninput="_renderLicUsersRows()">
-      <select id="lic-usr-proj" onchange="_renderLicUsersRows()"
-        >
-        <option value="all">ทุก project</option>
+      <select id="lic-usr-proj" onchange="_renderLicUsersRows()">
         ${projects.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
       </select>
-      <select id="lic-usr-lic" onchange="_renderLicUsersRows()"
-        >
-        <option value="all">ทุก license</option>
+      <select id="lic-usr-lic" onchange="_renderLicUsersRows()">
         ${allLicCols.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
       </select>
     </div>
     <div style="font-size:11px;color:var(--text-2);margin-bottom:6px">
-      ✅ = ได้รับ license นี้ · — = ไม่ได้รับ (ตามที่กรอกใน memo) · กด Edit licenses เพื่อแก้หลายรายการพร้อมกัน
+      คลิกแถวเพื่อดูรายละเอียด Program / Plan / Seat / Source Memo / Status ต่อ project · กด Edit licenses เพื่อแก้หลายรายการพร้อมกัน
     </div>
-    <div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
-      <table class="hist-table" style="min-width:500px" id="lic-usr-table">
+    <div class="card" style="padding:0;overflow:hidden">
+      <table class="hist-table" id="lic-usr-table">
         <thead><tr>
-          <th style="padding-left:14px">Email</th>
-          <th>Project</th>
-          ${allLicCols.map(c=>`<th style="text-align:center;white-space:nowrap">${esc(c)}</th>`).join('')}
-          <th style="text-align:center;white-space:nowrap">Actions</th>
+          <th style="padding-left:14px">User</th>
+          <th>Department</th>
+          <th style="text-align:center">Software Count</th>
+          <th style="text-align:center;white-space:nowrap"></th>
         </tr></thead>
         <tbody id="lic-usr-body"></tbody>
       </table>
@@ -839,6 +835,9 @@ function _renderLicUsers() {
       </div>
     </div>`;
 
+  // Part 8 (UX consistency pass) — Project/Software are multi-select filters.
+  initMultiSelect('lic-usr-proj', 'ทุก project');
+  initMultiSelect('lic-usr-lic', 'ทุก license');
   _renderLicUsersRows();
 }
 
@@ -846,56 +845,131 @@ function _renderLicUsersRows() {
   const allUserRows = window._licUsrRows || [];
   const allLicCols  = window._licUsrCols || [];
   const search  = (document.getElementById('lic-usr-search')?.value || '').toLowerCase();
-  const projF   = document.getElementById('lic-usr-proj')?.value || 'all';
-  const licF    = document.getElementById('lic-usr-lic')?.value || 'all';
+  const projF   = msValues('lic-usr-proj');
+  const licF    = msValues('lic-usr-lic');
   const tbody   = document.getElementById('lic-usr-body');
   if (!tbody) return;
 
   let rows = allUserRows;
-  if (projF !== 'all') rows = rows.filter(r => r.project === projF);
-  if (licF  !== 'all') rows = rows.filter(r => r.licenses[licF] === true);
+  if (projF.length) rows = rows.filter(r => projF.includes(r.project));
+  if (licF.length)  rows = rows.filter(r => licF.some(lic => r.licenses[lic] === true));
   if (search) rows = rows.filter(r => r.email.toLowerCase().includes(search));
 
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="${allLicCols.length+3}" style="text-align:center;padding:24px;color:var(--text-3)">ไม่พบข้อมูล</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:24px;color:var(--text-3)">ไม่พบข้อมูล</td></tr>`;
     return;
   }
 
-  // Deduplicate: if same email appears in multiple memos for same license, merge
-  const emailMap = {};
+  // Merge into one entry per (email, project) — the same grouping/override key
+  // shape _openLicUserEditor()/_saveLicUserEditor()/_toggleLicUserOverride()
+  // already depend on, unchanged. Also tracks, per license, which memo(s)
+  // actually granted it (licenseSources), so the expandable detail below can
+  // show a real Source Memo instead of guessing.
+  const emailProjMap = {};
   rows.forEach(r => {
     const key = `${r.email}|${r.project}`;
-    if (!emailMap[key]) emailMap[key] = { email: r.email, project: r.project, memos: new Set(), licenses: {} };
-    emailMap[key].memos.add(r.memoNo);
+    if (!emailProjMap[key]) emailProjMap[key] = { email: r.email, project: r.project, memos: new Set(), licenses: {}, licenseSources: {} };
+    const group = emailProjMap[key];
+    group.memos.add(r.memoNo);
     Object.entries(r.licenses).forEach(([lic, val]) => {
-      if (val) emailMap[key].licenses[lic] = true;
+      if (!val) return;
+      group.licenses[lic] = true;
+      if (!group.licenseSources[lic]) group.licenseSources[lic] = new Set();
+      group.licenseSources[lic].add(r.memoNo);
     });
   });
+  window._licUsrMerged = emailProjMap;
 
-  // Load manual overrides from localStorage
+  // Part 6 (UX consistency pass) — user-centric view: one primary row per
+  // email (User / Department / Software Count), expandable to reveal each
+  // project's Program/Plan/Seat/Source Memo/Status detail. Presentation only:
+  // the (email, project) groups, override keys, and Edit licenses editor are
+  // exactly the ones the matrix already used. Department has no data source
+  // yet (not tracked anywhere in memo account tables or user_profiles — that
+  // is Settings/Master-Data scope, out of bounds for this pass) so it always
+  // shows "—" rather than fabricating a value.
+  const userMap = {};
+  Object.values(emailProjMap).forEach(group => {
+    if (!userMap[group.email]) userMap[group.email] = { email: group.email, projectGroups: [] };
+    userMap[group.email].projectGroups.push(group);
+  });
+
   const overrides = _getLicUserOverrides();
-  const mergedArr = Object.values(emailMap);
-  window._licUsrMerged = Object.fromEntries(mergedArr.map(row => [`${row.email}|${row.project}`, row]));
+  const allLicenses = getAllLicenses();
+  window._licUsrExpanded = window._licUsrExpanded || new Set();
 
-  tbody.innerHTML = mergedArr.map(r => {
-    const initials = r.email.substring(0, 2).toUpperCase();
-    const key = `${r.email}|${r.project}`;
-    return `<tr>
-      <td style="padding-left:14px">
-        <span style="width:26px;height:26px;border-radius:50%;background:var(--blue-50,#E6F1FB);display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:var(--blue);margin-right:6px;vertical-align:middle">${initials}</span>
-        ${esc(r.email)}
-      </td>
-      <td style="font-size:12px">${esc(r.project)}</td>
-      ${allLicCols.map(c => {
-        const fromMemo = r.licenses[c] === true;
-        const ovKey    = `${key}|${c}`;
-        const override = overrides[ovKey]; // true = force on, false = force off, undefined = use memo
-        const active   = override !== undefined ? override : fromMemo;
-        return `<td style="text-align:center;font-size:13px">${active ? '✅' : '<span style="color:var(--text-3)">—</span>'}</td>`;
-      }).join('')}
-      <td style="text-align:center"><button class="btn-sm" onclick="_openLicUserEditor(decodeURIComponent('${encodeURIComponent(key)}'))">Edit licenses</button></td>
-    </tr>`;
+  const activeLicensesForGroup = group => {
+    const key = `${group.email}|${group.project}`;
+    return allLicCols.filter(lic => {
+      const fromMemo = group.licenses[lic] === true;
+      const ov = overrides[`${key}|${lic}`];
+      return ov !== undefined ? ov : fromMemo;
+    });
+  };
+
+  const users = Object.values(userMap).sort((a, b) => a.email.localeCompare(b.email));
+
+  tbody.innerHTML = users.map(u => {
+    const initials = u.email.substring(0, 2).toUpperCase();
+    const uKey = encodeURIComponent(u.email);
+    const softwareCount = u.projectGroups.reduce((sum, g) => sum + activeLicensesForGroup(g).length, 0);
+    const expanded = window._licUsrExpanded.has(u.email);
+
+    const detailHtml = u.projectGroups.map(group => {
+      const key = `${group.email}|${group.project}`;
+      const active = activeLicensesForGroup(group);
+      const detailRows = active.length
+        ? active.map(lic => {
+            const sources = [...(group.licenseSources[lic] || [])];
+            const match = allLicenses.find(l => l.name === lic && l.project === group.project && sources.includes(l.memoNo));
+            const plan = match?.plan || '—';
+            const seat = match?.seats ?? '—';
+            const status = match ? getLicenseStatus(match) : null;
+            const sourceHtml = sources.length
+              ? sources.map(m => `<span style="color:var(--blue);cursor:pointer" onclick="event.stopPropagation();typeof openMemoReadOnly==='function'&&openMemoReadOnly('${esc(m)}')">${esc(m)}</span>`).join(', ')
+              : '<span style="font-style:italic;color:var(--text-3)">Manual override</span>';
+            return `<tr>
+              <td style="padding:6px 10px;font-size:12px">${esc(lic)}</td>
+              <td style="padding:6px 10px;font-size:12px">${esc(plan)}</td>
+              <td style="padding:6px 10px;font-size:12px;text-align:center">${esc(String(seat))}</td>
+              <td style="padding:6px 10px;font-size:12px">${sourceHtml}</td>
+              <td style="padding:6px 10px;font-size:12px">${status ? `<span class="badge ${status.badge}" style="font-size:10px">${esc(status.label)}</span>` : '<span style="color:var(--text-3)">—</span>'}</td>
+            </tr>`;
+          }).join('')
+        : `<tr><td colspan="5" style="padding:8px 10px;text-align:center;color:var(--text-3);font-size:12px">ไม่มี license ที่ active ใน project นี้</td></tr>`;
+      return `<div style="border:1px solid var(--border);border-radius:var(--r-sm);margin-bottom:8px;overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg-2,#F8F8F6);font-size:12px">
+          <span><strong>Project:</strong> ${esc(group.project || '—')}</span>
+          <button class="btn-sm" onclick="event.stopPropagation();_openLicUserEditor(decodeURIComponent('${encodeURIComponent(key)}'))">Edit licenses</button>
+        </div>
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="text-align:left;font-size:10px;color:var(--text-3);text-transform:uppercase">
+            <th style="padding:6px 10px">Program</th><th style="padding:6px 10px">Plan</th>
+            <th style="padding:6px 10px;text-align:center">Seat</th><th style="padding:6px 10px">Source Memo</th><th style="padding:6px 10px">Status</th>
+          </tr></thead>
+          <tbody>${detailRows}</tbody>
+        </table>
+      </div>`;
+    }).join('');
+
+    return `<tr style="cursor:pointer" onclick="_toggleLicUserRow('${uKey}')">
+        <td style="padding-left:14px">
+          <span style="width:26px;height:26px;border-radius:50%;background:var(--blue-50,#E6F1FB);display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:var(--blue);margin-right:6px;vertical-align:middle">${initials}</span>
+          ${esc(u.email)}
+        </td>
+        <td style="font-size:12px;color:var(--text-3)">—</td>
+        <td style="text-align:center;font-size:12px">${softwareCount}</td>
+        <td style="text-align:center;font-size:11px;color:var(--text-3)">${expanded ? '▾' : '▸'}</td>
+      </tr>${expanded ? `<tr><td colspan="4" style="padding:10px 14px;background:var(--bg)">${detailHtml}</td></tr>` : ''}`;
   }).join('');
+}
+
+function _toggleLicUserRow(encodedEmail) {
+  const email = decodeURIComponent(encodedEmail);
+  window._licUsrExpanded = window._licUsrExpanded || new Set();
+  if (window._licUsrExpanded.has(email)) window._licUsrExpanded.delete(email);
+  else window._licUsrExpanded.add(email);
+  _renderLicUsersRows();
 }
 
 
@@ -1008,19 +1082,13 @@ function _renderLicOther() {
   el.innerHTML = `
     <div class="filter-row" style="margin-bottom:12px;justify-content:space-between">
       <div class="filter-row" style="margin-bottom:0">
-        <select id="lic-ot-type" onchange="_renderLicOtherRows()"
-          >
-          <option value="all">ทุกประเภท</option>
+        <select id="lic-ot-type" onchange="_renderLicOtherRows()">
           ${licTypes.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}
         </select>
-        <select id="lic-ot-proj" onchange="_renderLicOtherRows()"
-          >
-          <option value="all">ทุก project</option>
+        <select id="lic-ot-proj" onchange="_renderLicOtherRows()">
           ${projects.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
         </select>
-        <select id="lic-ot-status" onchange="_renderLicOtherRows()"
-          >
-          <option value="all">ทุกสถานะ</option>
+        <select id="lic-ot-status" onchange="_renderLicOtherRows()">
           <option value="active">Active</option>
           <option value="expiring">Expiring</option>
           <option value="expired">Expired</option>
@@ -1048,26 +1116,30 @@ function _renderLicOther() {
 
   window._licOtherManual = manual;
   window._licOtherFxRate = fxRate;
+  // Part 8 (UX consistency pass) — Type/Project/Status are multi-select filters.
+  initMultiSelect('lic-ot-type', 'ทุกประเภท');
+  initMultiSelect('lic-ot-proj', 'ทุก project');
+  initMultiSelect('lic-ot-status', 'ทุกสถานะ');
   _renderLicOtherRows();
 }
 
 function _renderLicOtherRows() {
-  const typeF   = document.getElementById('lic-ot-type')?.value || 'all';
-  const projF   = document.getElementById('lic-ot-proj')?.value || 'all';
-  const statF   = document.getElementById('lic-ot-status')?.value || 'all';
+  const typeF   = msValues('lic-ot-type');
+  const projF   = msValues('lic-ot-proj');
+  const statF   = msValues('lic-ot-status');
   const fxRate  = window._licOtherFxRate || _getLicFxRate();
   const tbody   = document.getElementById('lic-ot-body');
   if (!tbody) return;
 
   let rows = window._licOtherManual || [];
-  if (typeF !== 'all') rows = rows.filter(r => (r.licenseType||'subscription') === typeF);
-  if (projF !== 'all') rows = rows.filter(r => r.project === projF);
-  if (statF !== 'all') rows = rows.filter(r => {
+  if (typeF.length) rows = rows.filter(r => typeF.includes(r.licenseType||'subscription'));
+  if (projF.length) rows = rows.filter(r => projF.includes(r.project));
+  if (statF.length) rows = rows.filter(r => {
     const k = getLicenseStatus(r).key;
-    if (statF === 'active')   return k === 'active';
-    if (statF === 'expiring') return k.startsWith('expiring');
-    if (statF === 'expired')  return k === 'expired';
-    return true;
+    return statF.some(statFVal =>
+      statFVal === 'active'   ? k === 'active' :
+      statFVal === 'expiring' ? k.startsWith('expiring') :
+      statFVal === 'expired'  ? k === 'expired' : false);
   });
 
   window._licOtherFiltered = rows;
@@ -1097,8 +1169,8 @@ function _renderLicOtherRows() {
       <td style="font-size:11px">${shortDate(l.expiry)||'—'}</td>
       <td style="text-align:center"><span class="badge ${s.badge}">${s.label}</span></td>
       <td style="text-align:center;white-space:nowrap">
-        <button class="btn-sm" data-action="edit" data-idx="${idx}" style="padding:3px 7px;font-size:11px">✎</button>
-        <button class="btn-sm" data-action="delete" data-idx="${idx}" style="padding:3px 7px;font-size:11px;color:var(--red)">✕</button>
+        <button class="btn-sm" data-action="edit" data-idx="${idx}" style="padding:3px 7px;font-size:11px" title="แก้ไข">✎</button>
+        <button class="btn-sm" data-action="delete" data-idx="${idx}" style="padding:3px 7px;font-size:11px;color:var(--red)" title="ลบ">✕</button>
       </td>
     </tr>`;
   }).join('');

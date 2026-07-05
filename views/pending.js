@@ -86,20 +86,25 @@ async function refreshPendingMemos() {
 setInterval(updatePendingRefreshLabel, 60000);
 
 // ── Populate filter dropdowns dynamically from actual memo data ──
+// Part 8 (UX consistency pass): Project is a multi-select filter.
 function populatePendingFilters() {
   const allMemos = loadMemos();
   const projects = [...new Set(allMemos.map(m => m.project).filter(Boolean))].sort();
   const projSel = document.getElementById('pend-filter-project');
   if (projSel) {
-    const cur = projSel.value;
-    projSel.innerHTML = `<option value="all">ทุกโครงการ</option>` +
-      projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
-    if ([...projSel.options].some(o => o.value === cur)) projSel.value = cur;
+    const curSelected = msValues('pend-filter-project');
+    projSel.innerHTML = projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+    Array.from(projSel.options).forEach(o => { if (curSelected.includes(o.value)) o.selected = true; });
+    refreshMultiSelectUI('pend-filter-project');
   }
 }
 
 // ── Main render ──
 function renderPendingMemos() {
+  // Type/Project are multi-select filters; initMultiSelect() is idempotent
+  // and must run before populatePendingFilters() populates the options.
+  initMultiSelect('pend-filter-type', 'ทุกประเภท');
+  initMultiSelect('pend-filter-project', 'ทุกโครงการ');
   populatePendingFilters();
 
   const allMemos = loadMemos();
@@ -154,10 +159,10 @@ function renderPendingContent() {
       ...(m.approvers || []).map(a => a.name),
     ].some(value => String(value || '').toLowerCase().includes(s)));
   }
-  const typeF = val('#pend-filter-type')    ||'all';
-  const projF = val('#pend-filter-project') ||'all';
-  if(typeF!=='all') memos = memos.filter(m=>m.type===typeF);
-  if(projF!=='all') memos = memos.filter(m=>m.project===projF);
+  const typeF = msValues('pend-filter-type');
+  const projF = msValues('pend-filter-project');
+  if(typeF.length) memos = memos.filter(m=>typeF.includes(m.type));
+  if(projF.length) memos = memos.filter(m=>projF.includes(m.project));
   // Sort
   const sortF = val('#pend-sort') || 'date-desc';
   memos.sort((a,b) => {
@@ -253,7 +258,7 @@ function buildPendingRow(memo) {
     actionBtns = `
       <button class="btn-approve" data-action="approve" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px" title="Approve">✓</button>
       <button class="btn-reject"  data-action="reject"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px" title="Reject">✕</button>
-      <button class="btn-sm"      data-action="cancel"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px;color:var(--red)" title="Cancel">Cancel</button>
+      <button class="btn-sm"      data-action="cancel"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px;color:var(--red)" title="ยกเลิก">✕ Cancel</button>
       <button class="btn-sm"      data-action="detail"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px">View</button>`;
   } else if (!isOwner && canAct) {
     // Approver (not own memo, their turn) — Approve + Reject + View
@@ -509,7 +514,7 @@ function openDetailModal(memoNo) {
   } else {
     // Fallback if history.js not yet loaded
     document.getElementById('detail-content').innerHTML =
-      `<div style="padding:20px;color:var(--text-3)">Loading...</div>`;
+      `<div style="padding:20px;color:var(--text-3)">กำลังโหลด...</div>`;
   }
 
   const _no       = esc(memo.memoNo);
