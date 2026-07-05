@@ -1270,6 +1270,277 @@ Exit Criteria
 
 ---
 
+# TD-AUDIT-02
+
+Title
+
+Forecast Row Grouping Can Still Merge Two Same-Named Line Items Within One Memo
+
+Status
+
+OPEN (found during 2026-07-05 Final Functional Audit; not fixed — display/design judgment call)
+
+Priority
+
+Low
+
+Introduced
+
+Found during the 2026-07-05 8-flow Final Functional Audit
+
+Owner Phase
+
+Budget & Spend — Forecast (future design phase)
+
+Reason
+
+`calculateForecast()`'s row-grouping key (`app.js`) is `[record.project, item.program,
+record.spendType]` — keyed only by program name, with no per-line disambiguator. Two software line
+items within the same memo that share a program name (e.g. two different plan tiers of the same
+software, or two different coverage windows) collide into one blended row instead of the "one row
+per cost item" behavior the same function was already fixed to guarantee once (see CHANGELOG.md
+"2026-07-05 Functional Audit — Memo -> Approval -> Budget -> License -> Device end-to-end"). Merging
+by name IS desired across different records/memos (continuity for a recurring subscription), so the
+fix is not simply "always disambiguate by index" — it must only disambiguate within-one-record
+duplicates while preserving cross-record merging by name, which requires deciding what the second
+row's displayed Program label should be (e.g. append the plan, or "(2)") — a UI/display decision,
+not a pure calculation fix.
+
+Current Situation
+
+Unreached in the existing test suite (all current multi-line-item Forecast tests use distinct
+program names). Reproduced directly via `calculateForecast()`: two detailLines named "Microsoft 365"
+with different plans/coverage/amounts in one record produce exactly one row with blended monthly
+values, not two.
+
+Risk
+
+A PMO user viewing Forecast for a memo with two same-named line items (different plan tiers, or a
+mid-year plan change) sees one row with combined figures and no way to distinguish which plan
+contributes what, understating the granularity the per-line-item split was built to provide.
+
+Exit Criteria
+
+- Decide the disambiguated row label for a same-named duplicate (e.g. include `plan`, or an ordinal
+  suffix) — a display decision, not a calculation-engine change.
+- `forecastLineItems()`/the grouping key thread that label through without breaking cross-record
+  merging by name for non-duplicate cases.
+- Regression test with two same-named, differently-covered line items in one record proving two
+  distinct rows.
+
+---
+
+# TD-AUDIT-03
+
+Title
+
+Void's Supabase Sync Has No throwOnSyncError Guard — Possible Actual Spend Resurrection on Reload
+
+Status
+
+OPEN (found during 2026-07-05 Final Functional Audit; not fixed — needs a PMO/BA decision)
+
+Priority
+
+Medium
+
+Introduced
+
+Found during the 2026-07-05 8-flow Final Functional Audit
+
+Owner Phase
+
+Core Lifecycle Foundation (Void) — ties to TD-M1-03
+
+Reason
+
+`voidMemoAsync()` (app.js) calls `updateMemoStatusAsync(memoNo, 'voided', {...})` without
+`extra.throwOnSyncError = true` — unlike `confirmApprove()`, which explicitly sets it. Per
+TD-M1-03, the migration adding the Void/soft-delete columns is not yet applied to the live Supabase
+project; when that PATCH is rejected, the catch-and-continue in `updateMemoStatusAsync()` lets Void
+still "succeed" locally (memo shows `voided`, its Actual Spend record is deleted from the local
+cache) while Supabase's row silently keeps `status: 'completed'`. On the next real
+`loadMemosAsync()` refetch, the still-`completed` row comes back and
+`reconcileActualSpendSources()` recreates the same deterministic-id Actual Spend record — so a
+Voided memo's spend can reappear across Overview/Actual Spend/Budget vs Actual/Forecast.
+
+Current Situation
+
+This is a concrete, previously-undocumented *consequence* of TD-M1-03's already-accepted migration
+gap, not a new root cause — the underlying "migration not applied -> local-only fallback" risk shape
+is the same one every other TD-M1/M2/M3 item already accepts. It becomes moot once TD-M1-03's
+migration is applied. Until then, the specific resurrection behavior (not just "doesn't persist") is
+worse than the general shape, since it can silently *undo* a Void's financial exclusion on reload.
+
+Risk
+
+A PMO user voids a memo (e.g. to correct a mistaken Approval), sees it correctly excluded from
+Actual Spend immediately — then, after the migration-gap window, a page reload brings the spend
+back without any error being surfaced, looking like the Void silently failed.
+
+Exit Criteria
+
+- Apply TD-M1-03's pending migration (removes the root cause entirely), or
+- PMO/BA decision: should `voidMemoAsync()` set `throwOnSyncError: true` (fail loudly, matching
+  `confirmApprove()`'s contract, forcing the user to retry rather than silently degrading) instead of
+  the current keep-working-locally trade-off every other migration-gap item in this repo has chosen?
+- Regression test simulating a rejected Void PATCH, proving the memo's Actual Spend exclusion
+  survives a subsequent `loadMemosAsync()` refetch either way, once decided.
+
+---
+
+# TD-AUDIT-04
+
+Title
+
+License PMO Review Queue "Reject" Has No Manual Re-Assignment Path
+
+Status
+
+OPEN (found during 2026-07-05 Final Functional Audit; not fixed — requires new UI, out of audit scope)
+
+Priority
+
+Low
+
+Introduced
+
+Found during the 2026-07-05 8-flow Final Functional Audit
+
+Owner Phase
+
+License Logic (future UI phase)
+
+Reason
+
+SYSTEM_STATE_MACHINE.md §7 names the Review Queue's Reject branch "Manual assignment later."
+`computeLicUserMappingData()` (views/license.js) simply drops a rejected memo's account-list rows
+(`if (status === 'rejected') return;` — no row reaches `allUserRows`/the mapping table). The only
+manual-edit surface in License Management > Users, `_openLicUserEditor()`, operates exclusively on
+rows already present in the merged mapping data — there is no "Add user" affordance anywhere in
+`views/license.js` that would let PMO create a brand-new row for a user from a rejected memo's
+account list. Confirmed via repo-wide search: no add-user UI exists.
+
+Current Situation
+
+A rejected review item's users become fully invisible with no in-app path back to a manual grant,
+even though the state machine names that as the intended fallback.
+
+Risk
+
+After Reject, PMO has no in-app way to manually re-grant the specific users' licenses from that
+memo's data; they would need to reconstruct the list from memory/the original memo document and use
+a different entry point (if any exists) to re-add them.
+
+Exit Criteria
+
+- Decide and build an "Add user" affordance in License Management > Users (a new UI feature,
+  deliberately out of this audit's "no new features" scope).
+- Regression test proving a rejected memo's account list is reachable through it.
+
+---
+
+# TD-AUDIT-05
+
+Title
+
+Memo Void-Block Check Reads Devices From a Synchronous, Possibly-Stale Cache
+
+Status
+
+OPEN (found during 2026-07-05 Final Functional Audit; not fixed — needs a broader async-path review)
+
+Priority
+
+Low
+
+Introduced
+
+Found during the 2026-07-05 8-flow Final Functional Audit
+
+Owner Phase
+
+Device Logic / Core Lifecycle Foundation (Void)
+
+Reason
+
+`memoHasIrreversibleDownstreamRecords()` (app.js), the function `voidMemoAsync()` uses to block Void
+once Device Registry records exist, calls the synchronous `loadDevices()` (in-memory cache, falling
+back to `localStorage`) rather than `loadDevicesAsync()`. `_devCache` is only populated once
+`loadDevicesAsync()` resolves (fired in `initApp()`'s parallel, unawaited preload) or once Device
+Management has been opened in the current session.
+
+Current Situation
+
+On a fresh session/device where the startup preload hasn't resolved yet (slow network) and Device
+Management has never been opened, there is a narrow timing window where the Void-block check reads
+an empty/stale cache and could pass when it should block.
+
+Risk
+
+Low likelihood (requires a real timing race), but if hit, PMO could void a Hardware memo that
+already has real arrived-device records, creating a financial/audit inconsistency (spend excluded,
+hardware records remain tagged to a now-voided memo).
+
+Exit Criteria
+
+- Decide whether `memoHasIrreversibleDownstreamRecords()`/`voidMemoAsync()`'s call site should await
+  a fresh `loadDevicesAsync()` before deciding — a broader change to a business-critical guard
+  function, warranting its own reviewed pass rather than a same-audit fix.
+- Regression test simulating an empty/cold device cache at Void time, once decided.
+
+---
+
+# TD-AUDIT-06
+
+Title
+
+Settings / Master Data Changes Write No Audit Entry
+
+Status
+
+OPEN (found during 2026-07-05 Final Functional Audit; not fixed — Settings is out of this audit's scope)
+
+Priority
+
+Low
+
+Introduced
+
+Found during the 2026-07-05 8-flow Final Functional Audit
+
+Owner Phase
+
+Settings / Master Data (future phase)
+
+Reason
+
+SYSTEM_OVERVIEW.md §8 lists "Master data changes" among the actions audit logs must cover.
+`saveSettings()` (views/settings.js) persists Company info, default Reviewer/Approver, the Projects
+master list, and per-memo-type approval routing/reasons via a plain `saveSettingsAsync(s)` overwrite.
+Confirmed via repo-wide search: zero `appendAuditLog`/audit-log references anywhere in
+`views/settings.js`.
+
+Current Situation
+
+No record exists of who changed a Project/default Approver/Reviewer/routing config or when — a
+silent, untraceable change to data that drives approval routing and budget project-matching across
+the whole app.
+
+Risk
+
+A PMO user renaming/removing a Project or changing a default Approver has no audit trail; disputes
+or incident investigation involving master-data drift cannot be reconstructed.
+
+Exit Criteria
+
+- Add an `appendAuditLog()`-style entry (or a dedicated Settings audit store) on every
+  `saveSettings()` call, capturing actor/timestamp/previous+new values per changed field.
+- Explicitly out of scope for the 2026-07-05 Final Functional Audit per its own brief ("Do NOT
+  modify Settings") — deferred to a future Settings-scoped phase.
+
+---
+
 # TD-PDF-01
 
 Title

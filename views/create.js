@@ -741,13 +741,44 @@ function validateMemo(data) {
   if(missing.length) { alert('กรุณากรอกข้อมูลให้ครบ:\n\n• '+missing.join('\n• ')); return false; }
   return true;
 }
+// Milestone 1B — memo number reuse: Rejected and Cancelled are the only
+// statuses that may reuse a memo number (no warning needed for those). Every
+// other status — including the new Voided — still blocks reuse.
+const MEMO_NO_BLOCKING_STATUSES = new Set(['draft', 'pending', 'pending_a2', 'pending_a3', 'completed', 'voided']);
+
+// Shared by Submit and Save Draft — MEMO_LIFECYCLE.md §5: Memo Number must be
+// unique app-wide, with no stated exception for Draft. Returns the conflicting
+// row ({memo_no,status,deleted}) or null.
+async function checkMemoNoConflict(memoNo) {
+  const conflicts = await supaFetch('memos', 'GET', null,
+    `?memo_no=eq.${encodeURIComponent(memoNo)}&select=memo_no,status,deleted&limit=1`);
+  return conflicts?.[0] || null;
+}
+
 // ── Save as Draft ──
-function saveDraft() {
+async function saveDraft() {
   if(!selectedType) { alert('กรุณาเลือกประเภท Memo ก่อน'); return; }
   const data = collectMemoData();
   data.status = 'draft';
   if(!data.memoNo) {
     data.memoNo = 'DRAFT-' + Date.now().toString(36).toUpperCase();
+  }
+  // Functional audit fix: Save Draft previously had no memo-number uniqueness
+  // check at all — saveMemo()/saveMemoAsync() upsert by memoNo, so typing (or
+  // editing into) a number that already belongs to a different, non-Draft
+  // memo silently overwrote that unrelated record. Reuse the same conflict
+  // check Submit already performs.
+  try {
+    const conflict = await checkMemoNoConflict(data.memoNo);
+    const editingSameDraft = conflict?.status === 'draft' && _editingDraftMemoNo === data.memoNo;
+    if(conflict && !conflict.deleted && MEMO_NO_BLOCKING_STATUSES.has(conflict.status) && !editingSameDraft) {
+      alert(`เลข Memo ${data.memoNo} ถูกใช้งานแล้ว (สถานะ: ${conflict.status || '-'}) กรุณาใช้เลขอื่น`);
+      return;
+    }
+  } catch(e) {
+    console.error('Memo number duplicate check failed', e);
+    alert('ไม่สามารถตรวจสอบเลข Memo กับฐานข้อมูลได้ กรุณาตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง');
+    return;
   }
   // If editing existing draft, keep same memoNo
   saveMemo(data);
@@ -761,18 +792,11 @@ function saveDraft() {
   if (typeof switchHistTab === 'function') switchHistTab('draft');
 }
 
-// Milestone 1B — memo number reuse: Rejected and Cancelled are the only
-// statuses that may reuse a memo number (no warning needed for those). Every
-// other status — including the new Voided — still blocks reuse.
-const MEMO_NO_BLOCKING_STATUSES = new Set(['draft', 'pending', 'pending_a2', 'pending_a3', 'completed', 'voided']);
-
 async function submitMemo() {
   const data = collectMemoData();
   if(!validateMemo(data)) return;
   try {
-    const conflicts = await supaFetch('memos', 'GET', null,
-      `?memo_no=eq.${encodeURIComponent(data.memoNo)}&select=memo_no,status,deleted&limit=1`);
-    const conflict = conflicts?.[0];
+    const conflict = await checkMemoNoConflict(data.memoNo);
     const editingSameDraft = conflict?.status === 'draft' && _editingDraftMemoNo === data.memoNo;
     // A soft-deleted Draft behaves as deleted from the user's perspective —
     // it must not block reuse of its memo number (business rule correction).

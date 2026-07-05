@@ -380,6 +380,17 @@ async function confirmApprove() {
       const isPendingA3 = memo.status === 'pending_a3';
       const actionKey   = isPendingA3 ? 'approved_a3' : isPendingA2 ? 'approved_a2' : 'approved_a1';
       const stageLabel  = isPendingA3 ? 'A3' : isPendingA2 ? 'A2' : 'A1';
+      // Functional audit fix: `actionKey` ('approved_a1'/'approved_a2'/'approved_a3')
+      // is the action passed to updateMemoStatusAsync() for its branching, but it
+      // is never the real resulting memo.status — updateMemoStatusAsync() always
+      // resolves to 'pending_a2'/'pending_a3'/'completed' (app.js). The audit
+      // entry must record that real new status, not the intermediate action key.
+      const approvers   = memo.approvers || [];
+      const approvingIdx = isPendingA3 ? 2 : isPendingA2 ? 1 : 0;
+      const hasNextApprover = approvers[approvingIdx + 1];
+      const realStatusAfter = hasNextApprover
+        ? (approvingIdx + 1 === 1 ? 'pending_a2' : 'pending_a3')
+        : 'completed';
 
       const updatedAuditLog = [...(memo.auditLog || []), {
         actor: user,
@@ -388,7 +399,7 @@ async function confirmApprove() {
         comment: note,
         timestamp: new Date().toISOString(),
         statusBefore: memo.status || null,
-        statusAfter: actionKey,
+        statusAfter: realStatusAfter,
         evidenceUrl: evidenceUrl || null,
         channel: 'in-app',
       }];
@@ -678,10 +689,29 @@ function confirmPmoOverride(memoNo) {
   const editRows = document.querySelectorAll('#pmo-appr-edit-rows .approver-edit-row');
   const memo     = loadMemos().find(m => m.memoNo === memoNo);
   const user     = currentUser();
+
+  // Functional audit fix: Override is only a documented transition FROM a
+  // Pending-family status (MEMO_LIFECYCLE.md §8, SYSTEM_STATE_MACHINE.md §3) —
+  // previously only the Override button's visibility (isPending) enforced
+  // this; the function itself had no guard, so a direct call could resurrect
+  // an already-terminal (Rejected/Cancelled/Completed/Voided) memo in place.
+  if (!memo || !['pending', 'pending_a2', 'pending_a3'].includes(memo.status)) {
+    alert('PMO Override ใช้ได้เฉพาะ Memo ที่มีสถานะ Pending เท่านั้น');
+    return;
+  }
+
   // Milestone 1A Task 1.3: the one approver step whose turn it currently is gets
   // marked 'overridden' (PMO acted in its place) rather than reset to 'pending'
   // like every other not-yet-reached step — see MEMO_LIFECYCLE.md §7/§8.
   const currentPendingIdx = (memo?.approvers || []).findIndex(a => !a.status || a.status === 'pending');
+  // Functional audit fix: overriding to "Completed" asserts the *final* memo
+  // approval happened outside the system (MEMO_LIFECYCLE.md §8 item 2), so
+  // every not-yet-reached step — not just the current one — must resolve to
+  // Overridden. Leaving a later step at 'pending' under a completed memo
+  // contradicted SYSTEM_STATE_MACHINE.md §5's own worked example and let a
+  // required approver step go permanently unresolved. Overriding to a
+  // specific intermediate step (pending_a2/pending_a3) is unaffected — only
+  // the current step resolves, later ones correctly remain 'pending'.
   let newApprovers = null;
   if (editRows.length && memo) {
     newApprovers = Array.from(editRows).map((row, i) => {
@@ -689,7 +719,7 @@ function confirmPmoOverride(memoNo) {
       const title = row.querySelector('.appr-title')?.value.trim() || '';
       const orig  = (memo.approvers||[])[i];
       if (isApproverStepResolved(orig?.status)) return orig; // keep resolved entries intact
-      if (i === currentPendingIdx) {
+      if (i === currentPendingIdx || (newStatus === 'completed' && i > currentPendingIdx)) {
         return {
           ...orig, name, title,
           status: 'overridden',

@@ -236,3 +236,56 @@ test('parseLicenseFromMemo gives each line item a unique id even when two lines 
   assert.equal(new Set(licenses.map(l => l.id)).size, 2, 'each line item must have a unique id, not a collision on memoNo+name+plan+coverage');
   assert.deepEqual(Array.from(licenses.map(l => l.seats)).sort(), [2, 3], 'seat counts for both lines must be preserved, not overwritten by a colliding id');
 });
+
+// Functional audit fix: when a line item has no (or an invalid) startMonth, expiry falls back to
+// `new Date(purchaseDate)` (memo.approvedAt/updatedAt/createdAt) + setMonth(+months). Without
+// normalizing to day 1 first, Date.setMonth() overflows into the next month whenever the
+// purchase-date day-of-month (29-31) exceeds the target month's day count (e.g. Jan 31 + 1 month
+// => Mar 3, not Feb 28), pushing the computed expiry later than intended.
+test('parseLicenseFromMemo does not let Date.setMonth() overflow the expiry into the wrong month when startMonth is missing', () => {
+  const { context } = createLicenseContext();
+  const memo = slMemo({
+    memoNo: 'ORB-2610-100',
+    approvedAt: '2026-01-31T10:00:00.000Z',
+    updatedAt: '2026-01-31T10:00:00.000Z',
+    createdAt: '2026-01-31T10:00:00.000Z',
+    slItems: [
+      { name: 'Canva', plan: 'Pro', price: 300, qty: 1, months: 1 }, // no startMonth
+    ],
+  });
+  const [license] = context.parseLicenseFromMemo(memo);
+  assert.equal(license.purchaseDate.slice(0, 10), '2026-01-01', 'start must normalize to day 1 of the month, not the raw approval day (31)');
+  assert.equal(license.expiry.slice(0, 10), '2026-02-01', 'expiry must land in February (Jan + 1 month), not roll over into March');
+});
+
+// Functional audit fix: _renderLicMemoIndexRows() has always looked for
+// #license-load-more (to show remaining count / wire loadMoreLicense()), but
+// no such element was ever added to _renderLicMemoIndex()'s own template —
+// pagination was silently unreachable, capping License Index at 20 rows with
+// no way to see the rest.
+test('_renderLicMemoIndex renders a Load More control wired to the existing loadMoreLicense() (previously missing entirely)', () => {
+  const { context } = createLicenseContext();
+  const licContent = { innerHTML: '' };
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => (id === 'lic-content') ? licContent : origGetById(id);
+
+  context._renderLicMemoIndex();
+
+  assert.match(licContent.innerHTML, /id="license-load-more"/, 'the Load More container must exist in the rendered DOM');
+  assert.match(licContent.innerHTML, /onclick="loadMoreLicense\(\)"/, 'its button must call the already-implemented loadMoreLicense()');
+});
+
+test('parseLicenseFromMemo still computes the correct 12-month expiry when startMonth is missing (regression control)', () => {
+  const { context } = createLicenseContext();
+  const memo = slMemo({
+    memoNo: 'ORB-2610-101',
+    approvedAt: '2026-01-31T10:00:00.000Z',
+    updatedAt: '2026-01-31T10:00:00.000Z',
+    createdAt: '2026-01-31T10:00:00.000Z',
+    slItems: [
+      { name: 'Notion', plan: 'Team', price: 1000, qty: 1, months: 12 }, // no startMonth
+    ],
+  });
+  const [license] = context.parseLicenseFromMemo(memo);
+  assert.equal(license.expiry.slice(0, 10), '2027-01-01', 'a 12-month term from Jan must expire exactly one year later');
+});

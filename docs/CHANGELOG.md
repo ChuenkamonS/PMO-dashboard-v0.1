@@ -22,6 +22,145 @@
 
 ## Current Baseline
 
+### 2026-07-05 Final Functional Audit — 8-Flow End-to-End Stabilization Pass
+
+Scope: final pre-feature-complete functional audit of all 8 core business flows (Memo lifecycle;
+Software License → License module; Hardware → Purchase Order/Device Registry; Budget flow;
+Dashboard/Overview; Search/Filter/Export/Sort/Pagination/Bulk/Import; Audit log coverage; Data
+integrity). No new features, no refactors, no UI redesign. Only confirmed, reproducible functional
+defects were fixed; everything else is documented in `docs/TECHNICAL_DEBT.md` instead.
+
+#### Fixed
+- `confirmPmoOverride()` (views/pending.js): overriding a memo directly to "Completed" only marked
+  the one approval step PMO acted in place of as `overridden` — every later, not-yet-reached
+  approver step was reset to `pending` and left there permanently, even though the memo itself
+  became fully `completed` (triggering PO/license creation and Actual Spend impact). This
+  contradicted SYSTEM_STATE_MACHINE.md §5's own worked example. Overriding to "Completed" now marks
+  every not-yet-reached step `overridden` too; overriding to a specific intermediate step
+  (`pending_a2`/`pending_a3`) is unchanged — only the acted-on step resolves, matching MEMO_LIFECYCLE.md
+  §8's "specific approval step" vs. "final memo approval" distinction.
+- `confirmPmoOverride()` had no function-level guard on the memo's *current* status — only the
+  Override button's visibility (`isPending`) prevented it from being invoked on an already-terminal
+  (Rejected/Cancelled/Completed/Voided) memo. A direct call could resurrect a terminal memo in place,
+  bypassing the required Duplicate-with-new-memo-number flow (SYSTEM_STATE_MACHINE.md §3/§4). The
+  function itself now refuses to act unless the memo's status is `pending`/`pending_a2`/`pending_a3`.
+- `saveDraft()` (views/create.js) had no memo-number uniqueness check at all —
+  `saveMemo()`/`saveMemoAsync()` upsert by `memoNo`, so typing (or editing into) a number that
+  already belonged to a different, non-Draft memo silently overwrote that unrelated record,
+  including downgrading an Approved/Pending memo's own record back to Draft. `submitMemo()`'s
+  existing Supabase conflict check was extracted into a shared `checkMemoNoConflict()` and is now
+  also run by `saveDraft()` before saving, blocking on the same rule (Rejected/Cancelled memo numbers
+  may still be reused; the Draft currently being edited is exempt) — closing the gap identified in
+  MEMO_LIFECYCLE.md §5 ("Duplicate Memo Number is not allowed", no stated Draft exception).
+- `confirmApprove()` (views/pending.js) wrote its own audit entry with `statusAfter` set to the
+  intermediate action key (`'approved_a1'`/`'approved_a2'`/`'approved_a3'`) — a value `memo.status`
+  never actually holds; `updateMemoStatusAsync()` always resolves to `'pending_a2'`/`'pending_a3'`/
+  `'completed'`. Every Approve action's audit trail recorded a "new status" that could never match
+  the live record. The audit entry now computes and records the real resulting status.
+- `openDeviceModal()`/`saveDevice()` (views/device.js) read/wrote the device→memo link via a stale
+  field name, `d.memoRef`, while the canonical field (used by PO-arrival device creation, the
+  DB mapping, and the Void downstream-block check) is `memoNo` — matching an already-completed
+  one-time migration in `_loadDevicesRaw()`. The "Link HW Memo" field therefore always showed blank
+  on Edit, and saving silently blanked a device's real `memoNo`, severing its link back to the
+  source memo and defeating `memoHasIrreversibleDownstreamRecords()`'s Void-block check
+  (MEMO_LIFECYCLE.md §12). Both now read/write `memoNo`.
+- `exportDeviceCsv()` (views/device.js) always exported every device in the system regardless of the
+  active search/platform/type/status/project/company filters, disagreeing with what
+  `_renderDeviceTable()` shows on screen — a direct MASTER_SPEC.md "Export Rules" violation. The
+  filter predicates are now a single shared `_filteredDevices()` helper used by both the table
+  render and the export, so they can no longer diverge; also fixed the export's Memo Ref column,
+  which had the same stale `d.memoRef` bug as above.
+- `parseLicenseFromMemo()` (views/license.js): when a software line item has no (or an invalid)
+  `startMonth`, expiry falls back to `new Date(purchaseDate)` (the memo's approval/update/create
+  timestamp) + `setMonth(+months)`. Without normalizing to day 1 of the month first, `Date.setMonth()`
+  overflows into the next month whenever the purchase-date's day-of-month (29-31) exceeds the target
+  month's day count (e.g. Jan 31 + 1 month => Mar 3, not Feb 28), silently pushing the computed
+  expiry later than intended and mis-bucketing License Index's "expiring soon"/expired status. `start`
+  is now always normalized to day 1 before the month arithmetic, using the same UTC-safe
+  `"YYYY-MM-01"` construction already used by the `startMonth` branch.
+- License Index's pagination was silently unreachable: `_renderLicMemoIndexRows()` has always looked
+  for `#license-load-more` to show a "Load more"/remaining-count control, but no such element was
+  ever added to `_renderLicMemoIndex()`'s own template — the list was capped at 20 rows with no way
+  to see the rest, and today's `loadMoreLicense()` re-wiring (see "PDF Signature Lookup Fix" section
+  below / prior audit) had nothing to attach to. Added the missing `#license-load-more` control,
+  matching the exact pattern already used by All Memo/History's own Load More bar.
+- `markArrived()` (views/device.js) never re-checked the source memo's status. A Hardware memo could
+  be Voided while its Purchase Order still had no arrivals (correctly allowed per MEMO_LIFECYCLE.md
+  §12's own example), but nothing then stopped that PO from continuing to advance and creating
+  brand-new Device Registry records against the now-voided memo — contradicting
+  SYSTEM_STATE_MACHINE.md §6 ("Block or require manual downstream resolution" for Device Management
+  on a Voided memo) and the core principle that only Approved memos create downstream impact
+  (SYSTEM_OVERVIEW.md §2). `markArrived()` now blocks with an explanatory alert if the source memo's
+  status is `voided`/`rejected`/`cancelled`.
+
+#### Investigated, not a bug (no change made)
+- Overview's Budget KPI/Section-B figures (`_ovUpdateKPIs()`/`_ovRenderBvA()`, views/budget.js) do
+  not shrink when the Spend Type filter chips narrow the Actual figure. Traced into the canonical
+  `calculateBudgetVsActualDataset()`/`calculateBudgetUtilization()` (app.js) engine itself: a Budget
+  Pool's `budget` is one undecomposed number covering potentially several Spend Types (MASTER_SPEC.md
+  "One pool → many spend types"), so it is never spend-type-scoped anywhere, including in the
+  already-shipped Budget vs Actual tab (Phase 7A-8) — Overview's behavior exactly matches the
+  canonical tab's own established, reviewed semantics. Not a new Overview-specific inconsistency.
+- Save Draft double-click race and `resetMemoForm()` interactions with manually-edited account-table
+  headers were re-checked from the prior audit pass; both remain not reproducible for the same
+  reasons already recorded in the 2026-07-05 Functional Audit entry below.
+
+#### Remaining Work (documented, not fixed — see docs/TECHNICAL_DEBT.md)
+- **TD-AUDIT-02 (new)**: `calculateForecast()`'s row-grouping key (`app.js`) can still merge two
+  distinct same-named line items within one memo (e.g. two tiers of the same software) into one
+  blended Forecast row — a narrower recurrence of the aggregation bug class already fixed once for
+  this function. Not fixed here: the correct visual disambiguator (how to label the second row) is a
+  display/design judgment call, not a pure logic fix, consistent with this repo's own precedent
+  (TD-AUDIT-01) for not silently changing Forecast semantics.
+- **TD-AUDIT-03 (new)**: `voidMemoAsync()` calls `updateMemoStatusAsync()` without
+  `throwOnSyncError:true` (unlike `confirmApprove()`, which does). Combined with TD-M1-03's
+  already-documented "Void/soft-delete migration not yet applied" gap, a Supabase PATCH rejection is
+  silently swallowed, so a Voided memo's Actual Spend record (deleted locally) can reappear after a
+  real reload once `reconcileActualSpendSources()` re-reads the still-`completed` row from Supabase.
+  Not fixed here: changing Void's error-handling contract (fail loudly vs. silently degrade to local-only)
+  needs a PMO/BA decision, since every other post-M1 migration-gap item in this repo has deliberately
+  chosen the "keep working locally" trade-off.
+- **TD-AUDIT-04 (new)**: License Management's PMO Review Queue "Reject" path drops an account list's
+  rows entirely with no way to manually re-grant those specific users' licenses later, even though
+  SYSTEM_STATE_MACHINE.md §7 names the flow's Reject branch "manual assignment later." No "Add user"
+  affordance exists anywhere in License Management > Users to serve as that manual path. Not
+  implemented — building one is a new UI affordance, out of this audit's "no new features" scope.
+- **TD-AUDIT-05 (new)**: `memoHasIrreversibleDownstreamRecords()` (app.js), the Void-block check,
+  reads devices via the synchronous `loadDevices()` (cache/localStorage only), not
+  `loadDevicesAsync()`. On a fresh session/device where Device Management hasn't been opened yet,
+  there is a narrow timing window where the check runs against a stale/empty cache before the
+  startup preload resolves. Not fixed here: closing this fully means making the Void path async-await
+  a fresh fetch, a broader change to a business-critical guard that warrants its own reviewed pass
+  rather than a same-audit fix.
+- Settings/master-data saves (`saveSettings()`, views/settings.js) write no audit entry at all —
+  SYSTEM_OVERVIEW.md §8 lists "Master data changes" as requiring an audit log. Confirmed by tracing
+  (zero `appendAuditLog`/audit-log references anywhere in the file). Not fixed here: this audit's
+  brief explicitly excludes modifying Settings.
+
+#### Tests
+- `tests/memo-audit.test.js`: new tests for PMO Override resolving every not-yet-reached approver
+  step to Overridden when the target is "Completed" (and confirming intermediate-step overrides are
+  unaffected); PMO Override refusing to act on a non-Pending-family memo; `confirmApprove()` recording
+  the real resulting status (`completed`/`pending_a3`) rather than the intermediate action key.
+- `tests/workflow.test.js`: new tests for the shared `checkMemoNoConflict()` helper (conflict found /
+  none found) and for `saveDraft()`'s control flow correctly gating on it before `saveMemo()`.
+- `tests/device.test.js`: new tests for `openDeviceModal()`/`saveDevice()` preserving `memoNo` across
+  an edit round-trip (and that the Void guard still blocks correctly afterward); `exportDeviceCsv()`
+  respecting the active project filter; `markArrived()` blocked against a Voided source memo and
+  unaffected for a normal Completed one.
+- `tests/license.test.js`: new tests for the `Date.setMonth()` expiry-rollover fix (including a
+  12-month regression control) and for `_renderLicMemoIndex()` rendering the Load More control.
+- Full regression suite: 443/443 passing (up from 426 before this pass).
+- Manually verified in the browser against the live app: License Index's Load More control renders
+  and correctly reveals all 45 real licenses in two clicks; Device Registry's Export CSV now returns
+  exactly the 5 devices visible under an active project filter (previously all 115); editing a real
+  device (id 116, `memoNo: 'DEVTEST-M037'`) through the modal preserves its memo link instead of
+  blanking it (test edit reverted afterward); `checkMemoNoConflict()` correctly detects a real
+  in-use memo number and returns `null` for an unused one against the live Supabase backend. No
+  console errors observed across History, Pending, Budget & Spend, License, Device, or Create Memo.
+
+---
+
 ### 2026-07-05 PDF Signature Lookup Fix
 
 Scope: fix a confirmed defect where an approver's uploaded signature did not appear on the

@@ -436,6 +436,18 @@ async function markArrived(poId, qty, serialNumbers = []) {
   const pos = loadPurchaseOrders();
   const po  = pos.find(p => p.id === poId);
   if (!po) return;
+  // Functional audit fix: SYSTEM_STATE_MACHINE.md §6 requires Device
+  // Management downstream impact to be blocked once the source memo is
+  // Voided/Rejected/Cancelled. Nothing previously re-checked the memo's
+  // status here, so a PO tied to an already-voided memo could keep advancing
+  // and spawn brand-new Device Registry records with no warning.
+  if (po.memoNo && typeof loadMemos === 'function') {
+    const sourceMemo = loadMemos().find(m => m.memoNo === po.memoNo);
+    if (sourceMemo && ['voided', 'rejected', 'cancelled'].includes(sourceMemo.status)) {
+      alert(`Memo ${po.memoNo} ถูกเปลี่ยนสถานะเป็น "${sourceMemo.status}" แล้ว — ไม่สามารถสร้าง Device Registry ใหม่จาก PO นี้ได้ กรุณาแจ้ง PMO เพื่อดำเนินการแก้ไขด้วยตนเอง`);
+      return;
+    }
+  }
   if (!['awaiting', 'partial_arrived'].includes(po.status)) {
     alert('กรุณาเปลี่ยนสถานะเป็น Awaiting ก่อน mark arrived');
     return;
@@ -695,6 +707,34 @@ function renderDevice() {
   loadDevicesAsync().then(() => _renderDeviceTable()).catch(() => _renderDeviceTable());
 }
 
+// Functional audit fix: single source of the Device Registry filter
+// predicates (search + platform/type/status/project/company dropdowns) —
+// previously only inlined inside _renderDeviceTable(), so Export CSV
+// (exportDeviceCsv()) always read the full unfiltered list, disagreeing with
+// what was on screen (MASTER_SPEC.md "Export Rules"). Reused by both.
+function _filteredDevices(allDevices) {
+  const search     = (document.getElementById('dev-search')?.value||'').toLowerCase();
+  const platFilter = val('#dev-filter-platform') || 'all';
+  const typeFilter = val('#dev-filter-type')     || 'all';
+  const statFilter = val('#dev-filter-status')   || 'all';
+  const projFilter = val('#dev-filter-project')  || 'all';
+  const compFilter = val('#dev-filter-company')  || 'all';
+
+  let devices = allDevices;
+  if(platFilter !== 'all') devices = devices.filter(d => (d.platform||'other') === platFilter);
+  if(typeFilter !== 'all') devices = devices.filter(d => (d.type||'other') === typeFilter);
+  if(statFilter !== 'all') devices = devices.filter(d => d.status === statFilter);
+  if(projFilter !== 'all') devices = devices.filter(d => d.project === projFilter);
+  if(compFilter !== 'all') devices = devices.filter(d => d.company === compFilter);
+  if(search) devices = devices.filter(d => [
+    d.name, d.brand, d.serial, d.assetTag, d.pbxNumber,
+    d.owner, d.position, d.project, d.company, d.osVersion,
+    d.qaOwner, d.note, d.memoNo, d.type, d.platform,
+    PLATFORM_LABEL[d.platform||'other'], TYPE_LABEL[d.type||'other']
+  ].some(v => v && String(v).toLowerCase().includes(search)));
+  return devices;
+}
+
 function _renderDeviceTable() {
 
   const allDevices = loadDevices();
@@ -713,26 +753,8 @@ function _renderDeviceTable() {
   // Summary tables (unfiltered)
   renderDeviceSummaries(allDevices);
 
-  // Filters
-  const search     = (document.getElementById('dev-search')?.value||'').toLowerCase();
-  const platFilter = val('#dev-filter-platform') || 'all';
-  const typeFilter = val('#dev-filter-type')     || 'all';
-  const statFilter = val('#dev-filter-status')   || 'all';
-  const projFilter = val('#dev-filter-project')  || 'all';
-  const compFilter = val('#dev-filter-company')  || 'all';
-
-  let devices = allDevices;
-  if(platFilter !== 'all') devices = devices.filter(d => (d.platform||'other') === platFilter);
-  if(typeFilter !== 'all') devices = devices.filter(d => (d.type||'other') === typeFilter);
-  if(statFilter !== 'all') devices = devices.filter(d => d.status === statFilter);
-  if(projFilter !== 'all') devices = devices.filter(d => d.project === projFilter);
-  if(compFilter !== 'all') devices = devices.filter(d => d.company === compFilter);
-  if(search) devices = devices.filter(d => [
-    d.name, d.brand, d.serial, d.assetTag, d.pbxNumber,
-    d.owner, d.position, d.project, d.company, d.osVersion,
-    d.qaOwner, d.note, d.memoRef, d.type, d.platform,
-    PLATFORM_LABEL[d.platform||'other'], TYPE_LABEL[d.type||'other']
-  ].some(v => v && String(v).toLowerCase().includes(search)));
+  const search = (document.getElementById('dev-search')?.value||'').toLowerCase();
+  const devices = _filteredDevices(allDevices);
 
   const tbody = document.getElementById('dev-table-body');
   if(!devices.length) {
@@ -741,7 +763,14 @@ function _renderDeviceTable() {
   }
 
   // Reset visible count when filters change
-  const filterKey = JSON.stringify({search, platFilter, typeFilter, statFilter, projFilter, compFilter});
+  const filterKey = JSON.stringify({
+    search,
+    platFilter: val('#dev-filter-platform') || 'all',
+    typeFilter: val('#dev-filter-type')     || 'all',
+    statFilter: val('#dev-filter-status')   || 'all',
+    projFilter: val('#dev-filter-project')  || 'all',
+    compFilter: val('#dev-filter-company')  || 'all',
+  });
   if(typeof _devLastFilter !== 'undefined' && _devLastFilter !== filterKey) _devVisibleCount = DEV_PAGE_SIZE;
   window._devLastFilter = filterKey;
 
@@ -834,7 +863,7 @@ function openDeviceModal(id) {
     setVal('dev-company', d.company);  setVal('dev-project', d.project);
     setVal('dev-owner', d.owner);      setVal('dev-position', d.position);
     setVal('dev-assigned-date', d.assignedDate);
-    setVal('dev-return-date', d.returnDate); setVal('dev-memo-ref', d.memoRef);
+    setVal('dev-return-date', d.returnDate); setVal('dev-memo-ref', d.memoNo);
     setVal('dev-warranty', d.warranty);
     setVal('dev-status', d.status||'not_identified'); setVal('dev-note', d.note);
     setVal('dev-qa-owner', d.qaOwner);
@@ -942,7 +971,10 @@ function deleteDevice(id) {
 // ── Export CSV ──
 function exportDeviceCSV() { exportDeviceCsv(); } // alias
 function exportDeviceCsv() {
-  const devices = loadDevices();
+  // Functional audit fix: export the same filtered set _renderDeviceTable()
+  // currently shows (search + platform/type/status/project/company), not the
+  // full unfiltered registry — see MASTER_SPEC.md "Export Rules".
+  const devices = _filteredDevices(loadDevices());
   if(!devices.length) { alert('ไม่มีข้อมูลสำหรับ Export'); return; }
   const headers = ['PBX Number','OS','Type','Brand / Model','Asset ACC',
     'Serial','Assignee','Position','Project','Received date','QA Owner',
@@ -953,7 +985,7 @@ function exportDeviceCsv() {
     d.assetTag||'', d.serial||'', d.owner||'', d.position||'',
     d.project||'', d.assignedDate||'', d.qaOwner||'',
     d.updatedAt ? d.updatedAt.slice(0,10) : '', d.note||'', d.osVersion||'',
-    d.status||'', d.warranty||'', d.memoRef||''
+    d.status||'', d.warranty||'', d.memoNo||''
   ]);
   _downloadCSV('Device_Registry', headers, rows);
 }

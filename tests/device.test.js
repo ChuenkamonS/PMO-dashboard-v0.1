@@ -66,7 +66,11 @@ function createDeviceContext() {
     },
     document: {
       getElementById,
-      querySelector: () => null,
+      // val() (app.js) reads filter dropdowns via document.querySelector('#id')
+      // rather than getElementById — resolve simple #id selectors through the
+      // same auto-vivifying element map so filter-dependent code under test
+      // (e.g. _filteredDevices()) sees values set via getElementById(id).value.
+      querySelector: sel => (typeof sel === 'string' && sel.startsWith('#')) ? getElementById(sel.slice(1)) : null,
       querySelectorAll: () => [],
       createElement: () => ({ style:{}, click(){}, remove(){}, appendChild(){} }),
       body: { appendChild(){}, removeChild(){}, classList: { add(){}, remove(){} } },
@@ -560,4 +564,78 @@ test('markArrived falls back to a generic placeholder (never the memo number) if
   const device = context.loadDevices().find(d => d.memoNo === 'HW-952');
   assert.ok(device.name, 'device name must never be blank');
   assert.notEqual(device.name, 'HW-952', 'device name must never fall back to the memo number');
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Functional audit fixes
+// ══════════════════════════════════════════════════════════════════
+
+test('openDeviceModal populates "Link HW Memo" from the canonical memoNo field, not the stale/removed memoRef field', () => {
+  const { context } = createDeviceContext();
+  context.storeDevices([{ id: 'dev-800', name: 'iPhone 13', memoNo: 'HW-800', status: 'available', auditLog: [] }]);
+  context.openDeviceModal('dev-800');
+  assert.equal(context.document.getElementById('dev-memo-ref').value, 'HW-800');
+});
+
+test('saveDevice() edit round-trip preserves memoNo (previously blanked on every edit because the modal read a stale memoRef field)', () => {
+  const { context } = createDeviceContext();
+  context.storeDevices([{ id: 'dev-801', name: 'iPad', memoNo: 'HW-801', status: 'available', auditLog: [] }]);
+  context.openDeviceModal('dev-801'); // populates the edit form, including dev-memo-ref
+  context.saveDevice();
+  const device = context.loadDevices().find(d => d.id === 'dev-801');
+  assert.equal(device.memoNo, 'HW-801', 'editing a device through the modal must not blank its memoNo link');
+});
+
+test('a device whose memoNo survives editing still correctly blocks the memo Void downstream guard', async () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = [${JSON.stringify({
+    memoNo: 'HW-802', type: 'hw', status: 'completed',
+    requesterProfileId: 3, requesterName: 'PMO Admin', approvers: [], auditLog: [],
+  })}]`, context);
+  context.storeDevices([{ id: 'dev-802', name: 'iPad', memoNo: 'HW-802', status: 'available', auditLog: [] }]);
+  context.openDeviceModal('dev-802');
+  context.saveDevice(); // a routine edit (e.g. filling in owner) must not sever the memo link
+  const result = await context.voidMemoAsync('HW-802', 'reason');
+  assert.equal(result.ok, false, 'the device is still linked to HW-802 after editing, so Void must remain blocked');
+});
+
+test('exportDeviceCsv exports only the currently filtered/searched devices, matching the on-screen table (MASTER_SPEC.md Export Rules)', () => {
+  const { context } = createDeviceContext();
+  context.storeDevices([
+    { id: 'dev-900', name: 'Alpha Laptop', project: 'AOA-MP', status: 'available', auditLog: [] },
+    { id: 'dev-901', name: 'Beta Laptop', project: 'Geo9', status: 'available', auditLog: [] },
+  ]);
+  context.document.getElementById('dev-filter-project').value = 'AOA-MP';
+  let downloaded = null;
+  context._downloadCSV = (name, headers, rows) => { downloaded = { name, headers, rows }; };
+  context.exportDeviceCsv();
+  assert.ok(downloaded, 'export must produce a CSV');
+  assert.equal(downloaded.rows.length, 1, 'export must respect the active project filter, not export every device');
+  assert.equal(downloaded.rows[0][3], 'Alpha Laptop');
+});
+
+test('markArrived is blocked once the source Hardware memo has been Voided, even though a PO still exists with no arrivals yet', async () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = [${JSON.stringify({
+    memoNo: 'HW-960', type: 'hw', status: 'voided', voidedAt: '2026-07-05T00:00:00.000Z', voidedBy: 'PMO Admin',
+  })}]`, context);
+  context.storePurchaseOrders([{ id: 'po-960', memoNo: 'HW-960', itemName: 'Laptop', orderedQty: 2, arrivedQty: 0, status: 'awaiting' }]);
+
+  await context.markArrived('po-960', 2, ['SN1', 'SN2']);
+
+  const po = context.loadPurchaseOrders().find(p => p.id === 'po-960');
+  assert.equal(po.arrivedQty, 0, 'a voided memo\'s PO must not advance');
+  assert.equal(context.loadDevices().filter(d => d.memoNo === 'HW-960').length, 0, 'no new Device Registry records may be created against a voided memo');
+});
+
+test('markArrived still works normally for a PO whose source memo is completed (not voided/rejected/cancelled) — no false-positive block', async () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = [${JSON.stringify({ memoNo: 'HW-961', type: 'hw', status: 'completed' })}]`, context);
+  context.storePurchaseOrders([{ id: 'po-961', memoNo: 'HW-961', itemName: 'Monitor', orderedQty: 1, arrivedQty: 0, status: 'awaiting' }]);
+
+  await context.markArrived('po-961', 1, ['SN1']);
+
+  const po = context.loadPurchaseOrders().find(p => p.id === 'po-961');
+  assert.equal(po.arrivedQty, 1);
+  assert.equal(context.loadDevices().filter(d => d.memoNo === 'HW-961').length, 1);
 });

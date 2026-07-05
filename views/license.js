@@ -104,9 +104,24 @@ function parseLicenseFromMemo(memo) {
       const price  = Number(it.price) || 0;
       const months = Number(it.months) || 12;
       const seats  = Number(it.qty) || 1;
-      const start  = (it.startMonth && it.startMonth.match(/^\d{4}-\d{2}$/))
-        ? new Date(it.startMonth + '-01')
-        : new Date(purchaseDate);
+      // Functional audit fix: always normalize `start` to day 1 of the month
+      // before adding `months` below. Without this, when startMonth is
+      // missing/invalid and purchaseDate's day-of-month is 29-31,
+      // Date.setMonth() overflows into the next month for any `months` value
+      // that lands on a shorter month (e.g. Jan 31 + 1 month => Mar 3, not
+      // Feb 28) — silently pushing the license's expiry date later than
+      // intended and mis-bucketing License Index's "expiring soon" status.
+      let start;
+      if (it.startMonth && it.startMonth.match(/^\d{4}-\d{2}$/)) {
+        start = new Date(it.startMonth + '-01');
+      } else {
+        // Build the same "YYYY-MM-01" UTC-midnight shape as the startMonth
+        // branch above (not `new Date(y, m, 1)`, which is local-time and
+        // would drift the stored ISO timestamp by the local UTC offset).
+        const pd = new Date(purchaseDate);
+        const ym = `${pd.getFullYear()}-${String(pd.getMonth() + 1).padStart(2, '0')}`;
+        start = new Date(ym + '-01');
+      }
       const expiry = new Date(start);
       expiry.setMonth(expiry.getMonth() + months);
       // idx (line position within this memo) keeps the id unique even when two lines share the
@@ -369,6 +384,9 @@ function _renderLicMemoIndex() {
         </tr></thead>
         <tbody id="lic-table-body"></tbody>
       </table>
+    </div>
+    <div id="license-load-more" class="load-more-bar" style="display:none">
+      <button onclick="loadMoreLicense()">Load more</button>
     </div>`;
 
   _renderLicMemoIndexRows();

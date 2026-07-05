@@ -931,7 +931,7 @@ test('memoToDb/dbToMemo map the new Hotfix detail fields to/from snake_case DB c
 test("saveDraft() no longer calls the undefined switchPendingTab() and navigates to History's Draft tab instead", () => {
   const createCode = fs.readFileSync(path.join(root, 'views/create.js'), 'utf8');
   const historyCode = fs.readFileSync(path.join(root, 'views/history.js'), 'utf8');
-  const fn = createCode.match(/function saveDraft\(\) \{([\s\S]*?)\n\}\n/)?.[0] || '';
+  const fn = createCode.match(/async function saveDraft\(\) \{([\s\S]*?)\n\}\n/)?.[0] || '';
   assert.ok(fn, 'saveDraft must be defined');
 
   assert.doesNotMatch(fn, /switchPendingTab/, 'switchPendingTab does not exist anywhere in the codebase');
@@ -942,6 +942,87 @@ test("saveDraft() no longer calls the undefined switchPendingTab() and navigates
   assert.match(fn, /swView\('history'/);
   assert.match(fn, /switchHistTab\('draft'\)/);
   assert.match(historyCode, /function switchHistTab\(status, btn\)/, 'switchHistTab must exist and be the real tab-switch function');
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Functional audit fix — Save Draft had NO memo-number uniqueness check at
+// all: saveMemo()/saveMemoAsync() upsert by memoNo, so typing (or editing
+// into) a number that already belonged to a different, non-Draft memo
+// silently overwrote that unrelated record (MEMO_LIFECYCLE.md §5: "Memo
+// Number must be unique", "Duplicate Memo Number is not allowed" — no stated
+// Draft exception). saveDraft() now reuses the same checkMemoNoConflict()
+// check submitMemo() already performed.
+// ══════════════════════════════════════════════════════════════════
+
+function createMemoNoConflictContext(fetchImpl) {
+  const createCode = fs.readFileSync(path.join(root, 'views/create.js'), 'utf8');
+  const context = {
+    console, Date, URL, Blob, AbortController,
+    setTimeout, clearTimeout,
+    alert: () => {}, confirm: () => true,
+    fetch: fetchImpl,
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    document: {
+      getElementById: () => null, querySelector: () => null, querySelectorAll: () => [],
+      createElement: () => ({ style: {}, click() {}, remove() {}, appendChild() {} }),
+      body: { appendChild() {}, removeChild() {}, classList: { add() {}, remove() {} } },
+      addEventListener: () => {},
+    },
+    window: {},
+    location: { reload() {} },
+  };
+  context.window = context;
+  vm.createContext(context);
+  vm.runInContext(appCode, context, { filename: 'app.js' });
+  vm.runInContext(createCode, context, { filename: 'views/create.js' });
+  return context;
+}
+
+test('saveDraft() calls the shared checkMemoNoConflict() before saving and blocks on a real conflict — the same check submitMemo() already performs', () => {
+  const createCode = fs.readFileSync(path.join(root, 'views/create.js'), 'utf8');
+  const fn = createCode.match(/async function saveDraft\(\) \{([\s\S]*?)\n\}\n/)?.[0] || '';
+  assert.ok(fn, 'saveDraft must be defined and async (it now awaits a network check)');
+  assert.match(fn, /checkMemoNoConflict\(data\.memoNo\)/, 'saveDraft must run the shared conflict check before saveMemo()');
+  assert.match(fn, /MEMO_NO_BLOCKING_STATUSES\.has\(conflict\.status\)/, 'saveDraft must apply the same blocking-status rule submitMemo() uses (Rejected/Cancelled may still be reused)');
+  assert.match(fn, /editingSameDraft/, 're-saving the SAME draft under its own existing number must not be blocked');
+  // saveMemo() itself must run strictly after the check (not before), i.e. the check can still return/block first.
+  const checkPos = fn.indexOf('checkMemoNoConflict');
+  const savePos = fn.indexOf('saveMemo(data)');
+  assert.ok(checkPos >= 0 && savePos > checkPos, 'the conflict check must run before saveMemo() persists anything');
+
+  // checkMemoNoConflict() must be a single shared implementation, not duplicated per caller.
+  const defCount = (createCode.match(/async function checkMemoNoConflict\(/g) || []).length;
+  assert.equal(defCount, 1, 'checkMemoNoConflict must be defined exactly once and reused by both saveDraft and submitMemo');
+  assert.match(createCode.match(/async function submitMemo\(\) \{([\s\S]*?)\n\}\n/)?.[0] || '', /checkMemoNoConflict\(data\.memoNo\)/, 'submitMemo must reuse the same shared helper, not its own inline duplicate query');
+});
+
+test('checkMemoNoConflict() returns the conflicting row when Supabase reports one, and null when there is none', async () => {
+  const conflictCtx = createMemoNoConflictContext(async () => ({
+    ok: true, text: async () => JSON.stringify([{ memo_no: 'MEMO-100', status: 'pending', deleted: false }]),
+  }));
+  const conflict = await conflictCtx.checkMemoNoConflict('MEMO-100');
+  assert.equal(conflict.memo_no, 'MEMO-100');
+  assert.equal(conflict.status, 'pending');
+  assert.equal(conflict.deleted, false);
+
+  const cleanCtx = createMemoNoConflictContext(async () => ({ ok: true, text: async () => '[]' }));
+  const none = await cleanCtx.checkMemoNoConflict('MEMO-200');
+  assert.equal(none, null);
+});
+
+test('checkMemoNoConflict() surfaces a real existing memo\'s status so saveDraft can correctly refuse to overwrite it', async () => {
+  // Reproduces the exact reported bug scenario: a second user types an already-in-use memo
+  // number (belonging to a Pending memo) into a brand-new Create Memo form and hits Save Draft.
+  const ctx = createMemoNoConflictContext(async () => ({
+    ok: true, text: async () => JSON.stringify([{ memo_no: 'MEMO-100', status: 'pending', deleted: false }]),
+  }));
+  const conflict = await ctx.checkMemoNoConflict('MEMO-100');
+  // MEMO_NO_BLOCKING_STATUSES is a module-scope const (not exposed on the vm
+  // global object); its membership is already asserted structurally above,
+  // so mirror the same set here rather than reaching into the vm context.
+  const blockingStatuses = new Set(['draft', 'pending', 'pending_a2', 'pending_a3', 'completed', 'voided']);
+  const blocked = !!conflict && !conflict.deleted && blockingStatuses.has(conflict.status);
+  assert.equal(blocked, true, 'Save Draft must refuse to proceed — saving would have silently overwritten the unrelated Pending memo');
 });
 
 // ══════════════════════════════════════════════════════════════════
