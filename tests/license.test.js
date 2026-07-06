@@ -2178,3 +2178,203 @@ test('Viewing assigned users in the Users tab does not mutate overrides, manual 
   assert.deepEqual(context._getLicUserManualRows(), beforeManualRows);
   assert.deepEqual(context._getLicReviewState(), beforeReviewState);
 });
+
+// ══════════════════════════════════════════════════════════════════
+// Phase 2E — Users tab UX polish: Search/Project/Software filters combine
+// with AND logic (OR only within a single multi-select), the User Matrix
+// export never recomputes independently of what's on screen, a proper empty
+// state renders when filters exclude everyone, four KPI cards reuse the
+// existing per-group active-license/source computation, and filter state
+// survives an open → save → return round trip through Manage Licenses.
+// ══════════════════════════════════════════════════════════════════
+function twoProjectUserFixture() {
+  // designer@orbit.co.th has two project groups (AOA-MP/Figma, BETA/Slack);
+  // dev@orbit.co.th has one (AOA-MP/Slack). Lets AND-logic tests prove the
+  // Project filter narrows *before* merging into per-user groups (so a
+  // multi-project user's non-matching project group is dropped, not just
+  // hidden), and that Search/Project/Software must all agree.
+  const memoAoa = slMemo({
+    memoNo: 'ORB-2E-001', project: 'AOA-MP',
+    slItems: [
+      { name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 },
+      { name: 'Slack', plan: '', price: 50, qty: 2, months: 12 },
+    ],
+    sections: [{
+      title: 'ตาราง Account',
+      html: '<table><thead><tr><th>Email</th><th>Figma</th><th>Slack</th></tr></thead>' +
+            '<tbody>' +
+            '<tr><td>designer@orbit.co.th</td><td>✓</td><td>-</td></tr>' +
+            '<tr><td>dev@orbit.co.th</td><td>-</td><td>✓</td></tr>' +
+            '</tbody></table>',
+    }],
+  });
+  const memoBeta = slMemo({
+    memoNo: 'ORB-2E-002', project: 'BETA',
+    slItems: [{ name: 'Slack', plan: '', price: 50, qty: 1, months: 12 }],
+    sections: [{
+      title: 'ตาราง Account',
+      html: '<table><thead><tr><th>Email</th><th>Slack</th></tr></thead>' +
+            '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td></tr></tbody></table>',
+    }],
+  });
+  return [memoAoa, memoBeta];
+}
+
+function licUsersKpiElements(extra = {}) {
+  return licUsersElements({
+    'lic-usr-kpi-users': { textContent: '' },
+    'lic-usr-kpi-active-licenses': { textContent: '' },
+    'lic-usr-kpi-projects': { textContent: '' },
+    'lic-usr-kpi-manual': { textContent: '' },
+    'lic-usr-search': { value: '' },
+    'lic-usr-proj': { value: '', selectedOptions: [] },
+    'lic-usr-lic': { value: '', selectedOptions: [] },
+    ...extra,
+  });
+}
+
+test('Search, Project, and Software filters combine using AND logic (not OR)', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  context.storeMemos(twoProjectUserFixture());
+
+  const elements = licUsersKpiElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+  const bodyOf = () => elements['lic-usr-body'].innerHTML;
+
+  // No filters -> both users visible.
+  assert.match(bodyOf(), /designer@orbit\.co\.th/);
+  assert.match(bodyOf(), /dev@orbit\.co\.th/);
+
+  // Search='designer' AND Project=AOA-MP AND Software=Figma -> designer only,
+  // matched via her AOA-MP/Figma group.
+  elements['lic-usr-search'].value = 'designer';
+  elements['lic-usr-proj'].selectedOptions = [{ value: 'AOA-MP' }];
+  elements['lic-usr-lic'].selectedOptions = [{ value: 'Figma' }];
+  context._renderLicUsersRows();
+  assert.match(bodyOf(), /designer@orbit\.co\.th/);
+  assert.doesNotMatch(bodyOf(), /dev@orbit\.co\.th/);
+
+  // Search='designer' AND Project=BETA AND Software=Figma -> nobody: the
+  // Project filter drops designer's AOA-MP/Figma row before her groups are
+  // merged, leaving only her BETA/Slack group, which does not have Figma.
+  // This proves the categories are AND'd together, not OR'd — matching on
+  // Search alone (or even Search+Software) is not enough.
+  elements['lic-usr-proj'].selectedOptions = [{ value: 'BETA' }];
+  context._renderLicUsersRows();
+  assert.doesNotMatch(bodyOf(), /designer@orbit\.co\.th/, 'Project must scope which of a multi-project user\'s groups count');
+  assert.match(bodyOf(), /No users found\./);
+});
+
+test('Empty state shows "No users found." / "Try changing your filters." when filters exclude everyone', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  context.storeMemos(twoProjectUserFixture());
+
+  const elements = licUsersKpiElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+
+  elements['lic-usr-search'].value = 'nobody-matches-this';
+  context._renderLicUsersRows();
+
+  const body = elements['lic-usr-body'].innerHTML;
+  assert.match(body, /No users found\./);
+  assert.match(body, /Try changing your filters\./);
+  // KPIs must reflect the empty filtered view too, not the full dataset.
+  assert.equal(elements['lic-usr-kpi-users'].textContent, 0);
+  assert.equal(elements['lic-usr-kpi-active-licenses'].textContent, 0);
+});
+
+test('KPI cards (Users/Active Licenses/Projects/Manual Assignments) reuse the existing active-license computation and track the current filter', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  context.storeMemos(twoProjectUserFixture());
+
+  const elements = licUsersKpiElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+
+  // Manual override on top of the two memo-granted assignments: designer's
+  // BETA/Slack grant is memo-sourced already; add a manual grant of Figma to
+  // dev@orbit.co.th (not backed by any memo row) to get a distinct "Manual"
+  // count separate from the memo-sourced assignments.
+  context._saveLicUserOverrides({ 'dev@orbit.co.th|AOA-MP|Figma': true });
+  context._renderLicUsersRows();
+
+  // Unfiltered: designer{AOA-MP/Figma(memo), BETA/Slack(memo)}, dev{AOA-MP/Slack(memo), AOA-MP/Figma(manual)}
+  assert.equal(elements['lic-usr-kpi-users'].textContent, 2);
+  assert.equal(elements['lic-usr-kpi-active-licenses'].textContent, 4);
+  assert.equal(elements['lic-usr-kpi-projects'].textContent, 2, 'AOA-MP and BETA');
+  assert.equal(elements['lic-usr-kpi-manual'].textContent, 1, 'only dev\'s Figma grant has no memo backing it');
+
+  // Narrow to Project=AOA-MP -> designer's BETA group drops out entirely.
+  elements['lic-usr-proj'].selectedOptions = [{ value: 'AOA-MP' }];
+  context._renderLicUsersRows();
+  assert.equal(elements['lic-usr-kpi-users'].textContent, 2);
+  assert.equal(elements['lic-usr-kpi-active-licenses'].textContent, 3, 'designer/Figma + dev/Slack + dev/Figma(manual)');
+  assert.equal(elements['lic-usr-kpi-projects'].textContent, 1);
+  assert.equal(elements['lic-usr-kpi-manual'].textContent, 1);
+});
+
+test('Export User Licenses never recomputes independently — it exports exactly the currently visible (filtered) rows, matching Search+Project+Software together', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  context.storeMemos(twoProjectUserFixture());
+
+  const elements = licUsersKpiElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+
+  elements['lic-usr-search'].value = 'designer';
+  elements['lic-usr-proj'].selectedOptions = [{ value: 'AOA-MP' }];
+  elements['lic-usr-lic'].selectedOptions = [{ value: 'Figma' }];
+  context._renderLicUsersRows();
+  assert.match(elements['lic-usr-body'].innerHTML, /designer@orbit\.co\.th/, 'sanity: designer is the only visible row');
+
+  let downloaded = null;
+  context._downloadCSV = (name, headers, rows) => { downloaded = { name, headers, rows }; };
+  context.exportUserLicensesCSV();
+
+  assert.ok(downloaded);
+  assert.equal(downloaded.rows.length, 1, 'export must match the on-screen filtered row count exactly');
+  assert.equal(Array.from(downloaded.rows[0])[0], 'designer@orbit.co.th');
+});
+
+test('Opening Manage Licenses, saving, and returning preserves Search/Project/Software filter state (no full-tab re-render)', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  context.storeMemos(twoProjectUserFixture());
+
+  const elements = licUsersKpiElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+
+  elements['lic-usr-search'].value = 'dev';
+  elements['lic-usr-proj'].selectedOptions = [{ value: 'AOA-MP' }];
+  context._renderLicUsersRows();
+  assert.match(elements['lic-usr-body'].innerHTML, /dev@orbit\.co\.th/);
+
+  let fullTabRerenders = 0;
+  const originalRenderLicUsers = context._renderLicUsers;
+  context._renderLicUsers = (...args) => { fullTabRerenders++; return originalRenderLicUsers(...args); };
+
+  context._openLicUserEditorForEmail('dev@orbit.co.th');
+  context._saveLicUserEditor();
+
+  assert.equal(fullTabRerenders, 0, 'saving Manage Licenses must not rebuild the whole Users tab (would reset filters/scroll)');
+  assert.equal(elements['lic-usr-search'].value, 'dev', 'search filter must survive the save');
+  assert.deepEqual(elements['lic-usr-proj'].selectedOptions, [{ value: 'AOA-MP' }], 'project filter must survive the save');
+  assert.match(elements['lic-usr-body'].innerHTML, /dev@orbit\.co\.th/, 'table still re-renders its rows via _renderLicUsersRows()');
+});

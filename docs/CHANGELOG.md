@@ -22,6 +22,65 @@
 
 ## Current Baseline
 
+### 2026-07-06 License Management — Phase 2E: Users Tab UX Polish (KPI cards, empty state, AND-filter/export/state-preservation regression coverage)
+
+Scope: Phase 2E per the brief — Users tab filters, export, empty state, and four new KPI cards. Email
+search, Project multi-select, and Software multi-select already existed (Phase 2D-1/2D.2) with AND
+logic across categories and the User Matrix export already reading `window._licUsrVisibleUsers` (never
+recomputing independently); this pass adds the KPI cards, upgrades the empty state copy, and locks all
+of the above in with regression tests. No inventory, reconciliation, assignment, Assignment Import,
+Memo, Budget, or Device logic touched.
+
+#### Added
+- **Four KPI cards on the Users tab** (`_renderLicUsers()`, `views/license.js`): Users, Active Licenses,
+  Projects, Manual Assignments — rendered with the existing `.metric-row`/`.metric-card` CSS (same
+  classes Budget vs Actual already uses, no new styling). New `_licUsrComputeKpis(users, allLicCols,
+  overrides, allLicenses)` reuses the exact same `_licActiveForGroup()`/`_licUserAssignmentDetail()`/
+  `_licAssignmentSourceLabel()` pipeline the table and export already call — no separate counting logic.
+  `_renderLicUsrKpis()` writes the four values via `textContent`. Both are invoked from
+  `_renderLicUsersRows()` on every filter change, so the cards always reflect the currently visible
+  (post Search/Project/Software) list, not the full unfiltered dataset — consistent with how the
+  export and table already behave.
+- **Proper empty state**: the Users table body now renders "No users found." / "Try changing your
+  filters." (with a 🔍 icon, matching Budget vs Actual's existing empty-state pattern) when the active
+  filters exclude every user, replacing the previous single-line "ไม่พบข้อมูล" cell. The separate
+  "no license data at all" empty state (before any account-list data exists) is unchanged.
+
+#### Verified unchanged (no code change needed)
+- Email search, Project multi-select, and Software multi-select already combine with AND logic across
+  categories (OR only within a single multi-select's own selections) — confirmed by a new regression
+  test using a multi-project user where Project scopes which of her groups exist *before* Search and
+  Software are applied.
+- `exportUserLicensesCSV()` already reads `window._licUsrVisibleUsers` (the exact list
+  `_renderLicUsersRows()` just rendered) and only falls back to recomputing when the tab has never
+  rendered in the session — it never recomputes independently once rendered.
+- `_saveLicUserEditor()` already ends by calling `_closeLicUserEditor()` + `_renderLicUsersRows()`, not
+  a full `_renderLicUsers()` rebuild — so Search/Project/Software filter inputs and page scroll position
+  were already preserved across an open Manage Licenses → Save → return round trip; confirmed with a
+  new regression test spying on `_renderLicUsers()` to prove it is never called by the save path.
+
+#### Tests
+- `tests/license.test.js`: 6 new tests — AND-logic across Search/Project/Software (including the
+  multi-project-user edge case proving Project scopes groups before merging); the new empty-state copy;
+  KPI card values against a fixture mixing memo-granted and manual assignments, unfiltered and filtered;
+  export exactness under all three filters combined; and the Manage Licenses save round trip preserving
+  filter state with zero full-tab re-renders. Full suite: 536/536 passing (up from 530).
+- `node --check views/license.js tests/license.test.js` and `node --test tests/*.test.js` both clean.
+
+#### Manual verification
+- Not performed this pass — the sandbox's preview server pool for this folder was at capacity (5
+  servers held by other sessions) and a new one could not be started. Verification relies on the
+  regression suite above, which exercises `_renderLicUsers()`/`_renderLicUsersRows()`/
+  `exportUserLicensesCSV()`/`_saveLicUserEditor()` through the same DOM-stub harness used by all
+  pre-existing Users tab tests.
+
+#### Remaining Work
+- None identified for this pass's scope. A future pass could revisit whether "Manual Assignments"
+  should also count Assignment-Import-sourced grants (currently counted separately, not included) if
+  PMO wants that folded into a single "not from a memo" figure.
+
+---
+
 ### 2026-07-06 License Management — Manage Licenses Modal Simplify Hotfix (seat metrics removed, flat list)
 
 Scope: further, explicitly-requested simplification of the Manage Licenses dialog (License

@@ -1555,6 +1555,12 @@ function _renderLicUsers() {
     <div style="background:var(--bg-2,#F8F8F6);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:12px;font-size:11px;color:var(--text-2)">
       ℹ ข้อมูลมาจาก "ตาราง Account" ใน SL Memo — email + ✓/- ต่อโปรแกรม (เฉพาะรายการที่ PMO อนุมัติแล้ว)
     </div>
+    <div class="metric-row" style="grid-template-columns:repeat(4,1fr)">
+      <div class="metric-card"><div class="metric-label">Users</div><div class="metric-val" id="lic-usr-kpi-users">0</div></div>
+      <div class="metric-card"><div class="metric-label">Active Licenses</div><div class="metric-val" id="lic-usr-kpi-active-licenses">0</div></div>
+      <div class="metric-card"><div class="metric-label">Projects</div><div class="metric-val" id="lic-usr-kpi-projects">0</div></div>
+      <div class="metric-card"><div class="metric-label">Manual Assignments</div><div class="metric-val" id="lic-usr-kpi-manual">0</div></div>
+    </div>
     <div id="lic-usr-context-banner" style="margin-bottom:12px;display:none"></div>
     <div class="filter-row" style="margin-bottom:12px;justify-content:space-between">
       <div class="filter-row" style="margin-bottom:0">
@@ -1756,6 +1762,37 @@ function _licChipsForUser(user, allLicCols, overrides, allLicenses) {
   return [...seen.values()];
 }
 
+// Part 4 (Phase 2E) — KPI cards for the Users tab. Reuses the exact same
+// _licActiveForGroup()/_licUserAssignmentDetail()/_licAssignmentSourceLabel()
+// pipeline the table/export already use — no separate counting logic, and the
+// numbers always match what's currently visible (post Search/Project/Software
+// filters), never the full unfiltered dataset.
+function _licUsrComputeKpis(users, allLicCols, overrides, allLicenses) {
+  const projectSet = new Set();
+  let activeLicenses = 0;
+  let manualAssignments = 0;
+  users.forEach(u => {
+    u.projectGroups.forEach(group => {
+      projectSet.add(group.project);
+      _licActiveForGroup(group, allLicCols, overrides).forEach(lic => {
+        activeLicenses++;
+        const ovKey = `${group.email}|${group.project}|${lic}`;
+        const detail = _licUserAssignmentDetail(group, lic, allLicenses, overrides[ovKey]);
+        if (_licAssignmentSourceLabel(detail) === 'Manual') manualAssignments++;
+      });
+    });
+  });
+  return { users: users.length, activeLicenses, projects: projectSet.size, manualAssignments };
+}
+
+function _renderLicUsrKpis(kpis) {
+  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  setText('lic-usr-kpi-users', kpis.users);
+  setText('lic-usr-kpi-active-licenses', kpis.activeLicenses);
+  setText('lic-usr-kpi-projects', kpis.projects);
+  setText('lic-usr-kpi-manual', kpis.manualAssignments);
+}
+
 function _renderLicUsersRows() {
   const allUserRows = window._licUsrRows || [];
   const allLicCols  = window._licUsrCols || [];
@@ -1802,8 +1839,19 @@ function _renderLicUsersRows() {
   if (licF.length) users = users.filter(u => _licUserHasAnySoftware(u, licF, allLicCols, overrides));
   window._licUsrVisibleUsers = users;
 
+  // Part 4 — KPI cards reflect exactly this filtered/visible user list, reusing
+  // the same per-group active-license/source computation the table and export
+  // already use (no separate counting logic).
+  _renderLicUsrKpis(_licUsrComputeKpis(users, allLicCols, overrides, allLicenses));
+
   if (!users.length) {
-    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;padding:24px;color:var(--text-3)">ไม่พบข้อมูล</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="3" style="padding:0">
+      <div style="text-align:center;padding:48px 24px">
+        <div style="font-size:32px;margin-bottom:12px">🔍</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No users found.</div>
+        <div style="font-size:12px;color:var(--text-3)">Try changing your filters.</div>
+      </div>
+    </td></tr>`;
     return;
   }
 
