@@ -1120,7 +1120,7 @@ function exportPurchaseOrdersCSV() {
   const rows = pos.map(p => [
     p.id, p.memoNo, p.project, p.itemName,
     p.orderedQty, p.arrivedQty, (p.orderedQty - p.arrivedQty),
-    p.status, p.note||'',
+    poEffectiveStatus(p), p.note||'',
     p.createdAt?.slice(0,10), p.updatedAt?.slice(0,10)
   ]);
   _downloadCSV('Purchase_Orders', headers, rows);
@@ -1325,7 +1325,7 @@ function _filteredPOs(allPos) {
 
   let pos = allPos;
   if(_poDeepLinkFilter) pos = pos.filter(p => p.memoNo === _poDeepLinkFilter.memoNo);
-  if(statFilter.length) pos = pos.filter(p => statFilter.includes(p.status));
+  if(statFilter.length) pos = pos.filter(p => statFilter.includes(poEffectiveStatus(p)));
   if(projFilter.length) pos = pos.filter(p => projFilter.includes(p.project));
   if(remainingOnly) pos = pos.filter(p => (p.orderedQty - p.arrivedQty) > 0);
   if(search) pos = pos.filter(p => [p.memoNo, p.itemName].some(v => v && String(v).toLowerCase().includes(search)));
@@ -1414,6 +1414,47 @@ const PO_STATUS_BADGE = {
   voided_source:  `<span style="font-size:10px;background:#F6E4E1;color:#7A2E20;padding:2px 8px;border-radius:100px">Voided</span>`,
 };
 
+// Hotfix (source memo void/reject/cancel — non-actionable PO before cascade):
+// rendering must not rely solely on po.status already having been cascaded to
+// 'voided_source' by cancelPurchaseOrdersForVoidedMemo(). If the source memo
+// was voided/rejected/cancelled but the cascade never ran against this PO
+// (older record predating the cascade, or a cascade write that never landed),
+// the PO would otherwise keep rendering as Ordered/Awaiting with live
+// Mark Awaiting/Mark Arrived actions — only to be rejected by markArrived()'s
+// own guard (a few lines up) after the user clicks. These helpers let
+// rendering detect the live source memo status directly, so the safe,
+// non-actionable state shows up before any click, not after.
+function poSourceMemoStatus(po) {
+  if (!po.memoNo || typeof loadMemos !== 'function') return null;
+  const memo = loadMemos().find(m => m.memoNo === po.memoNo);
+  return memo ? memo.status : null;
+}
+function poIsVoidedSource(po) {
+  if (po.status === 'voided_source') return true;
+  if (po.status === 'fulfilled') return false; // already-arrived devices are never retroactively hidden
+  return ['voided', 'rejected', 'cancelled'].includes(poSourceMemoStatus(po));
+}
+// Status used for every rendering decision (badge, action button, row
+// styling, sort order) — po.status itself is never mutated here (read-only
+// render path); only cancelPurchaseOrdersForVoidedMemo() writes it.
+function poEffectiveStatus(po) {
+  return poIsVoidedSource(po) ? 'voided_source' : po.status;
+}
+
+const VOIDED_SOURCE_BADGE_LABEL = { voided: 'Voided Source', rejected: 'Rejected Source', cancelled: 'Cancelled Source' };
+// Badge HTML for a PO row. Once cancelPurchaseOrdersForVoidedMemo() has
+// cascaded (po.status === 'voided_source'), keep the existing plain "Voided"
+// label. For a live-detected-but-not-yet-cascaded PO, label it with the
+// specific source memo status so it's clear at a glance why it's terminal.
+function poStatusBadgeHtml(po) {
+  if (po.status === 'voided_source') return PO_STATUS_BADGE.voided_source;
+  if (poIsVoidedSource(po)) {
+    const label = VOIDED_SOURCE_BADGE_LABEL[poSourceMemoStatus(po)] || 'Voided Source';
+    return `<span style="font-size:10px;background:#F6E4E1;color:#7A2E20;padding:2px 8px;border-radius:100px">${label}</span>`;
+  }
+  return PO_STATUS_BADGE[po.status] || `<span style="font-size:10px;background:#F1EFE8;color:#444441;padding:2px 8px;border-radius:100px">${esc(po.status)}</span>`;
+}
+
 // Reason + timestamp recorded on a PO's own audit trail when its source memo
 // was voided — read back to build the "Voided" badge tooltip without needing
 // a dedicated column.
@@ -1429,10 +1470,27 @@ function poVoidReason(po) {
 // resumed, without needing a dedicated detail view.
 function poVoidTooltip(po) {
   const entry = poVoidAuditEntry(po);
-  if (!entry) return '';
-  const lines = ['Source memo was voided', ''];
-  lines.push('Reason:', entry.comment || '—', '');
-  lines.push('Date:', entry.timestamp ? shortDate(entry.timestamp) : '—');
+  if (entry) {
+    const lines = ['Source memo was voided', ''];
+    lines.push('Reason:', entry.comment || '—', '');
+    lines.push('Date:', entry.timestamp ? shortDate(entry.timestamp) : '—');
+    return lines.join('\n');
+  }
+  // Fallback: no PO-side audit entry (the cascade hasn't run against this
+  // record yet) — build the tooltip straight from the source memo's own
+  // reason/date fields instead.
+  if (!poIsVoidedSource(po)) return '';
+  const memo = po.memoNo && typeof loadMemos === 'function' ? loadMemos().find(m => m.memoNo === po.memoNo) : null;
+  if (!memo) return '';
+  const byStatus = {
+    voided:    { label: 'Source memo was voided',    reason: memo.voidReason,         at: memo.voidedAt },
+    rejected:  { label: 'Source memo was rejected',  reason: memo.rejectionReason,    at: memo.rejectedAt },
+    cancelled: { label: 'Source memo was cancelled', reason: memo.cancellationReason, at: memo.cancelledAt },
+  }[memo.status];
+  if (!byStatus) return '';
+  const lines = [byStatus.label, ''];
+  lines.push('Reason:', byStatus.reason || '—', '');
+  lines.push('Date:', byStatus.at ? shortDate(byStatus.at) : '—');
   return lines.join('\n');
 }
 
@@ -1460,7 +1518,7 @@ function cancelPurchaseOrdersForVoidedMemo(memoNo, reason) {
 }
 
 function poActionBtn(po) {
-  const s = po.status;
+  const s = poEffectiveStatus(po);
   if (s === 'pending_order')
     return `<button class="btn-sm" style="font-size:11px;background:#185FA5;color:#fff;border-color:transparent" onclick="advancePOStatus('${esc(po.id)}','ordered')">Mark ordered</button>`;
   if (s === 'ordered')
@@ -1495,8 +1553,8 @@ function _renderPOTable() {
 
   // KPIs — always computed on the unfiltered set (matches Device Registry's
   // metric cards, which also stay unfiltered).
-  const active    = pos.filter(p => !['fulfilled', 'voided_source'].includes(p.status)).length;
-  const awaitingUnits = pos.filter(p => ['ordered','awaiting'].includes(p.status)).reduce((s,p) => s+p.orderedQty,0);
+  const active    = pos.filter(p => p.status !== 'fulfilled' && !poIsVoidedSource(p)).length;
+  const awaitingUnits = pos.filter(p => ['ordered','awaiting'].includes(p.status) && !poIsVoidedSource(p)).reduce((s,p) => s+p.orderedQty,0);
   const partial   = pos.filter(p => p.status === 'partial_arrived').length;
   const fulfilled = pos.filter(p => p.status === 'fulfilled').length;
   const setText = (id, v) => { const el = document.getElementById(id); if(el) el.textContent = v; };
@@ -1529,7 +1587,7 @@ function _renderPOTable() {
 
   // Sort: active first (by status order), then fulfilled, then voided source
   const statusOrder = { pending_order:0, ordered:1, awaiting:2, partial_arrived:3, fulfilled:4, voided_source:5 };
-  const sorted = [...visible].sort((a,b) => (statusOrder[a.status]||99) - (statusOrder[b.status]||99));
+  const sorted = [...visible].sort((a,b) => (statusOrder[poEffectiveStatus(a)]||99) - (statusOrder[poEffectiveStatus(b)]||99));
 
   tbody.innerHTML = sorted.map(po => {
     const pct = po.orderedQty > 0 ? Math.round(po.arrivedQty / po.orderedQty * 100) : 0;
@@ -1537,7 +1595,7 @@ function _renderPOTable() {
     const voidTooltip = poVoidTooltip(po);
     const remaining = po.orderedQty - po.arrivedQty; // derived only, never persisted
     const devCount = _devicesCountForPO(po);
-    return `<tr style="${po.status==='fulfilled'||po.status==='voided_source'?'opacity:0.7':''}">
+    return `<tr style="${po.status==='fulfilled'||poIsVoidedSource(po)?'opacity:0.7':''}">
       <td style="color:#185FA5;font-weight:500;cursor:pointer;padding:9px 12px" onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly('${esc(po.memoNo)}')">${esc(po.memoNo)}</td>
       <td style="padding:9px 12px;font-size:12px">${esc(po.itemName)}</td>
       <td style="padding:9px 12px;font-size:12px">${esc(po.project||'—')}</td>
@@ -1552,7 +1610,7 @@ function _renderPOTable() {
           <span style="font-size:10px;color:var(--text-3)">${po.arrivedQty}/${po.orderedQty}</span>
         </div>
       </td>
-      <td style="padding:9px 12px"${voidTooltip ? ` title="${esc(voidTooltip)}"` : ''}>${PO_STATUS_BADGE[po.status]||`<span style="font-size:10px;background:#F1EFE8;color:#444441;padding:2px 8px;border-radius:100px">${esc(po.status)}</span>`}</td>
+      <td style="padding:9px 12px"${voidTooltip ? ` title="${esc(voidTooltip)}"` : ''}>${poStatusBadgeHtml(po)}</td>
       <td style="padding:9px 12px;text-align:center">${devCount > 0
         ? `<span style="color:#185FA5;font-weight:500;cursor:pointer;text-decoration:underline" onclick="viewDevicesForPO('${esc(po.id)}')">${devCount} device${devCount>1?'s':''}</span>`
         : `<span style="color:var(--text-3)">0</span>`}</td>

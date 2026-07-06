@@ -1015,6 +1015,83 @@ test('_filteredPOs: status multi-select narrows rows', () => {
   assert.equal(filtered[0].id, 'po-d2-6');
 });
 
+// ══════════════════════════════════════════════════════════════════
+// Hotfix (follow-up) — status filter, KPIs, sort, and CSV export must all
+// key off poEffectiveStatus(po), not raw po.status, so a live-detected
+// (not-yet-cascaded) voided/rejected/cancelled-source PO behaves identically
+// to one the void cascade already touched, everywhere in the Purchase
+// Orders view — not just in the badge/action-button rendering fixed earlier.
+// ══════════════════════════════════════════════════════════════════
+
+test('_filteredPOs: status filter "voided_source" matches a live-detected (not-yet-cascaded) voided-source PO, not just a cascaded one', () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = [${JSON.stringify({ memoNo: 'HW-HF-7', type: 'hw', status: 'voided', voidedAt: '2026-07-05T00:00:00.000Z', voidedBy: 'PMO Admin' })}]`, context);
+  context.storePurchaseOrders([
+    // status still 'awaiting' — as if it predates the cascade or the cascade write never landed.
+    { id: 'po-hf-7', memoNo: 'HW-HF-7', itemName: 'Laptop', project: 'AOA-MP', orderedQty: 1, arrivedQty: 0, status: 'awaiting', auditLog: [] },
+    { id: 'po-hf-8', memoNo: 'HW-HF-8', itemName: 'Monitor', project: 'AOA-MP', orderedQty: 1, arrivedQty: 0, status: 'ordered', auditLog: [] },
+  ]);
+  context.document.getElementById('po-filter-status').value = 'voided_source';
+  const filtered = context._filteredPOs(context.loadPurchaseOrders());
+  assert.equal(filtered.length, 1, 'filtering by "Voided" status must surface a live-detected voided-source PO even though po.status is still "awaiting"');
+  assert.equal(filtered[0].id, 'po-hf-7');
+});
+
+test('exportPurchaseOrdersCSV includes a live-detected voided-source PO under the effective status, not its stale raw po.status', () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = [${JSON.stringify({ memoNo: 'HW-HF-9', type: 'hw', status: 'cancelled', cancelledAt: '2026-07-05T00:00:00.000Z', cancelledBy: 'Requester', cancellationReason: 'no longer needed' })}]`, context);
+  context.storePurchaseOrders([
+    { id: 'po-hf-9', memoNo: 'HW-HF-9', itemName: 'Tablet', project: 'AOA-MP', orderedQty: 1, arrivedQty: 0, status: 'pending_order', auditLog: [] },
+  ]);
+  let downloaded = null;
+  context._downloadCSV = (name, headers, rows) => { downloaded = { name, headers, rows }; };
+  context.exportPurchaseOrdersCSV();
+  assert.ok(downloaded, 'export must produce a CSV');
+  assert.equal(downloaded.rows.length, 1);
+  const statusColIdx = downloaded.headers.indexOf('สถานะ');
+  assert.equal(downloaded.rows[0][statusColIdx], 'voided_source', 'CSV status column must reflect the effective status, not the stale raw "pending_order"');
+});
+
+test('table and CSV export row counts stay in sync under a status filter, including a live-detected voided-source row', () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = [${JSON.stringify({ memoNo: 'HW-HF-10', type: 'hw', status: 'rejected', rejectedAt: '2026-07-05T00:00:00.000Z', rejectedBy: 'Approver', rejectionReason: 'budget denied' })}]`, context);
+  context.storePurchaseOrders([
+    { id: 'po-hf-10', memoNo: 'HW-HF-10', itemName: 'Dock', project: 'AOA-MP', orderedQty: 1, arrivedQty: 0, status: 'ordered', auditLog: [] },
+    { id: 'po-hf-11', memoNo: 'HW-HF-11', itemName: 'Keyboard', project: 'AOA-MP', orderedQty: 1, arrivedQty: 0, status: 'ordered', auditLog: [] },
+  ]);
+  vm.runInContext(`_memCache.push(${JSON.stringify({ memoNo: 'HW-HF-11', type: 'hw', status: 'completed' })})`, context);
+
+  context.document.getElementById('po-filter-status').value = 'voided_source';
+  context._renderPOTable();
+  const tableRows = (context.document.getElementById('po-table-body').innerHTML.match(/<tr/g) || []).length;
+
+  let downloaded = null;
+  context._downloadCSV = (name, headers, rows) => { downloaded = { name, headers, rows }; };
+  context.exportPurchaseOrdersCSV();
+
+  assert.equal(tableRows, 1, 'only the live-detected voided-source PO should render under the "Voided" filter');
+  assert.equal(downloaded.rows.length, 1, 'export must match the filtered table row count exactly');
+  assert.equal(downloaded.rows[0][0], 'po-hf-10');
+});
+
+test('_filteredPOs: normal ordered/awaiting status filters still work exactly as before, unaffected by effective-status detection', () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = [${JSON.stringify({ memoNo: 'HW-HF-12', type: 'hw', status: 'completed' })}]`, context);
+  context.storePurchaseOrders([
+    { id: 'po-hf-12', memoNo: 'HW-HF-12', itemName: 'Laptop', project: 'AOA-MP', orderedQty: 1, arrivedQty: 0, status: 'ordered', auditLog: [] },
+    { id: 'po-hf-13', memoNo: 'HW-HF-12', itemName: 'Monitor', project: 'AOA-MP', orderedQty: 1, arrivedQty: 0, status: 'awaiting', auditLog: [] },
+  ]);
+  context.document.getElementById('po-filter-status').value = 'ordered';
+  let filtered = context._filteredPOs(context.loadPurchaseOrders());
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].id, 'po-hf-12');
+
+  context.document.getElementById('po-filter-status').value = 'awaiting';
+  filtered = context._filteredPOs(context.loadPurchaseOrders());
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].id, 'po-hf-13');
+});
+
 test('_filteredPOs: project multi-select narrows rows', () => {
   const { context } = createDeviceContext();
   context.storePurchaseOrders([
@@ -1288,4 +1365,104 @@ test('_clearPODeepLinkFilter() restores the normal Purchase Orders view', () => 
   context._clearPODeepLinkFilter();
   assert.equal(context.document.getElementById('po-context-banner').style.display, 'none');
   assert.equal(context._filteredPOs(context.loadPurchaseOrders()).length, 2);
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Hotfix — Purchase Orders render the safe, non-actionable state directly
+// from the live source memo status, even when po.status itself was never
+// cascaded to 'voided_source' (e.g. a record predating the cascade, or a
+// cascade write that never landed). Mirrors markArrived()'s own guard so the
+// UI never shows an action that would just be rejected after the click.
+// ══════════════════════════════════════════════════════════════════
+
+test('a PO whose source memo is voided, but whose own status was never cascaded, still renders as non-actionable (Voided Source badge, no Mark actions)', () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = [${JSON.stringify({
+    memoNo: 'HW-HF-1', type: 'hw', status: 'voided', voidedAt: '2026-07-01T00:00:00.000Z', voidedBy: 'PMO Admin', voidReason: 'wrong vendor',
+  })}]`, context);
+  // status still 'awaiting' — as if this PO predates cancelPurchaseOrdersForVoidedMemo() or its cascade write never landed.
+  context.storePurchaseOrders([{ id: 'po-hf-1', memoNo: 'HW-HF-1', itemName: 'Laptop', orderedQty: 2, arrivedQty: 0, status: 'awaiting', auditLog: [] }]);
+
+  context._renderPOTable();
+  const html = context.document.getElementById('po-table-body').innerHTML;
+  assert.match(html, />Voided Source</, 'must show a terminal, non-actionable badge derived from the live source memo status');
+  assert.doesNotMatch(html, /Mark awaiting/i);
+  assert.doesNotMatch(html, /Mark arrived/i);
+
+  const po = context.loadPurchaseOrders().find(p => p.id === 'po-hf-1');
+  assert.equal(context.poActionBtn(po), '', 'action button must be hidden even though po.status itself is still "awaiting"');
+});
+
+test('rejected/cancelled source memo also renders its PO as non-actionable, even without a cascade', () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = ${JSON.stringify([
+    { memoNo: 'HW-HF-2', type: 'hw', status: 'rejected', rejectedAt: '2026-07-02T00:00:00.000Z', rejectedBy: 'Approver A', rejectionReason: 'budget denied' },
+    { memoNo: 'HW-HF-3', type: 'hw', status: 'cancelled', cancelledAt: '2026-07-03T00:00:00.000Z', cancelledBy: 'Requester B', cancellationReason: 'no longer needed' },
+  ])}`, context);
+  context.storePurchaseOrders([
+    { id: 'po-hf-2', memoNo: 'HW-HF-2', itemName: 'Monitor', orderedQty: 1, arrivedQty: 0, status: 'ordered', auditLog: [] },
+    { id: 'po-hf-3', memoNo: 'HW-HF-3', itemName: 'Tablet', orderedQty: 1, arrivedQty: 0, status: 'pending_order', auditLog: [] },
+  ]);
+
+  const pos = context.loadPurchaseOrders();
+  const poRejected  = pos.find(p => p.id === 'po-hf-2');
+  const poCancelled = pos.find(p => p.id === 'po-hf-3');
+  assert.equal(context.poActionBtn(poRejected), '', 'rejected-source PO must hide its action button');
+  assert.equal(context.poActionBtn(poCancelled), '', 'cancelled-source PO must hide its action button');
+
+  context._renderPOTable();
+  const html = context.document.getElementById('po-table-body').innerHTML;
+  assert.match(html, />Rejected Source</);
+  assert.match(html, />Cancelled Source</);
+});
+
+test('Mark Arrived stays blocked as the final safety net even for a live-detected (not-yet-cascaded) voided-source PO', async () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = [${JSON.stringify({ memoNo: 'HW-HF-4', type: 'hw', status: 'voided', voidedAt: '2026-07-04T00:00:00.000Z', voidedBy: 'PMO Admin' })}]`, context);
+  context.storePurchaseOrders([{ id: 'po-hf-4', memoNo: 'HW-HF-4', itemName: 'Laptop', orderedQty: 1, arrivedQty: 0, status: 'awaiting', auditLog: [] }]);
+
+  await context.markArrived('po-hf-4', 1, ['SN-HF-1']);
+
+  const po = context.loadPurchaseOrders().find(p => p.id === 'po-hf-4');
+  assert.equal(po.arrivedQty, 0, 'guard must still block advancing even though the render layer never mutates po.status');
+  assert.equal(context.loadDevices().filter(d => d.memoNo === 'HW-HF-4').length, 0);
+});
+
+test('a fulfilled PO with existing devices still shows View devices and is never re-labeled as voided, even if its source memo somehow ends up non-completed', () => {
+  const { context } = createDeviceContext();
+  context.storePurchaseOrders([{ id: 'po-hf-5', memoNo: 'HW-HF-5', itemName: 'Laptop', orderedQty: 1, arrivedQty: 0, status: 'awaiting', auditLog: [] }]);
+  vm.runInContext(`_memCache = [${JSON.stringify({ memoNo: 'HW-HF-5', type: 'hw', status: 'completed' })}]`, context);
+
+  return context.markArrived('po-hf-5', 1, ['SN-HF-2']).then(() => {
+    // Fulfilled with a device already created — even if the memo record is (hypothetically) later
+    // found in a non-completed status, an already-fulfilled PO must not be retroactively hidden.
+    vm.runInContext(`_memCache = [${JSON.stringify({ memoNo: 'HW-HF-5', type: 'hw', status: 'voided' })}]`, context);
+    context._renderPOTable();
+    const html = context.document.getElementById('po-table-body').innerHTML;
+    assert.match(html, /onclick="viewDevicesForPO\('po-hf-5'\)">1 device</);
+    assert.match(html, />Fulfilled</);
+    assert.doesNotMatch(html, />Voided Source</);
+
+    const po = context.loadPurchaseOrders().find(p => p.id === 'po-hf-5');
+    assert.equal(context.poActionBtn(po), '<button class="btn-sm" style="font-size:11px;color:var(--text-3)" onclick="viewDevicesForPO(\'po-hf-5\')">View devices</button>');
+  });
+});
+
+test('existing normal PO flow (no void/reject/cancel involved) is unaffected: badges, action buttons, and KPIs render exactly as before', () => {
+  const { context } = createDeviceContext();
+  vm.runInContext(`_memCache = [${JSON.stringify({ memoNo: 'HW-HF-6', type: 'hw', status: 'completed' })}]`, context);
+  context.storePurchaseOrders([
+    { id: 'po-hf-6a', memoNo: 'HW-HF-6', itemName: 'Laptop', orderedQty: 2, arrivedQty: 0, status: 'pending_order', auditLog: [] },
+    { id: 'po-hf-6b', memoNo: 'HW-HF-6', itemName: 'Monitor', orderedQty: 1, arrivedQty: 0, status: 'ordered', auditLog: [] },
+    { id: 'po-hf-6c', memoNo: 'HW-HF-6', itemName: 'Dock', orderedQty: 1, arrivedQty: 0, status: 'awaiting', auditLog: [] },
+  ]);
+
+  context._renderPOTable();
+  const html = context.document.getElementById('po-table-body').innerHTML;
+  assert.match(html, /Mark ordered/);
+  assert.match(html, /Mark awaiting/);
+  assert.match(html, /Mark arrived/);
+  assert.doesNotMatch(html, /Voided/);
+  assert.equal(context.document.getElementById('po-kpi-active').textContent, 3);
+  assert.equal(context.document.getElementById('po-kpi-awaiting').textContent, 2, 'awaiting units KPI should sum ordered+awaiting POs unaffected by the live-detection change');
 });
