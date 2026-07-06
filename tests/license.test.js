@@ -1958,3 +1958,223 @@ test('License Summary matrix freezes Software/Plan/Total columns while Project c
   assert.match(theadMatch, /lic-bp-freeze-plan/);
   assert.match(theadMatch, /lic-bp-freeze-total/);
 });
+
+// ══════════════════════════════════════════════════════════════════
+// Phase 2D.2 — Reconciliation's Assigned Users drill-down modal gets a
+// "View in Users tab" button (only when assignedCount > 0) that closes the
+// modal, switches to the Users tab, and narrows it to that row's assigned
+// emails via a temporary, non-persisted filter + context banner. Navigation
+// and display only — no writes to overrides/manual rows/review state.
+// ══════════════════════════════════════════════════════════════════
+function reconDeepLinkElements(extra = {}) {
+  return {
+    'lic-content': { innerHTML: '' },
+    'bp-table-wrap': { innerHTML: '' },
+    'lic-recon-wrap': { innerHTML: '' },
+    'lic-recon-detail': { style: {} },
+    'lic-recon-detail-name': {},
+    'lic-recon-detail-purchased': {},
+    'lic-recon-detail-assigned': {},
+    'lic-recon-detail-remaining': {},
+    'lic-recon-detail-body': { innerHTML: '' },
+    'lic-recon-view-in-users': { style: {} },
+    'lic-usr-context-banner': { style: {}, innerHTML: '' },
+    'lic-usr-body': { innerHTML: '' },
+    'lic-usr-search': { value: '' },
+    'lic-usr-proj': { value: '', selectedOptions: [] },
+    'lic-usr-lic': { value: '', selectedOptions: [] },
+    'lic-usr-editor': { style: {} },
+    'lic-usr-editor-name': {},
+    'lic-usr-editor-options': { innerHTML: '' },
+    ...extra,
+  };
+}
+
+test('Assigned Users modal shows "View in Users tab" only when assigned count > 0', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  const memos = [...bpFixtureMemos(), slMemo({
+    memoNo: 'ORB-2D02-004', project: 'AOA-MP',
+    slItems: [{ name: 'Zoom', plan: '', price: 100, qty: 2, months: 12 }],
+    // No "ตาราง Account" section at all — purchased seats exist, nobody assigned.
+  })];
+  context.storeMemos(memos);
+
+  const elements = reconDeepLinkElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+
+  context._renderLicReconciliation();
+  const figmaIdx = context.window._licReconRows.findIndex(r => r.name === 'Figma' && r.project === 'AOA-MP');
+  const zoomIdx = context.window._licReconRows.findIndex(r => r.name === 'Zoom');
+  assert.ok(figmaIdx >= 0 && zoomIdx >= 0, 'sanity: both rows exist');
+
+  context._openLicReconDetail(figmaIdx);
+  assert.notEqual(elements['lic-recon-view-in-users'].style.display, 'none', 'button must show when assignedCount > 0');
+
+  context._openLicReconDetail(zoomIdx);
+  assert.equal(elements['lic-recon-view-in-users'].style.display, 'none', 'button must be hidden when assignedCount = 0');
+});
+
+test('Clicking "View in Users tab" switches to Users tab, filtered to that row\'s assigned users, with a context banner', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  context.storeMemos(bpFixtureMemos());
+
+  const elements = reconDeepLinkElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+
+  context._renderLicByProject();
+  const idx = context.window._licReconRows.findIndex(r => r.name === 'Figma' && r.project === 'AOA-MP');
+  context._openLicReconDetail(idx);
+  assert.equal(elements['lic-recon-detail'].style.display, 'flex');
+
+  elements['lic-recon-view-in-users'].onclick();
+
+  assert.equal(elements['lic-recon-detail'].style.display, 'none', 'modal must close');
+  const usersHtml = elements['lic-usr-body'].innerHTML;
+  assert.match(usersHtml, /designer1@orbit\.co\.th/, 'the one Figma\\/AOA-MP\\/Professional assignee must be shown');
+  assert.doesNotMatch(usersHtml, /a@orbit\.co\.th/, 'Slack assignee must be excluded');
+  assert.doesNotMatch(usersHtml, /designer2@orbit\.co\.th/, 'the BETA\\/Figma\\/Basic assignee must be excluded');
+
+  assert.notEqual(elements['lic-usr-context-banner'].style.display, 'none', 'banner must be visible');
+  const banner = elements['lic-usr-context-banner'].innerHTML;
+  assert.match(banner, /Project: AOA-MP/);
+  assert.match(banner, /Software: Figma/);
+  assert.match(banner, /Plan: Professional/);
+  assert.match(banner, /Clear filter/);
+  assert.match(banner, /Back to Reconciliation/, 'banner must also offer a way back to Reconciliation (Phase 2D.2.1)');
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Phase 2D.2.1 — the Users-tab context banner also offers "← Back to
+// Reconciliation", which returns to License Summary with the Reconciliation
+// sub-tab active (any existing Project/Software/Plan/Over Assigned/Has
+// Remaining filters carry over unchanged, since they're separate module
+// state) and clears the deep-link filter so a later, ordinary visit to the
+// Users tab is never left confusingly narrowed.
+// ══════════════════════════════════════════════════════════════════
+test('Clicking "Back to Reconciliation" returns to License Summary with the Reconciliation sub-tab active', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  context.storeMemos(bpFixtureMemos());
+
+  const elements = reconDeepLinkElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+
+  context._renderLicByProject();
+  const idx = context.window._licReconRows.findIndex(r => r.name === 'Figma' && r.project === 'AOA-MP');
+  context._openLicReconDetail(idx);
+  elements['lic-recon-view-in-users'].onclick();
+  assert.match(elements['lic-usr-body'].innerHTML, /designer1@orbit\.co\.th/, 'sanity: on the Users tab, deep-linked');
+
+  context._backToReconciliationFromUsers();
+
+  const content = elements['lic-content'].innerHTML;
+  const summaryTag = content.match(/<div id="lic-summary-panel"[^>]*>/)[0];
+  const reconTag = content.match(/<div id="lic-reconciliation-panel"[^>]*>/)[0];
+  assert.match(summaryTag, /display:none/, 'Summary sub-tab must not be the one shown');
+  assert.doesNotMatch(reconTag, /display:none/, 'Reconciliation sub-tab must be active');
+  assert.match(elements['lic-recon-wrap'].innerHTML, /Figma/, 'Reconciliation table itself must be rendered');
+});
+
+test('"Back to Reconciliation" clears the deep-link filter so a later, ordinary visit to Users is not left narrowed', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  context.storeMemos(bpFixtureMemos());
+
+  const elements = reconDeepLinkElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+
+  context._renderLicByProject();
+  const idx = context.window._licReconRows.findIndex(r => r.name === 'Figma' && r.project === 'AOA-MP');
+  context._openLicReconDetail(idx);
+  elements['lic-recon-view-in-users'].onclick();
+
+  context._backToReconciliationFromUsers();
+  context._renderLicUsers(); // simulate PMO opening the Users tab normally afterward
+
+  assert.match(elements['lic-usr-body'].innerHTML, /a@orbit\.co\.th/, 'Slack assignee must be visible again — no stale narrowing');
+  assert.match(elements['lic-usr-body'].innerHTML, /designer2@orbit\.co\.th/, 'BETA\\/Figma assignee must be visible again');
+  assert.equal(elements['lic-usr-context-banner'].style.display, 'none', 'context banner must not reappear on a plain visit');
+});
+
+test('"Clear filter" still works after the "Back to Reconciliation" addition', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  context.storeMemos(bpFixtureMemos());
+
+  const elements = reconDeepLinkElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+
+  context._renderLicByProject();
+  const idx = context.window._licReconRows.findIndex(r => r.name === 'Figma' && r.project === 'AOA-MP');
+  context._openLicReconDetail(idx);
+  elements['lic-recon-view-in-users'].onclick();
+  assert.doesNotMatch(elements['lic-usr-body'].innerHTML, /a@orbit\.co\.th/, 'sanity: filtered before clearing');
+
+  context._clearLicUsrDeepLinkFilter();
+
+  assert.match(elements['lic-usr-body'].innerHTML, /a@orbit\.co\.th/, 'Slack assignee must reappear');
+  assert.match(elements['lic-usr-body'].innerHTML, /designer2@orbit\.co\.th/, 'BETA\\/Figma assignee must reappear');
+  assert.equal(elements['lic-usr-context-banner'].style.display, 'none', 'banner must hide once cleared');
+  assert.equal(elements['lic-usr-context-banner'].innerHTML, '');
+});
+
+test('Existing Users search filter still narrows results on top of the deep-link filter (compatibility)', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  context.storeMemos(bpFixtureMemos());
+
+  const elements = reconDeepLinkElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+
+  context._renderLicByProject();
+  const idx = context.window._licReconRows.findIndex(r => r.name === 'Figma' && r.project === 'AOA-MP');
+  context._openLicReconDetail(idx);
+  elements['lic-recon-view-in-users'].onclick();
+  assert.match(elements['lic-usr-body'].innerHTML, /designer1@orbit\.co\.th/, 'sanity: deep-linked user visible');
+
+  elements['lic-usr-search'].value = 'nomatch';
+  context._renderLicUsersRows();
+  assert.doesNotMatch(elements['lic-usr-body'].innerHTML, /designer1@orbit\.co\.th/, 'search must still narrow within the deep-linked set');
+
+  elements['lic-usr-search'].value = '';
+  context._renderLicUsersRows();
+  assert.match(elements['lic-usr-body'].innerHTML, /designer1@orbit\.co\.th/, 'clearing the search (not the deep link) restores the single deep-linked user');
+});
+
+test('Viewing assigned users in the Users tab does not mutate overrides, manual rows, or review state', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  context.storeMemos(bpFixtureMemos());
+
+  const beforeOverrides = context._getLicUserOverrides();
+  const beforeManualRows = context._getLicUserManualRows();
+  const beforeReviewState = context._getLicReviewState();
+
+  const elements = reconDeepLinkElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+
+  context._renderLicByProject();
+  const idx = context.window._licReconRows.findIndex(r => r.name === 'Figma' && r.project === 'AOA-MP');
+  context._openLicReconDetail(idx);
+  elements['lic-recon-view-in-users'].onclick();
+  context._clearLicUsrDeepLinkFilter();
+
+  assert.deepEqual(context._getLicUserOverrides(), beforeOverrides);
+  assert.deepEqual(context._getLicUserManualRows(), beforeManualRows);
+  assert.deepEqual(context._getLicReviewState(), beforeReviewState);
+});

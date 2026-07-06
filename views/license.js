@@ -945,6 +945,9 @@ function _renderLicReconciliation() {
           <div><div style="font-size:10px;color:var(--text-3);text-transform:uppercase">Remaining</div><div id="lic-recon-detail-remaining" style="font-weight:700;font-size:16px"></div></div>
         </div>
         <div id="lic-recon-detail-body"></div>
+        <div style="margin-top:14px;display:flex;justify-content:flex-end">
+          <button id="lic-recon-view-in-users" class="btn-sm" style="display:none">View in Users tab</button>
+        </div>
       </div>
     </div>`;
 }
@@ -970,12 +973,60 @@ function _openLicReconDetail(idx) {
         </div>`).join('')
       : `<div style="text-align:center;padding:16px;color:var(--text-3)">No assigned users</div>`;
   }
+  // Phase 2D.2 — deep link into Users tab, only offered when there is
+  // actually someone to jump to.
+  const viewBtn = document.getElementById('lic-recon-view-in-users');
+  if (viewBtn) {
+    if (row.assignedCount > 0) {
+      viewBtn.style.display = '';
+      viewBtn.onclick = () => _viewReconRowInUsers(idx);
+    } else {
+      viewBtn.style.display = 'none';
+      viewBtn.onclick = null;
+    }
+  }
   modal.style.display = 'flex';
 }
 
 function _closeLicReconDetail() {
   const modal = document.getElementById('lic-recon-detail');
   if (modal) modal.style.display = 'none';
+}
+
+// Phase 2D.2 — navigation + a temporary display filter only. Never writes to
+// overrides/settings/licenses/memos; _licUsrDeepLinkFilter is read by
+// _renderLicUsersRows() to narrow the visible list and by the Users tab's
+// context banner, and is cleared by _clearLicUsrDeepLinkFilter().
+let _licUsrDeepLinkFilter = null; // { project, name, plan, emails } | null
+
+function _viewReconRowInUsers(idx) {
+  const row = (window._licReconRows || [])[idx];
+  if (!row) return;
+  _licUsrDeepLinkFilter = {
+    project: row.project,
+    name: row.name,
+    plan: row.plan,
+    emails: row.assignedUsers.map(u => u.email),
+  };
+  _closeLicReconDetail();
+  switchLicTab('users');
+}
+
+function _clearLicUsrDeepLinkFilter() {
+  _licUsrDeepLinkFilter = null;
+  _renderLicUsrContextBanner();
+  _renderLicUsersRows();
+}
+
+// Phase 2D.2.1 — returns to License Summary > Reconciliation. The deep-link
+// filter is cleared on the way out (not preserved) so a later, ordinary
+// visit to the Users tab never shows a stale, unexplained narrowing; any
+// Reconciliation-side filters (Project/Software/Plan/Over Assigned/Has
+// Remaining) are untouched module state, so that context comes back as-is.
+function _backToReconciliationFromUsers() {
+  _licUsrDeepLinkFilter = null;
+  _bpSubTab = 'reconciliation';
+  switchLicTab('by-project');
 }
 
 // Phase 1 Part 7 — separate from the existing User Matrix export
@@ -1504,6 +1555,7 @@ function _renderLicUsers() {
     <div style="background:var(--bg-2,#F8F8F6);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:12px;font-size:11px;color:var(--text-2)">
       ℹ ข้อมูลมาจาก "ตาราง Account" ใน SL Memo — email + ✓/- ต่อโปรแกรม (เฉพาะรายการที่ PMO อนุมัติแล้ว)
     </div>
+    <div id="lic-usr-context-banner" style="margin-bottom:12px;display:none"></div>
     <div class="filter-row" style="margin-bottom:12px;justify-content:space-between">
       <div class="filter-row" style="margin-bottom:0">
         <input id="lic-usr-search" type="text" placeholder="ค้นหา email..."
@@ -1581,7 +1633,29 @@ function _renderLicUsers() {
   // Part 8 (UX consistency pass) — Project/Software are multi-select filters.
   initMultiSelect('lic-usr-proj', 'ทุก project');
   initMultiSelect('lic-usr-lic', 'ทุก license');
+  _renderLicUsrContextBanner();
   _renderLicUsersRows();
+}
+
+// Phase 2D.2 — shows which Reconciliation row (Project/Software/Plan) the
+// current Users list is scoped to, and lets PMO drop back to the full list.
+function _renderLicUsrContextBanner() {
+  const el = document.getElementById('lic-usr-context-banner');
+  if (!el) return;
+  const f = _licUsrDeepLinkFilter;
+  if (!f) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = '';
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--blue-50,#E6F1FB);border:1px solid var(--border-md);border-radius:var(--r-sm);padding:8px 12px">
+      <div style="font-size:12px;color:var(--text-1)">
+        Showing assigned users for:
+        <strong>Project: ${esc(f.project)}</strong> · <strong>Software: ${esc(f.name)}</strong>${f.plan ? ` · <strong>Plan: ${esc(f.plan)}</strong>` : ''}
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn-sm" onclick="_backToReconciliationFromUsers()">← Back to Reconciliation</button>
+        <button class="btn-sm" onclick="_clearLicUsrDeepLinkFilter()">Clear filter</button>
+      </div>
+    </div>`;
 }
 
 // Merge account-list rows into one entry per (email, project) — the same
@@ -1698,6 +1772,14 @@ function _renderLicUsersRows() {
   let rows = allUserRows;
   if (projF.length) rows = rows.filter(r => projF.includes(r.project));
   if (search) rows = rows.filter(r => r.email.toLowerCase().includes(search));
+  // Phase 2D.2 — Reconciliation "View in Users tab" deep link: a temporary
+  // display-only narrowing to the assigned emails from that row, combined
+  // (AND) with whatever Search/Project/Software filters are also set. Never
+  // written to overrides/settings — cleared via _clearLicUsrDeepLinkFilter().
+  if (_licUsrDeepLinkFilter) {
+    const emailSet = new Set(_licUsrDeepLinkFilter.emails.map(e => e.toLowerCase()));
+    rows = rows.filter(r => emailSet.has(r.email.toLowerCase()));
+  }
 
   const emailProjMap = _buildLicUserGroups(rows);
   window._licUsrMerged = emailProjMap;
