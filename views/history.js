@@ -233,6 +233,24 @@ function getLinkedDevices(memo) {
   const devices = typeof loadDevices === 'function' ? loadDevices() : [];
   return devices.filter(d => d.memoNo === memo.memoNo);
 }
+// Device Management D2 (Part 5) — Purchase Orders linked to a Hardware memo.
+function getLinkedPurchaseOrders(memo) {
+  if (memo.type !== 'hw' || typeof loadPurchaseOrders !== 'function') return [];
+  return loadPurchaseOrders().filter(po => po.memoNo === memo.memoNo);
+}
+// Device Management D2 (Part 5) — "View Purchase Orders" / "View Devices"
+// buttons for the memo detail action bar, only rendered when a linked record
+// actually exists. Shared by openHistoryDetail() and openMemoReadOnly() so
+// the two detail views don't diverge (no duplicated memo-rendering logic).
+function _memoLinkedRecordsButtonsHtml(memo) {
+  const _no = esc(memo.memoNo);
+  const hasPOs     = getLinkedPurchaseOrders(memo).length > 0;
+  const hasDevices = getLinkedDevices(memo).length > 0;
+  return `
+    ${hasPOs ? `<button class="btn-sm" type="button" onclick="closeDetailModal();if(typeof viewPurchaseOrdersForMemo==='function')viewPurchaseOrdersForMemo('${_no}')">📦 View Purchase Orders</button>` : ''}
+    ${hasDevices ? `<button class="btn-sm" type="button" onclick="closeDetailModal();if(typeof viewDevicesForMemo==='function')viewDevicesForMemo('${_no}')">🖥 View Devices</button>` : ''}
+  `;
+}
 
 // ── Detail modal (audit workspace) ──
 // Approval Timeline — single data source shared by the screen widget
@@ -800,6 +818,7 @@ function openHistoryDetail(memoNo) {
     ${!isDraft ? `
       <button class="btn-sm" type="button" onclick="if(typeof downloadMemoPdf==='function'){downloadMemoPdf(loadMemos().find(m=>m.memoNo==='${_no}'))}" style="color:var(--blue)">⬇ Download PDF</button>
     ` : ''}
+    ${_memoLinkedRecordsButtonsHtml(memo)}
     ${isRejected ? `
       <button class="btn-sm" type="button" onclick="closeDetailModal();reeditRejectedMemo('${_no}')">✎ Re-edit as New Draft</button>
     ` : ''}
@@ -919,8 +938,10 @@ function openMemoReadOnly(memoNo) {
   if (!memo) { alert('ไม่พบ Memo'); return; }
   document.getElementById('detail-content').innerHTML = _buildMemoDetailContent(memo, 'readonly');
   const acts = document.getElementById('detail-actions');
-  // Read-only tabs: ปิด only — no approve, no reject, no tag budget, no duplicate
-  if (acts) acts.innerHTML = `<button class="btn-ghost" type="button" onclick="closeDetailModal()">ปิด</button>`;
+  // Read-only tabs: no approve/reject/tag-budget/duplicate, but the Device
+  // Management deep-links (Part 5) are still useful here since this view is
+  // itself reached by clicking a memo number from the PO table.
+  if (acts) acts.innerHTML = `${_memoLinkedRecordsButtonsHtml(memo)}<button class="btn-ghost" type="button" onclick="closeDetailModal()">ปิด</button>`;
   const modalInner = document.querySelector('#detail-modal > div');
   if (modalInner) modalInner.style.maxWidth = '680px';
   document.getElementById('detail-modal').style.display = 'flex';

@@ -49,7 +49,7 @@ function createDeviceContext() {
   // from throwing without enumerating every element by hand.
   const getElementById = id => {
     if (!elements[id]) {
-      elements[id] = { value:'', style:{}, textContent:'', innerHTML:'', dataset:{}, appendChild(){}, click(){}, remove(){} };
+      elements[id] = { value:'', checked:false, style:{}, textContent:'', innerHTML:'', dataset:{}, classList:{ add(){}, remove(){}, toggle(){}, contains(){ return false; } }, appendChild(){}, click(){}, remove(){} };
     }
     return elements[id];
   };
@@ -86,6 +86,12 @@ function createDeviceContext() {
   // Default to offline/local-only persistence — tests that specifically
   // exercise the Supabase retry/fallback pattern override checkSupa/supaFetch.
   context.checkSupa = async () => false;
+  // Device Management D2 — renderDevice()/renderPurchaseOrders() now call
+  // initMultiSelect() on every render; this harness's DOM stub doesn't
+  // implement <select>.options/insertAdjacentElement, and initMultiSelect's
+  // own behavior is exercised elsewhere (tests/workflow.test.js's msValues()
+  // tests), not by these Device Management tests.
+  context.initMultiSelect = () => {};
   return {
     context,
     storage,
@@ -967,4 +973,319 @@ test('Device Detail "Edit" button closes the Detail modal before opening Edit De
     /onclick="document\.getElementById\('dev-detail-modal'\)\.style\.display='none';openDeviceModal\('dev-994'\)"/,
     'Edit button must close the Detail modal (dev-detail-modal) before opening Edit Device (openDeviceModal)'
   );
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Device Management D2 — Purchase Order filters (Part 1)
+// ══════════════════════════════════════════════════════════════════
+
+test('_filteredPOs: search narrows by Item Name', () => {
+  const { context } = createDeviceContext();
+  context.storePurchaseOrders([
+    { id: 'po-d2-1', memoNo: 'HW-D2-1', itemName: 'Laptop', project: 'AOA-MP', orderedQty: 2, arrivedQty: 0, status: 'ordered' },
+    { id: 'po-d2-2', memoNo: 'HW-D2-2', itemName: 'Monitor', project: 'Geo9', orderedQty: 1, arrivedQty: 1, status: 'fulfilled' },
+  ]);
+  context.document.getElementById('po-search').value = 'laptop';
+  const filtered = context._filteredPOs(context.loadPurchaseOrders());
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].id, 'po-d2-1');
+});
+
+test('_filteredPOs: search also matches by Memo No', () => {
+  const { context } = createDeviceContext();
+  context.storePurchaseOrders([
+    { id: 'po-d2-3', memoNo: 'HW-D2-3', itemName: 'Laptop', project: 'AOA-MP', orderedQty: 2, arrivedQty: 0, status: 'ordered' },
+    { id: 'po-d2-4', memoNo: 'HW-OTHER', itemName: 'Monitor', project: 'Geo9', orderedQty: 1, arrivedQty: 1, status: 'fulfilled' },
+  ]);
+  context.document.getElementById('po-search').value = 'hw-d2-3';
+  const filtered = context._filteredPOs(context.loadPurchaseOrders());
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].id, 'po-d2-3');
+});
+
+test('_filteredPOs: status multi-select narrows rows', () => {
+  const { context } = createDeviceContext();
+  context.storePurchaseOrders([
+    { id: 'po-d2-5', memoNo: 'HW-D2-5', itemName: 'A', project: 'AOA-MP', orderedQty: 1, arrivedQty: 0, status: 'ordered' },
+    { id: 'po-d2-6', memoNo: 'HW-D2-6', itemName: 'B', project: 'AOA-MP', orderedQty: 1, arrivedQty: 1, status: 'fulfilled' },
+  ]);
+  context.document.getElementById('po-filter-status').value = 'fulfilled';
+  const filtered = context._filteredPOs(context.loadPurchaseOrders());
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].id, 'po-d2-6');
+});
+
+test('_filteredPOs: project multi-select narrows rows', () => {
+  const { context } = createDeviceContext();
+  context.storePurchaseOrders([
+    { id: 'po-d2-7', memoNo: 'HW-D2-7', itemName: 'A', project: 'AOA-MP', orderedQty: 1, arrivedQty: 0, status: 'ordered' },
+    { id: 'po-d2-8', memoNo: 'HW-D2-8', itemName: 'B', project: 'Geo9', orderedQty: 1, arrivedQty: 0, status: 'ordered' },
+  ]);
+  context.document.getElementById('po-filter-project').value = 'Geo9';
+  const filtered = context._filteredPOs(context.loadPurchaseOrders());
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].id, 'po-d2-8');
+});
+
+test('_filteredPOs: Remaining > 0 toggle keeps only orderedQty > arrivedQty, computed live and never persisted', () => {
+  const { context } = createDeviceContext();
+  context.storePurchaseOrders([
+    { id: 'po-d2-9', memoNo: 'HW-D2-9', itemName: 'A', project: 'AOA-MP', orderedQty: 3, arrivedQty: 1, status: 'partial_arrived' },
+    { id: 'po-d2-10', memoNo: 'HW-D2-10', itemName: 'B', project: 'AOA-MP', orderedQty: 2, arrivedQty: 2, status: 'fulfilled' },
+  ]);
+  context.document.getElementById('po-filter-remaining').checked = true;
+  const filtered = context._filteredPOs(context.loadPurchaseOrders());
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].id, 'po-d2-9');
+  assert.equal(Object.hasOwn(context.loadPurchaseOrders().find(p => p.id === 'po-d2-9'), 'remaining'), false, 'Remaining Qty must never be written back onto the PO record');
+});
+
+test('_renderPOTable() renders only the filtered rows in po-table-body, not the full unfiltered set', () => {
+  const { context } = createDeviceContext();
+  context.storePurchaseOrders([
+    { id: 'po-d2-11', memoNo: 'HW-D2-11', itemName: 'Laptop', project: 'AOA-MP', orderedQty: 1, arrivedQty: 0, status: 'ordered', auditLog: [] },
+    { id: 'po-d2-12', memoNo: 'HW-D2-12', itemName: 'Monitor', project: 'AOA-MP', orderedQty: 1, arrivedQty: 0, status: 'ordered', auditLog: [] },
+  ]);
+  context.document.getElementById('po-search').value = 'laptop';
+  context._renderPOTable();
+  const html = context.document.getElementById('po-table-body').innerHTML;
+  assert.match(html, /Laptop/);
+  assert.doesNotMatch(html, /Monitor/);
+  assert.match(context.document.getElementById('po-visible-count').textContent, /1 of 2/);
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Device Management D2 — PO export respects filters (Part 2)
+// ══════════════════════════════════════════════════════════════════
+
+test('exportPurchaseOrdersCSV exports only the currently filtered rows, matching the on-screen table (MASTER_SPEC.md Export Rules)', () => {
+  const { context } = createDeviceContext();
+  context.storePurchaseOrders([
+    { id: 'po-d2-13', memoNo: 'HW-D2-13', itemName: 'Laptop', project: 'AOA-MP', orderedQty: 1, arrivedQty: 0, status: 'ordered' },
+    { id: 'po-d2-14', memoNo: 'HW-D2-14', itemName: 'Monitor', project: 'Geo9', orderedQty: 1, arrivedQty: 0, status: 'ordered' },
+  ]);
+  context.document.getElementById('po-filter-project').value = 'AOA-MP';
+  let downloaded = null;
+  context._downloadCSV = (name, headers, rows) => { downloaded = { name, headers, rows }; };
+  context.exportPurchaseOrdersCSV();
+  assert.ok(downloaded, 'export must produce a CSV');
+  assert.equal(downloaded.rows.length, 1, 'export must respect the active project filter, not export every PO');
+  assert.equal(downloaded.rows[0][1], 'HW-D2-13');
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Device Management D2 — PO -> Device Registry drill-down (Part 3)
+// ══════════════════════════════════════════════════════════════════
+
+test("viewDevicesForPO() sets the Device Registry deep-link filter, switches tabs, and shows only that PO's devices", async () => {
+  const { context } = createDeviceContext();
+  context.storePurchaseOrders([{ id: 'po-d2-20', memoNo: 'HW-D2-20', itemName: 'Laptop', orderedQty: 2, arrivedQty: 0, status: 'awaiting' }]);
+  await context.markArrived('po-d2-20', 2, ['SN-D2-1', 'SN-D2-2']);
+  context.storePurchaseOrders([...context.loadPurchaseOrders(), { id: 'po-d2-21', memoNo: 'HW-D2-21', itemName: 'Monitor', orderedQty: 1, arrivedQty: 0, status: 'awaiting' }]);
+  // A real few-ms gap between arrivals, like tests/device.test.js's existing
+  // "two sequential markArrived()" test already does — Date.now()-based
+  // per-batch device ids can otherwise collide within the same millisecond
+  // (a separate, pre-existing, documented quirk, not something this feature touches).
+  await new Promise(r => setTimeout(r, 10));
+  await context.markArrived('po-d2-21', 1, ['SN-D2-9']); // unrelated PO's device must not leak in
+
+  context.viewDevicesForPO('po-d2-20');
+  assert.equal(context.document.getElementById('dev-panel-registry').style.display, '');
+  assert.equal(context.document.getElementById('dev-panel-orders').style.display, 'none');
+
+  const shown = context._filteredDevices(context.loadDevices());
+  assert.equal(shown.length, 2);
+  assert.deepEqual(Array.from(shown, d => d.serial).sort(), ['SN-D2-1', 'SN-D2-2']);
+});
+
+test('viewDevicesForPO() is a no-op when the PO has zero devices created (count = 0, link disabled)', () => {
+  const { context } = createDeviceContext();
+  context.storePurchaseOrders([{ id: 'po-d2-22', memoNo: 'HW-D2-22', itemName: 'Laptop', orderedQty: 2, arrivedQty: 0, status: 'ordered' }]);
+  context.viewDevicesForPO('po-d2-22');
+  assert.notEqual(context.document.getElementById('dev-panel-registry').style.display, '', 'must not switch tabs for a PO with zero devices');
+});
+
+test('_renderPOTable() shows a clickable device count for a PO with arrived devices, and a plain "0" when there are none', async () => {
+  const { context } = createDeviceContext();
+  context.storePurchaseOrders([
+    { id: 'po-d2-23', memoNo: 'HW-D2-23', itemName: 'Laptop', orderedQty: 1, arrivedQty: 0, status: 'awaiting', auditLog: [] },
+    { id: 'po-d2-24', memoNo: 'HW-D2-24', itemName: 'Monitor', orderedQty: 1, arrivedQty: 0, status: 'ordered', auditLog: [] },
+  ]);
+  await context.markArrived('po-d2-23', 1, ['SN-D2-3']);
+  context._renderPOTable();
+  const html = context.document.getElementById('po-table-body').innerHTML;
+  assert.match(html, /onclick="viewDevicesForPO\('po-d2-23'\)">1 device</);
+  assert.match(html, /<span style="color:var\(--text-3\)">0<\/span>/);
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Device Management D2 — Device Registry deep-link filter + banner (Parts 4 & 6)
+// ══════════════════════════════════════════════════════════════════
+
+test('Device Registry deep-link filter combines with the existing search box (AND, not OR)', async () => {
+  const { context } = createDeviceContext();
+  context.storePurchaseOrders([{ id: 'po-d2-30', memoNo: 'HW-D2-30', itemName: 'iPhone 13', orderedQty: 2, arrivedQty: 0, status: 'awaiting' }]);
+  await context.markArrived('po-d2-30', 2, ['SN-D2-A', 'SN-D2-B']);
+  context.viewDevicesForPO('po-d2-30');
+
+  context.document.getElementById('dev-search').value = 'SN-D2-A';
+  const shown = context._filteredDevices(context.loadDevices());
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0].serial, 'SN-D2-A');
+});
+
+test('_renderDeviceTable() renders a context banner with Memo/Item/Back/Clear when deep-linked from a PO', async () => {
+  const { context } = createDeviceContext();
+  context.storePurchaseOrders([{ id: 'po-d2-31', memoNo: 'HW-D2-31', itemName: 'iPad', orderedQty: 1, arrivedQty: 0, status: 'awaiting' }]);
+  await context.markArrived('po-d2-31', 1, ['SN-D2-C']);
+  context.viewDevicesForPO('po-d2-31');
+
+  const banner = context.document.getElementById('dev-registry-context-banner');
+  assert.equal(banner.style.display, '');
+  assert.match(banner.innerHTML, /HW-D2-31/);
+  assert.match(banner.innerHTML, /iPad/);
+  assert.match(banner.innerHTML, /Back to Purchase Orders/);
+  assert.match(banner.innerHTML, /Clear filter/);
+});
+
+test('no context banner is shown for the normal (non-deep-linked) Device Registry view', () => {
+  const { context } = createDeviceContext();
+  context.storeDevices([{ id: 'dev-d2-x', name: 'Plain Device', status: 'available', auditLog: [] }]);
+  context._renderDeviceTable();
+  assert.equal(context.document.getElementById('dev-registry-context-banner').style.display, 'none');
+});
+
+test('_backToPOFromDeviceRegistry() clears the deep-link filter and switches back to the Purchase Orders tab', async () => {
+  const { context } = createDeviceContext();
+  context.storePurchaseOrders([{ id: 'po-d2-32', memoNo: 'HW-D2-32', itemName: 'Laptop', orderedQty: 1, arrivedQty: 0, status: 'awaiting' }]);
+  await context.markArrived('po-d2-32', 1, ['SN-D2-D']);
+  context.viewDevicesForPO('po-d2-32');
+
+  context._backToPOFromDeviceRegistry();
+  assert.equal(context.document.getElementById('dev-panel-orders').style.display, '');
+  assert.equal(context.document.getElementById('dev-panel-registry').style.display, 'none');
+});
+
+test('_clearDevDeepLinkFilter() restores the normal Device Registry view (every device visible again)', async () => {
+  const { context } = createDeviceContext();
+  context.storePurchaseOrders([
+    { id: 'po-d2-33', memoNo: 'HW-D2-33', itemName: 'Laptop', orderedQty: 1, arrivedQty: 0, status: 'awaiting' },
+    { id: 'po-d2-34', memoNo: 'HW-D2-34', itemName: 'Monitor', orderedQty: 1, arrivedQty: 0, status: 'awaiting' },
+  ]);
+  await context.markArrived('po-d2-33', 1, ['SN-D2-E']);
+  await new Promise(r => setTimeout(r, 10)); // avoid a same-millisecond device-id collision across POs
+  await context.markArrived('po-d2-34', 1, ['SN-D2-F']);
+  context.viewDevicesForPO('po-d2-33');
+  assert.equal(context._filteredDevices(context.loadDevices()).length, 1);
+
+  context._clearDevDeepLinkFilter();
+  assert.equal(context.document.getElementById('dev-registry-context-banner').style.display, 'none');
+  assert.equal(context._filteredDevices(context.loadDevices()).length, 2, 'clearing the filter must show every device again');
+});
+
+// ══════════════════════════════════════════════════════════════════
+// Device Management D2 — Memo Detail -> PO / Device links (Part 5),
+// and the Purchase Orders context banner reached from Memo Detail (Part 6/7)
+// ══════════════════════════════════════════════════════════════════
+
+function createDeviceHistoryContext() {
+  const built = createDeviceContext();
+  const historyCode = fs.readFileSync(path.join(root, 'views/history.js'), 'utf8');
+  vm.runInContext(historyCode, built.context, { filename: 'views/history.js' });
+  return built;
+}
+
+test('getLinkedPurchaseOrders() returns only POs for this memo, and [] for a non-Hardware memo', () => {
+  const { context } = createDeviceHistoryContext();
+  context.storePurchaseOrders([
+    { id: 'po-d2-40', memoNo: 'HW-D2-40', itemName: 'Laptop', orderedQty: 1, arrivedQty: 0, status: 'ordered' },
+    { id: 'po-d2-41', memoNo: 'HW-D2-OTHER', itemName: 'Monitor', orderedQty: 1, arrivedQty: 0, status: 'ordered' },
+  ]);
+  const hw = { type: 'hw', memoNo: 'HW-D2-40' };
+  assert.deepEqual(Array.from(context.getLinkedPurchaseOrders(hw), p => p.id), ['po-d2-40']);
+  assert.equal(context.getLinkedPurchaseOrders({ type: 'sl', memoNo: 'HW-D2-40' }).length, 0);
+});
+
+test('Memo Detail shows "View Purchase Orders" only when a linked PO exists for this memo', () => {
+  const { context } = createDeviceHistoryContext();
+  context.storePurchaseOrders([{ id: 'po-d2-42', memoNo: 'HW-D2-42', itemName: 'Laptop', orderedQty: 1, arrivedQty: 0, status: 'ordered' }]);
+  const withPO = context._memoLinkedRecordsButtonsHtml({ type: 'hw', memoNo: 'HW-D2-42' });
+  assert.match(withPO, /View Purchase Orders/);
+  assert.match(withPO, /viewPurchaseOrdersForMemo\('HW-D2-42'\)/);
+
+  const withoutPO = context._memoLinkedRecordsButtonsHtml({ type: 'hw', memoNo: 'HW-D2-NONE' });
+  assert.doesNotMatch(withoutPO, /View Purchase Orders/);
+});
+
+test('Memo Detail shows "View Devices" only when a linked device exists for this memo', async () => {
+  const { context } = createDeviceHistoryContext();
+  context.storePurchaseOrders([{ id: 'po-d2-43', memoNo: 'HW-D2-43', itemName: 'Laptop', orderedQty: 1, arrivedQty: 0, status: 'awaiting' }]);
+  await context.markArrived('po-d2-43', 1, ['SN-D2-G']);
+
+  const withDevice = context._memoLinkedRecordsButtonsHtml({ type: 'hw', memoNo: 'HW-D2-43' });
+  assert.match(withDevice, /View Devices/);
+  assert.match(withDevice, /viewDevicesForMemo\('HW-D2-43'\)/);
+
+  const withoutDevice = context._memoLinkedRecordsButtonsHtml({ type: 'hw', memoNo: 'HW-D2-NONE-2' });
+  assert.doesNotMatch(withoutDevice, /View Devices/);
+});
+
+test('Memo Detail shows neither link for a non-Hardware memo, even if the memoNo happens to collide with a PO record', () => {
+  const { context } = createDeviceHistoryContext();
+  context.storePurchaseOrders([{ id: 'po-d2-44', memoNo: 'SL-D2-44', itemName: 'Laptop', orderedQty: 1, arrivedQty: 0, status: 'ordered' }]);
+  const html = context._memoLinkedRecordsButtonsHtml({ type: 'sl', memoNo: 'SL-D2-44' });
+  assert.doesNotMatch(html, /View Purchase Orders/);
+  assert.doesNotMatch(html, /View Devices/);
+});
+
+test('viewPurchaseOrdersForMemo() deep-links into the Purchase Orders tab filtered by memoNo, with a context banner', () => {
+  const { context } = createDeviceHistoryContext();
+  context.storePurchaseOrders([
+    { id: 'po-d2-45', memoNo: 'HW-D2-45', itemName: 'Laptop', orderedQty: 1, arrivedQty: 0, status: 'ordered', auditLog: [] },
+    { id: 'po-d2-46', memoNo: 'HW-D2-OTHER-2', itemName: 'Monitor', orderedQty: 1, arrivedQty: 0, status: 'ordered', auditLog: [] },
+  ]);
+  context.viewPurchaseOrdersForMemo('HW-D2-45');
+  assert.equal(context.document.getElementById('dev-panel-orders').style.display, '');
+  const html = context.document.getElementById('po-table-body').innerHTML;
+  assert.match(html, /HW-D2-45/);
+  assert.doesNotMatch(html, /HW-D2-OTHER-2/);
+  const bannerHtml = context.document.getElementById('po-context-banner').innerHTML;
+  assert.match(bannerHtml, /Showing purchase orders for Memo/);
+  assert.match(bannerHtml, /HW-D2-45/);
+});
+
+test('viewDevicesForMemo() deep-links into the Device Registry filtered by memoNo', async () => {
+  const { context } = createDeviceHistoryContext();
+  context.storePurchaseOrders([{ id: 'po-d2-47', memoNo: 'HW-D2-47', itemName: 'Laptop', orderedQty: 1, arrivedQty: 0, status: 'awaiting' }]);
+  await context.markArrived('po-d2-47', 1, ['SN-D2-H']);
+  context.viewDevicesForMemo('HW-D2-47');
+  assert.equal(context.document.getElementById('dev-panel-registry').style.display, '');
+  const shown = context._filteredDevices(context.loadDevices());
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0].memoNo, 'HW-D2-47');
+});
+
+test('_backToMemoFromPO() clears the PO deep-link filter and reopens the source memo detail (read-only)', () => {
+  const { context } = createDeviceHistoryContext();
+  context.storePurchaseOrders([{ id: 'po-d2-48', memoNo: 'HW-D2-48', itemName: 'Laptop', orderedQty: 1, arrivedQty: 0, status: 'ordered', auditLog: [] }]);
+  vm.runInContext(`_memCache = [${JSON.stringify({ memoNo: 'HW-D2-48', type: 'hw', subject: 'Test Hardware Memo', status: 'completed', requesterProfileId: 3, requesterName: 'PMO Admin', approvers: [], auditLog: [] })}]`, context);
+  context.viewPurchaseOrdersForMemo('HW-D2-48');
+
+  context._backToMemoFromPO();
+  assert.equal(context.document.getElementById('po-context-banner').style.display, 'none');
+  assert.equal(context.document.getElementById('detail-modal').style.display, 'flex', 'Back to Memo must reopen the memo detail modal');
+});
+
+test('_clearPODeepLinkFilter() restores the normal Purchase Orders view', () => {
+  const { context } = createDeviceHistoryContext();
+  context.storePurchaseOrders([
+    { id: 'po-d2-49', memoNo: 'HW-D2-49', itemName: 'Laptop', orderedQty: 1, arrivedQty: 0, status: 'ordered', auditLog: [] },
+    { id: 'po-d2-50', memoNo: 'HW-D2-50', itemName: 'Monitor', orderedQty: 1, arrivedQty: 0, status: 'ordered', auditLog: [] },
+  ]);
+  context.viewPurchaseOrdersForMemo('HW-D2-49');
+  assert.equal(context._filteredPOs(context.loadPurchaseOrders()).length, 1);
+
+  context._clearPODeepLinkFilter();
+  assert.equal(context.document.getElementById('po-context-banner').style.display, 'none');
+  assert.equal(context._filteredPOs(context.loadPurchaseOrders()).length, 2);
 });

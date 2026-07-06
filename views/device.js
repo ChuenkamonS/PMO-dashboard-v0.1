@@ -7,6 +7,14 @@ const DEV_PAGE_SIZE = 20;
 let _devVisibleCount = DEV_PAGE_SIZE;
 let _devCache = null;
 
+// Device Management D2 — cross-tab deep-link context. Never persisted; purely
+// in-memory display state, mirroring views/license.js's _licUsrDeepLinkFilter
+// pattern. _devDeepLinkFilter narrows Device Registry (by PO id, via
+// viewDevicesForPO(), or by memoNo, via viewDevicesForMemo()).
+// _poDeepLinkFilter narrows Purchase Orders by memoNo (viewPurchaseOrdersForMemo()).
+let _devDeepLinkFilter = null; // { poId?, memoNo, itemName?, source: 'po'|'memo' } | null
+let _poDeepLinkFilter = null;  // { memoNo } | null
+
 // ══════════════════════════════════════════
 // SUPABASE SYNC — Devices
 // ══════════════════════════════════════════
@@ -740,6 +748,14 @@ function _filteredDevices(allDevices) {
   const compFilter = msValues('dev-filter-company');
 
   let devices = allDevices;
+  // Device Management D2 (Part 4) — deep-link filter (from PO drill-down or
+  // Memo Detail) applies first; the existing search/filter controls above
+  // still narrow further on top of it (AND, not OR).
+  if(_devDeepLinkFilter) {
+    devices = devices.filter(d => _devDeepLinkFilter.poId
+      ? d.purchaseOrderId === _devDeepLinkFilter.poId
+      : d.memoNo === _devDeepLinkFilter.memoNo);
+  }
   if(platFilter.length) devices = devices.filter(d => platFilter.includes(d.platform||'other'));
   if(typeFilter.length) devices = devices.filter(d => typeFilter.includes(d.type||'other'));
   if(statFilter.length) devices = devices.filter(d => statFilter.includes(d.status));
@@ -754,7 +770,53 @@ function _filteredDevices(allDevices) {
   return devices;
 }
 
+// Device Management D2 (Parts 4 & 6) — Device Registry deep-link context
+// banner. Populated by viewDevicesForPO() or viewDevicesForMemo(); mirrors
+// views/license.js's _renderLicUsrContextBanner() pattern.
+function _renderDevRegistryContextBanner() {
+  const el = document.getElementById('dev-registry-context-banner');
+  if(!el) return;
+  const f = _devDeepLinkFilter;
+  if(!f) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const parts = [];
+  if(f.poId) parts.push(`PO <strong>${esc(f.poId)}</strong>`);
+  if(f.memoNo) parts.push(`Memo <strong>${esc(f.memoNo)}</strong>`);
+  if(f.itemName) parts.push(`Item <strong>${esc(f.itemName)}</strong>`);
+  const backBtn = f.source === 'po'
+    ? `<button class="btn-sm" onclick="_backToPOFromDeviceRegistry()">← Back to Purchase Orders</button>`
+    : `<button class="btn-sm" onclick="_backToMemoFromDeviceRegistry()">← Back to Memo</button>`;
+  el.style.display = '';
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--blue-50,#E6F1FB);border:1px solid var(--border-md);border-radius:var(--r-sm);padding:8px 12px">
+      <div style="font-size:12px;color:var(--text-1)">Showing devices for: ${parts.join(' / ')}</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        ${backBtn}
+        <button class="btn-sm" onclick="_clearDevDeepLinkFilter()">Clear filter</button>
+      </div>
+    </div>`;
+}
+function _backToPOFromDeviceRegistry() {
+  _devDeepLinkFilter = null;
+  // switchDevTab('orders', ...) -> renderPurchaseOrders() re-fetches from
+  // Supabase before rendering; force an immediate render off the already-
+  // cached data too, so the cleared filter is reflected without waiting on
+  // that round-trip (same reasoning as viewPurchaseOrdersForMemo() below).
+  switchDevTab('orders', document.getElementById('dev-tbtn-orders'));
+  _renderPOTable();
+}
+function _backToMemoFromDeviceRegistry() {
+  const memoNo = _devDeepLinkFilter?.memoNo;
+  _devDeepLinkFilter = null;
+  _renderDeviceTable();
+  if(memoNo && typeof openMemoReadOnly === 'function') openMemoReadOnly(memoNo);
+}
+function _clearDevDeepLinkFilter() {
+  _devDeepLinkFilter = null;
+  _renderDeviceTable();
+}
+
 function _renderDeviceTable() {
+  _renderDevRegistryContextBanner();
 
   const allDevices = loadDevices();
 
@@ -1049,7 +1111,9 @@ function exportDeviceCsv() {
 }
 
 function exportPurchaseOrdersCSV() {
-  const pos = loadPurchaseOrders();
+  // Device Management D2 (Part 2) — export exactly the filtered/visible rows,
+  // not the full unfiltered list (MASTER_SPEC.md "Export Rules").
+  const pos = _filteredPOs(loadPurchaseOrders());
   if(!pos.length) { alert('ไม่มีข้อมูล Purchase Orders'); return; }
   const headers = ['PO ID','Memo No','โครงการ','ชื่อรายการ','จำนวนที่สั่ง','จำนวนที่รับ',
     'คงเหลือ','สถานะ','หมายเหตุ','วันที่สร้าง','วันที่อัปเดต'];
@@ -1243,7 +1307,99 @@ function switchDevTab(tab, btn) {
 }
 
 function renderPurchaseOrders() {
+  ['po-filter-status', 'po-filter-project'].forEach(id => initMultiSelect(id));
   loadPurchaseOrdersAsync().then(() => _renderPOTable()).catch(() => _renderPOTable());
+}
+
+// Device Management D2 (Parts 1 & 2) — single source of Purchase Orders filter
+// predicates (search + status/project multi-select + remaining>0 toggle +
+// memoNo deep-link), reused by both the visible table and
+// exportPurchaseOrdersCSV() so export always matches what's on screen
+// (MASTER_SPEC.md "Export Rules"). Remaining Qty is derived here only
+// (orderedQty - arrivedQty) — never persisted onto the PO record.
+function _filteredPOs(allPos) {
+  const search        = (document.getElementById('po-search')?.value||'').toLowerCase();
+  const statFilter     = msValues('po-filter-status');
+  const projFilter     = msValues('po-filter-project');
+  const remainingOnly  = !!document.getElementById('po-filter-remaining')?.checked;
+
+  let pos = allPos;
+  if(_poDeepLinkFilter) pos = pos.filter(p => p.memoNo === _poDeepLinkFilter.memoNo);
+  if(statFilter.length) pos = pos.filter(p => statFilter.includes(p.status));
+  if(projFilter.length) pos = pos.filter(p => projFilter.includes(p.project));
+  if(remainingOnly) pos = pos.filter(p => (p.orderedQty - p.arrivedQty) > 0);
+  if(search) pos = pos.filter(p => [p.memoNo, p.itemName].some(v => v && String(v).toLowerCase().includes(search)));
+  return pos;
+}
+
+// Device Management D2 (Part 3) — count of Device Registry rows created from
+// a given PO (matched via device.purchaseOrderId, set by markArrived()).
+function _devicesCountForPO(po) {
+  return loadDevices().filter(d => d.purchaseOrderId === po.id).length;
+}
+
+// Device Management D2 (Part 3) — PO -> Device Registry drill-down. No-op
+// when the PO has zero devices created yet (rendered as plain, non-clickable
+// text in _renderPOTable(), never wired to this handler at all).
+function viewDevicesForPO(poId) {
+  const po = loadPurchaseOrders().find(p => p.id === poId);
+  if(!po) return;
+  if(!_devicesCountForPO(po)) return;
+  _devDeepLinkFilter = { poId: po.id, memoNo: po.memoNo, itemName: po.itemName, source: 'po' };
+  // switchDevTab('registry', ...) only toggles panel visibility — it does not
+  // re-render (unlike the 'orders' branch, which calls renderPurchaseOrders())
+  // — so the new filter must be applied explicitly here.
+  switchDevTab('registry', document.getElementById('dev-tbtn-registry'));
+  _renderDeviceTable();
+}
+
+// Device Management D2 (Parts 5 & 6) — Purchase Orders deep-link context
+// banner, populated by viewPurchaseOrdersForMemo() (Memo Detail "View
+// Purchase Orders").
+function _renderPOContextBanner() {
+  const el = document.getElementById('po-context-banner');
+  if(!el) return;
+  const f = _poDeepLinkFilter;
+  if(!f) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = '';
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--blue-50,#E6F1FB);border:1px solid var(--border-md);border-radius:var(--r-sm);padding:8px 12px">
+      <div style="font-size:12px;color:var(--text-1)">Showing purchase orders for Memo <strong>${esc(f.memoNo)}</strong></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn-sm" onclick="_backToMemoFromPO()">← Back to Memo</button>
+        <button class="btn-sm" onclick="_clearPODeepLinkFilter()">Clear filter</button>
+      </div>
+    </div>`;
+}
+function _backToMemoFromPO() {
+  const memoNo = _poDeepLinkFilter?.memoNo;
+  _poDeepLinkFilter = null;
+  _renderPOTable();
+  if(memoNo && typeof openMemoReadOnly === 'function') openMemoReadOnly(memoNo);
+}
+function _clearPODeepLinkFilter() {
+  _poDeepLinkFilter = null;
+  _renderPOTable();
+}
+
+// Device Management D2 (Part 5) — Memo Detail deep-links. Called from
+// views/history.js's memo detail action buttons (only rendered there when a
+// linked PO/device actually exists for the memo).
+function viewPurchaseOrdersForMemo(memoNo) {
+  _poDeepLinkFilter = { memoNo };
+  if(typeof swView === 'function') swView('device', null, 'Device Management');
+  // switchDevTab('orders', ...) only toggles panel visibility and kicks off
+  // an async Supabase re-fetch via renderPurchaseOrders() — force a
+  // synchronous render off already-cached data too, so the new filter is
+  // visible immediately (mirrors viewDevicesForPO()/viewDevicesForMemo()).
+  switchDevTab('orders', document.getElementById('dev-tbtn-orders'));
+  _renderPOTable();
+}
+function viewDevicesForMemo(memoNo) {
+  _devDeepLinkFilter = { memoNo, source: 'memo' };
+  if(typeof swView === 'function') swView('device', null, 'Device Management');
+  switchDevTab('registry', document.getElementById('dev-tbtn-registry'));
+  _renderDeviceTable();
 }
 
 const PO_STATUS_BADGE = {
@@ -1312,7 +1468,10 @@ function poActionBtn(po) {
   if (s === 'awaiting' || s === 'partial_arrived')
     return `<button class="btn-sm" style="font-size:11px;background:#185FA5;color:#fff;border-color:transparent" onclick="openMarkArrivedModal('${esc(po.id)}')">+ Mark arrived</button>`;
   if (s === 'fulfilled')
-    return `<button class="btn-sm" style="font-size:11px;color:var(--text-3)" onclick="switchDevTab('registry',document.getElementById('dev-tbtn-registry'))">View devices</button>`;
+    // Device Management D2 (Part 3) — scoped to this PO's own devices, same
+    // as the Devices column's drill-down link, instead of jumping to an
+    // unfiltered Device Registry.
+    return `<button class="btn-sm" style="font-size:11px;color:var(--text-3)" onclick="viewDevicesForPO('${esc(po.id)}')">View devices</button>`;
   return '';
 }
 
@@ -1331,9 +1490,11 @@ function advancePOStatus(poId, newStatus) {
 }
 
 function _renderPOTable() {
+  _renderPOContextBanner();
   const pos = loadPurchaseOrders();
 
-  // KPIs
+  // KPIs — always computed on the unfiltered set (matches Device Registry's
+  // metric cards, which also stay unfiltered).
   const active    = pos.filter(p => !['fulfilled', 'voided_source'].includes(p.status)).length;
   const awaitingUnits = pos.filter(p => ['ordered','awaiting'].includes(p.status)).reduce((s,p) => s+p.orderedQty,0);
   const partial   = pos.filter(p => p.status === 'partial_arrived').length;
@@ -1351,24 +1512,38 @@ function _renderPOTable() {
   if (!tbody) return;
 
   if (!pos.length) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:34px;color:var(--text-3)">ยังไม่มี Purchase Order — Approve HW Memo เพื่อสร้างอัตโนมัติ</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:34px;color:var(--text-3)">ยังไม่มี Purchase Order — Approve HW Memo เพื่อสร้างอัตโนมัติ</td></tr>`;
+    const countEl = document.getElementById('po-visible-count');
+    if(countEl) countEl.textContent = '';
+    return;
+  }
+
+  const visible = _filteredPOs(pos);
+  const countEl = document.getElementById('po-visible-count');
+  if(countEl) countEl.textContent = visible.length === pos.length ? `${pos.length} orders` : `Showing ${visible.length} of ${pos.length} orders`;
+
+  if (!visible.length) {
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:34px;color:var(--text-3)">ไม่พบ Purchase Order ที่ตรงกับการค้นหา/filter</td></tr>`;
     return;
   }
 
   // Sort: active first (by status order), then fulfilled, then voided source
   const statusOrder = { pending_order:0, ordered:1, awaiting:2, partial_arrived:3, fulfilled:4, voided_source:5 };
-  const sorted = [...pos].sort((a,b) => (statusOrder[a.status]||99) - (statusOrder[b.status]||99));
+  const sorted = [...visible].sort((a,b) => (statusOrder[a.status]||99) - (statusOrder[b.status]||99));
 
   tbody.innerHTML = sorted.map(po => {
     const pct = po.orderedQty > 0 ? Math.round(po.arrivedQty / po.orderedQty * 100) : 0;
     const barColor = pct >= 100 ? '#3B6D11' : '#185FA5';
     const voidTooltip = poVoidTooltip(po);
+    const remaining = po.orderedQty - po.arrivedQty; // derived only, never persisted
+    const devCount = _devicesCountForPO(po);
     return `<tr style="${po.status==='fulfilled'||po.status==='voided_source'?'opacity:0.7':''}">
       <td style="color:#185FA5;font-weight:500;cursor:pointer;padding:9px 12px" onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly('${esc(po.memoNo)}')">${esc(po.memoNo)}</td>
       <td style="padding:9px 12px;font-size:12px">${esc(po.itemName)}</td>
       <td style="padding:9px 12px;font-size:12px">${esc(po.project||'—')}</td>
       <td style="padding:9px 12px;text-align:center;font-size:12px">${po.orderedQty}</td>
       <td style="padding:9px 12px;text-align:center;font-size:12px;font-weight:500;color:${po.arrivedQty>0?'#3B6D11':'var(--text-3)'}">${po.arrivedQty||'—'}</td>
+      <td style="padding:9px 12px;text-align:center;font-size:12px">${remaining}</td>
       <td style="padding:9px 12px">
         <div style="display:flex;align-items:center;gap:6px">
           <div style="flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden">
@@ -1378,6 +1553,9 @@ function _renderPOTable() {
         </div>
       </td>
       <td style="padding:9px 12px"${voidTooltip ? ` title="${esc(voidTooltip)}"` : ''}>${PO_STATUS_BADGE[po.status]||`<span style="font-size:10px;background:#F1EFE8;color:#444441;padding:2px 8px;border-radius:100px">${esc(po.status)}</span>`}</td>
+      <td style="padding:9px 12px;text-align:center">${devCount > 0
+        ? `<span style="color:#185FA5;font-weight:500;cursor:pointer;text-decoration:underline" onclick="viewDevicesForPO('${esc(po.id)}')">${devCount} device${devCount>1?'s':''}</span>`
+        : `<span style="color:var(--text-3)">0</span>`}</td>
       <td style="padding:9px 12px;white-space:nowrap">${poActionBtn(po)}</td>
     </tr>`;
   }).join('');

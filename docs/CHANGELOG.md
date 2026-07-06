@@ -22,6 +22,73 @@
 
 ## Current Baseline
 
+### 2026-07-06 Device Management — PO Filters and Cross-Module Navigation (Phase D2)
+
+Scope: Device Management usability only, using existing data — no PO creation, Mark Arrived, memo
+approval, budget, license, settings, resource, or schema/migration logic touched. Reused
+`views/license.js`'s deep-link/context-banner pattern rather than inventing a new navigation system.
+
+#### Added
+- **Purchase Orders filters** (`views/device.js` `_filteredPOs()`, `index.html`): search by Memo
+  No / Item Name, Status multi-select, Project multi-select, and a "Remaining > 0" toggle. Remaining
+  Qty is computed live as `orderedQty - arrivedQty` and never persisted onto the PO record. Filters
+  narrow the visible table rows, the export, and a new "Showing X of Y orders" visible-count label.
+- **PO export respects filters**: `exportPurchaseOrdersCSV()` now exports `_filteredPOs(loadPurchaseOrders())`
+  instead of the full unfiltered list (MASTER_SPEC.md "Export Rules"), matching the pattern already
+  used by `exportDeviceCsv()`. Device Registry export is unchanged.
+- **PO -> Device Registry drill-down**: a new "Devices" column in the Purchase Orders table shows the
+  count of devices created from that PO (matched via `device.purchaseOrderId`, set by `markArrived()`).
+  A non-zero count is a clickable link (`viewDevicesForPO()`) that switches to Device Registry filtered
+  to just that PO's devices; zero renders as plain, non-clickable "0". The pre-existing "View devices"
+  action button on a Fulfilled PO row now also scopes to that PO (previously jumped to an unfiltered
+  Device Registry).
+- **Device Registry deep-link filter + context banner**: `_devDeepLinkFilter` (module-level, never
+  persisted) narrows `_filteredDevices()` on top of the existing search/type/status/project/company
+  filters (AND, not OR). A new banner (`dev-registry-context-banner`) shows "Showing devices for:
+  PO / Memo / Item" with "← Back to Purchase Orders" or "← Back to Memo" (depending on entry point)
+  and "Clear filter".
+- **Memo Detail -> PO / Device links** (`views/history.js`): `getLinkedPurchaseOrders()` (new, mirrors
+  the existing but previously-unused `getLinkedDevices()`) and a shared `_memoLinkedRecordsButtonsHtml()`
+  render "📦 View Purchase Orders" / "🖥 View Devices" in the memo detail action bar — only when a
+  linked record actually exists — reused by both `openHistoryDetail()` (full) and `openMemoReadOnly()`
+  (read-only, e.g. reached by clicking a memo number from the PO table) so the two views don't diverge.
+  Clicking deep-links into Device Management, switching tabs and applying the memoNo filter.
+- **Purchase Orders context banner**: `_poDeepLinkFilter` (memoNo-scoped) with its own banner
+  ("Showing purchase orders for Memo ...", "← Back to Memo" / "Clear filter"). "Back to Memo" reopens
+  the source memo via `openMemoReadOnly()`.
+
+#### Changed
+- `renderPurchaseOrders()`/`viewDevicesForPO()`/`viewDevicesForMemo()`/`viewPurchaseOrdersForMemo()`/
+  `_backToPOFromDeviceRegistry()` now force a synchronous re-render off already-cached data immediately
+  after switching tabs, instead of relying solely on `switchDevTab()`'s async Supabase re-fetch — so a
+  freshly-applied or freshly-cleared deep-link filter is visible immediately.
+
+#### Tests
+- `tests/device.test.js`: 23 new tests covering PO search/status/project/remaining filters, PO export
+  respecting filters, the Devices-column drill-down (including the zero-count no-op case), the Device
+  Registry deep-link filter combining with existing search (AND), the context banner (render/Back/Clear)
+  on both Device Registry and Purchase Orders, and the Memo Detail linked-buttons (shown only when a
+  linked PO/device exists, hidden for non-Hardware memos, correct deep-link wiring). Also extended the
+  shared test DOM stub (`classList`, `checked`) and neutralized `initMultiSelect()` in the harness (its
+  own behavior is covered elsewhere, not by these tests) so the new `renderPurchaseOrders()`/`swView()`
+  call chains don't require a full `<select>`/DOM implementation.
+- `node --check views/device.js views/history.js tests/device.test.js tests/workflow.test.js` and
+  `node --test tests/*.test.js`: clean, 558/558 passing (was 535; +23 new).
+
+#### Manual verification
+- Not performed — this folder's preview server pool was at capacity (5 servers held by other chats),
+  same constraint noted in prior phases' entries. Verified by full regression test coverage above plus
+  direct code review of the final diff (index.html markup, `views/device.js`, `views/history.js`).
+
+#### Remaining Work
+- Purchase Orders' Project multi-select reuses the same static option list as Device Registry's
+  Project filter (`AOA-MP`/`TTB`/`Geo9`/`Release 2.1`/`Release 3`) rather than a live master list —
+  pre-existing pattern (see `docs/TECHNICAL_DEBT.md` TD-7A-07), not introduced or worsened here.
+- No new schema/migration — device-to-PO matching relies entirely on the existing
+  `device.purchaseOrderId` field already written by `markArrived()`.
+
+---
+
 ### 2026-07-06 License Management — UX Cleanup (Export buttons relocated, Users tab decluttered)
 
 Scope: presentation-only cleanup per PMO request — no license/assignment/reconciliation logic, imports,

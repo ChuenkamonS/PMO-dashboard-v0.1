@@ -1808,18 +1808,43 @@ svg.icon { display: inline-block; vertical-align: middle; }
 
         <!-- ── PURCHASE ORDERS PANEL ── -->
         <div id="dev-panel-orders" style="display:none">
+          <div id="po-context-banner" style="display:none;margin-bottom:10px"></div>
           <div class="metric-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px">
             <div class="metric-card"><div class="metric-label">Active orders</div><div class="metric-val" id="po-kpi-active" style="color:#185FA5">0</div></div>
             <div class="metric-card"><div class="metric-label">Units awaiting</div><div class="metric-val" id="po-kpi-awaiting" style="color:#854F0B">0</div></div>
             <div class="metric-card"><div class="metric-label">Partially arrived</div><div class="metric-val" id="po-kpi-partial" style="color:#854F0B">0</div></div>
             <div class="metric-card"><div class="metric-label">Fulfilled</div><div class="metric-val" id="po-kpi-fulfilled" style="color:#3B6D11">0</div></div>
           </div>
+          <div class="filter-row" style="margin-bottom:10px">
+            <input type="text" id="po-search" placeholder="🔍 ค้นหา Memo No / Item Name..."
+              style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px;outline:none"
+              oninput="renderPurchaseOrders()">
+            <select id="po-filter-status" onchange="renderPurchaseOrders()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+              <option value="pending_order">Pending Order</option>
+              <option value="ordered">Ordered</option>
+              <option value="awaiting">Awaiting</option>
+              <option value="partial_arrived">Partial arrived</option>
+              <option value="fulfilled">Fulfilled</option>
+              <option value="voided_source">Voided</option>
+            </select>
+            <select id="po-filter-project" onchange="renderPurchaseOrders()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+              <option>AOA-MP</option><option>TTB</option><option>Geo9</option>
+              <option>Release 2.1</option><option>Release 3</option>
+            </select>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-2);white-space:nowrap">
+              <input type="checkbox" id="po-filter-remaining" onchange="renderPurchaseOrders()"> Remaining &gt; 0
+            </label>
+            <div id="po-visible-count" style="margin-left:auto;font-size:11px;color:var(--text-3)"></div>
+          </div>
           <div class="card" style="padding:0;overflow:hidden;overflow-x:auto;-webkit-overflow-scrolling:touch">
             <table class="hist-table">
               <thead><tr>
                 <th>Memo</th><th>Item</th><th>Project</th>
                 <th style="text-align:center">Ordered</th><th style="text-align:center">Arrived</th>
-                <th style="width:120px">Progress</th><th>Status</th><th>Actions</th>
+                <th style="text-align:center">Remaining</th>
+                <th style="width:120px">Progress</th><th>Status</th>
+                <th style="text-align:center">Devices</th>
+                <th>Actions</th>
               </tr></thead>
               <tbody id="po-table-body"></tbody>
             </table>
@@ -1871,6 +1896,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
         </div>
 
         <!-- Filter row -->
+        <div id="dev-registry-context-banner" style="display:none;margin-bottom:10px"></div>
         <div class="filter-row" style="margin-bottom:10px">
           <input type="text" id="dev-search" placeholder="🔍 ค้นหา Device, Serial, Owner..."
             style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px;outline:none"
