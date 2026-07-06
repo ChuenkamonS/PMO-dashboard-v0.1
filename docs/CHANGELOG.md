@@ -22,6 +22,52 @@
 
 ## Current Baseline
 
+### 2026-07-06 License Management — UX Cleanup (Export buttons relocated, Users tab decluttered)
+
+Scope: presentation-only cleanup per PMO request — no license/assignment/reconciliation logic, imports,
+exports, data model, or unrelated tests touched.
+
+#### Changed
+- **Removed the single global "Export CSV" button** from the License Management tab bar
+  (`index.html`) — it stayed visible across all four tabs regardless of which export it actually ran
+  (`exportLicenseCSV()`, the License Inventory export), which was confusing.
+- **Added "⬇ Export License Inventory"** to the Memo Index tab's own action row (`_renderLicMemoIndex()`,
+  `views/license.js`), calling the same pre-existing `exportLicenseCSV()` — now scoped to the one tab
+  it actually describes. License Summary's "Export Summary"/"Export Reconciliation" and the Users tab's
+  "Export User Licenses" were already correctly tab-scoped and are unchanged. "Download Assignment
+  Template"/"Import Assignments" remain on the Users tab (no separate "Assignment Import" tab exists in
+  this app; introducing one would be a new nav feature, out of scope for a cleanup pass).
+
+#### Removed
+- **Users tab helper banner** ("ℹ ข้อมูลมาจาก 'ตาราง Account' ใน SL Memo — ...") — the page is
+  self-explanatory without it.
+- **Users tab KPI cards** (Users / Active Licenses / Projects / Manual Assignments), added in Phase 2E.
+  Deleted the now-dead `_licUsrComputeKpis()`/`_renderLicUsrKpis()` helpers and their call site in
+  `_renderLicUsersRows()` along with the cards' markup — nothing else referenced them. The Users tab now
+  goes straight from the Review Queue (if any) into filters, then the table, matching the app's existing
+  spacing conventions elsewhere (no leftover gap).
+
+#### Tests
+- `tests/license.test.js`: removed the KPI-cards regression test and the two KPI assertions inside the
+  empty-state test (both tested UI that no longer exists); renamed the now KPI-free
+  `licUsersKpiElements()` test helper to `licUsersFilterElements()`. All other Users tab tests (filters,
+  export, Manage Licenses, deep-link, Assignment Import) unchanged and passing.
+- `node --check views/license.js tests/license.test.js` and `node --test tests/*.test.js`: clean,
+  535/535 passing (down from 536 — one KPI-only test removed, no other count changes).
+
+#### Manual verification
+- Not performed — this folder's preview server pool was at capacity (5 servers held by other sessions),
+  same constraint noted in the Phase 2E entry above. Verified by code review instead: confirmed no other
+  file references the removed KPI element ids or helper text, confirmed the Memo Index/License
+  Summary/Users tabs each render exactly one export action of their own, and confirmed the full
+  regression suite still passes.
+
+#### Remaining Work
+- Manual smoke test in a live browser once a preview server slot is free, to visually confirm tab
+  spacing and that no console errors fire on tab switch.
+
+---
+
 ### 2026-07-06 License Management — Phase 2E: Users Tab UX Polish (KPI cards, empty state, AND-filter/export/state-preservation regression coverage)
 
 Scope: Phase 2E per the brief — Users tab filters, export, empty state, and four new KPI cards. Email

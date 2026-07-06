@@ -2183,9 +2183,8 @@ test('Viewing assigned users in the Users tab does not mutate overrides, manual 
 // Phase 2E — Users tab UX polish: Search/Project/Software filters combine
 // with AND logic (OR only within a single multi-select), the User Matrix
 // export never recomputes independently of what's on screen, a proper empty
-// state renders when filters exclude everyone, four KPI cards reuse the
-// existing per-group active-license/source computation, and filter state
-// survives an open → save → return round trip through Manage Licenses.
+// state renders when filters exclude everyone, and filter state survives an
+// open → save → return round trip through Manage Licenses.
 // ══════════════════════════════════════════════════════════════════
 function twoProjectUserFixture() {
   // designer@orbit.co.th has two project groups (AOA-MP/Figma, BETA/Slack);
@@ -2220,12 +2219,8 @@ function twoProjectUserFixture() {
   return [memoAoa, memoBeta];
 }
 
-function licUsersKpiElements(extra = {}) {
+function licUsersFilterElements(extra = {}) {
   return licUsersElements({
-    'lic-usr-kpi-users': { textContent: '' },
-    'lic-usr-kpi-active-licenses': { textContent: '' },
-    'lic-usr-kpi-projects': { textContent: '' },
-    'lic-usr-kpi-manual': { textContent: '' },
     'lic-usr-search': { value: '' },
     'lic-usr-proj': { value: '', selectedOptions: [] },
     'lic-usr-lic': { value: '', selectedOptions: [] },
@@ -2239,7 +2234,7 @@ test('Search, Project, and Software filters combine using AND logic (not OR)', (
   context.initMultiSelect = () => {};
   context.storeMemos(twoProjectUserFixture());
 
-  const elements = licUsersKpiElements();
+  const elements = licUsersFilterElements();
   const origGetById = context.document.getElementById;
   context.document.getElementById = id => elements[id] || origGetById(id);
   context._renderLicUsers();
@@ -2275,7 +2270,7 @@ test('Empty state shows "No users found." / "Try changing your filters." when fi
   context.initMultiSelect = () => {};
   context.storeMemos(twoProjectUserFixture());
 
-  const elements = licUsersKpiElements();
+  const elements = licUsersFilterElements();
   const origGetById = context.document.getElementById;
   context.document.getElementById = id => elements[id] || origGetById(id);
   context._renderLicUsers();
@@ -2286,42 +2281,6 @@ test('Empty state shows "No users found." / "Try changing your filters." when fi
   const body = elements['lic-usr-body'].innerHTML;
   assert.match(body, /No users found\./);
   assert.match(body, /Try changing your filters\./);
-  // KPIs must reflect the empty filtered view too, not the full dataset.
-  assert.equal(elements['lic-usr-kpi-users'].textContent, 0);
-  assert.equal(elements['lic-usr-kpi-active-licenses'].textContent, 0);
-});
-
-test('KPI cards (Users/Active Licenses/Projects/Manual Assignments) reuse the existing active-license computation and track the current filter', () => {
-  const { context } = createLicenseContext();
-  context.DOMParser = FakeAcctDOMParser;
-  context.initMultiSelect = () => {};
-  context.storeMemos(twoProjectUserFixture());
-
-  const elements = licUsersKpiElements();
-  const origGetById = context.document.getElementById;
-  context.document.getElementById = id => elements[id] || origGetById(id);
-  context._renderLicUsers();
-
-  // Manual override on top of the two memo-granted assignments: designer's
-  // BETA/Slack grant is memo-sourced already; add a manual grant of Figma to
-  // dev@orbit.co.th (not backed by any memo row) to get a distinct "Manual"
-  // count separate from the memo-sourced assignments.
-  context._saveLicUserOverrides({ 'dev@orbit.co.th|AOA-MP|Figma': true });
-  context._renderLicUsersRows();
-
-  // Unfiltered: designer{AOA-MP/Figma(memo), BETA/Slack(memo)}, dev{AOA-MP/Slack(memo), AOA-MP/Figma(manual)}
-  assert.equal(elements['lic-usr-kpi-users'].textContent, 2);
-  assert.equal(elements['lic-usr-kpi-active-licenses'].textContent, 4);
-  assert.equal(elements['lic-usr-kpi-projects'].textContent, 2, 'AOA-MP and BETA');
-  assert.equal(elements['lic-usr-kpi-manual'].textContent, 1, 'only dev\'s Figma grant has no memo backing it');
-
-  // Narrow to Project=AOA-MP -> designer's BETA group drops out entirely.
-  elements['lic-usr-proj'].selectedOptions = [{ value: 'AOA-MP' }];
-  context._renderLicUsersRows();
-  assert.equal(elements['lic-usr-kpi-users'].textContent, 2);
-  assert.equal(elements['lic-usr-kpi-active-licenses'].textContent, 3, 'designer/Figma + dev/Slack + dev/Figma(manual)');
-  assert.equal(elements['lic-usr-kpi-projects'].textContent, 1);
-  assert.equal(elements['lic-usr-kpi-manual'].textContent, 1);
 });
 
 test('Export User Licenses never recomputes independently — it exports exactly the currently visible (filtered) rows, matching Search+Project+Software together', () => {
@@ -2330,7 +2289,7 @@ test('Export User Licenses never recomputes independently — it exports exactly
   context.initMultiSelect = () => {};
   context.storeMemos(twoProjectUserFixture());
 
-  const elements = licUsersKpiElements();
+  const elements = licUsersFilterElements();
   const origGetById = context.document.getElementById;
   context.document.getElementById = id => elements[id] || origGetById(id);
   context._renderLicUsers();
@@ -2356,7 +2315,7 @@ test('Opening Manage Licenses, saving, and returning preserves Search/Project/So
   context.initMultiSelect = () => {};
   context.storeMemos(twoProjectUserFixture());
 
-  const elements = licUsersKpiElements();
+  const elements = licUsersFilterElements();
   const origGetById = context.document.getElementById;
   context.document.getElementById = id => elements[id] || origGetById(id);
   context._renderLicUsers();
