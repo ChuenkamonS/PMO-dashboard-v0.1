@@ -2244,8 +2244,8 @@ test('Phase 7A-8: BvA shows a filter-specific empty state (not the "set up a poo
   context.__elements.get('bva-project').value = 'Nonexistent-Project';
   context._renderBvaWith(pools);
   const html = context.__elements.get('bva-content').innerHTML;
-  assert.match(html, /ไม่พบข้อมูลตามเงื่อนไขที่เลือก/);
-  assert.doesNotMatch(html, /ยังไม่มี Budget Pool สำหรับปี/, 'must not show the "set up a pool" CTA when pools already exist for this year/project scope');
+  assert.match(html, /No records found\. Try changing filters\./);
+  assert.doesNotMatch(html, /No budget pools found for/, 'must not show the "set up a pool" CTA when pools already exist for this year/project scope');
 });
 
 test('Phase 7A-8: BvA still shows the "set up a pool" Settings CTA when truly no Budget Pool exists for the selected year', () => {
@@ -2254,7 +2254,7 @@ test('Phase 7A-8: BvA still shows the "set up a pool" Settings CTA when truly no
   context.__elements.get('bva-project').value = 'all';
   context._renderBvaWith([]);
   const html = context.__elements.get('bva-content').innerHTML;
-  assert.match(html, /ยังไม่มี Budget Pool สำหรับปี 2569/);
+  assert.match(html, /No budget pools found for 2569/);
 });
 
 test('Phase 7A-8 regression: a Needs PMO Review record must never be hidden behind the "no Budget Pool" empty state, even when its matching pools fall in a different year than the active filter', () => {
@@ -2272,7 +2272,7 @@ test('Phase 7A-8 regression: a Needs PMO Review record must never be hidden behi
   context._renderBvaWith([poolA, poolB]);
 
   const html = context.__elements.get('bva-content').innerHTML;
-  assert.doesNotMatch(html, /ยังไม่มี Budget Pool สำหรับปี/, 'must not fall back to the "no pool" empty state when a Needs PMO Review item exists');
+  assert.doesNotMatch(html, /No budget pools found for/, 'must not fall back to the "no pool" empty state when a Needs PMO Review item exists');
   assert.match(html, /id="bva-needs-review-section"/);
   assert.match(html, /Needs PMO Review \(1 items\)/);
 });

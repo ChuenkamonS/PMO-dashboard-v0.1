@@ -1052,8 +1052,8 @@ function renderHistoryMemos() {
   // Part 8 (UX consistency pass) — Type/Project are multi-select filters.
   // initMultiSelect() is idempotent, and must run before
   // populateHistFilterOptions() populates hist-project's options.
-  initMultiSelect('hist-type', 'ทุกประเภท');
-  initMultiSelect('hist-project', 'ทั้งหมด');
+  initMultiSelect('hist-type', 'ทุกประเภท', 'Type');
+  initMultiSelect('hist-project', 'ทั้งหมด', 'Project');
   populateHistFilterOptions();
   populateHistTabCounts();
   const body = document.getElementById('history-body');

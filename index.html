@@ -432,6 +432,7 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 .badge-red    { background: var(--red-50);    color: var(--red); }
 .badge-gray   { background: var(--gray-50);   color: var(--gray); }
 .badge-purple { background: var(--purple-50); color: var(--purple); }
+.badge-orange { background: #FFF0E6;          color: #C05000; }
 .mono { font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
 
 /* ── METRICS ── */
@@ -892,6 +893,16 @@ svg.icon { display: inline-block; vertical-align: middle; }
   border-color: var(--blue);
   box-shadow: 0 0 0 2px rgba(24,95,165,.08);
 }
+/* ── FILTER FIELD LABELS (UX consistency pass) ── */
+.filter-field { display: inline-flex; align-items: center; gap: 5px; }
+.filter-label {
+  font-size: 11px; font-weight: 500; color: var(--text-3);
+  white-space: nowrap;
+}
+.ms-field-label {
+  font-size: 11px; font-weight: 500; color: var(--text-3);
+  white-space: nowrap; margin-right: 5px;
+}
 
 
   .load-more-bar {
@@ -1343,12 +1354,12 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <option value="int">INT</option><option value="ent">ENT</option><option value="dep">DEP</option>
           </select>
           <select id="pend-filter-project" onchange="renderPendingContent()"></select>
-          <select id="pend-sort" onchange="renderPendingContent()">
+          <span class="filter-field"><span class="filter-label">Sort</span><select id="pend-sort" onchange="renderPendingContent()">
             <option value="wait-desc">รอนานสุด</option>
             <option value="date-desc">วันที่ล่าสุด</option>
             <option value="amount-desc">วงเงิน มาก→น้อย</option>
             <option value="amount-asc">วงเงิน น้อย→มาก</option>
-          </select>
+          </select></span>
           <button class="btn-export" id="pending-refresh-btn" onclick="refreshPendingMemos()">↻ Refresh</button>
           <span id="pending-last-refreshed" style="font-size:11px;color:var(--text-3)"></span>
           <button class="btn-export" onclick="exportPendingCSV()">⬇ Export CSV</button>
@@ -1404,8 +1415,8 @@ svg.icon { display: inline-block; vertical-align: middle; }
           </select>
           <select id="hist-type" onchange="renderHistoryMemos()"><option value="sl">SL</option><option value="hw">HW</option><option value="int">INT</option><option value="ent">ENT</option><option value="dep">DEP</option></select>
           <select id="hist-project" onchange="renderHistoryMemos()"></select>
-          <select id="hist-range" onchange="renderHistoryMemos()"><option value="month">เดือนนี้</option><option value="last-month">เดือนที่แล้ว</option><option value="3-months">3 เดือน</option><option value="all">ทั้งหมด</option></select>
-          <select id="hist-sort" onchange="renderHistoryMemos()">
+          <span class="filter-field"><span class="filter-label">Period</span><select id="hist-range" onchange="renderHistoryMemos()"><option value="month">เดือนนี้</option><option value="last-month">เดือนที่แล้ว</option><option value="3-months">3 เดือน</option><option value="all">ทั้งหมด</option></select></span>
+          <span class="filter-field"><span class="filter-label">Sort</span><select id="hist-sort" onchange="renderHistoryMemos()">
             <option value="updated-desc">อัปเดตล่าสุด</option>
             <option value="updated-asc">อัปเดตเก่าสุด</option>
             <option value="created-desc">สร้างล่าสุด</option>
@@ -1414,7 +1425,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <option value="amount-asc">วงเงินน้อย→มาก</option>
             <option value="project-asc">โครงการ A-Z</option>
             <option value="status-asc">สถานะ</option>
-          </select>
+          </select></span>
           <button type="button" class="btn-sm" id="hist-filter-toggle" onclick="toggleHistFilters()" aria-expanded="false">ตัวกรองเพิ่มเติม</button>
           <button type="button" class="btn-export" onclick="exportHistoryCsv()">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -1422,15 +1433,15 @@ svg.icon { display: inline-block; vertical-align: middle; }
           </button>
         </div>
         <div id="hist-filters-advanced" class="hist-adv-panel filter-row" style="margin-bottom:12px">
-          <input type="date" id="hist-date-from" title="จากวันที่" onchange="renderHistoryMemos()">
+          <span class="filter-field"><span class="filter-label">Date</span><input type="date" id="hist-date-from" title="จากวันที่" onchange="renderHistoryMemos()"></span>
           <span class="hist-adv-sep">–</span>
           <input type="date" id="hist-date-to" title="ถึงวันที่" onchange="renderHistoryMemos()">
-          <select id="hist-amt-preset" onchange="renderHistoryMemos()">
+          <span class="filter-field"><span class="filter-label">Amount</span><select id="hist-amt-preset" onchange="renderHistoryMemos()">
             <option value="all">ทุกวงเงิน</option>
             <option value="gt100k">&gt; 100k</option>
             <option value="50k-100k">50k – 100k</option>
             <option value="lt50k">&lt; 50k</option>
-          </select>
+          </select></span>
           <input type="number" id="hist-amt-min" class="hist-amt-input" placeholder="ขั้นต่ำ ฿" min="0" onchange="renderHistoryMemos()">
           <input type="number" id="hist-amt-max" class="hist-amt-input" placeholder="สูงสุด ฿" min="0" onchange="renderHistoryMemos()">
           <select id="hist-requester" onchange="renderHistoryMemos()"><option value="all">— กรองตามผู้ขอ —</option></select>
@@ -1537,6 +1548,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 </div>
               </div>
             </div>
+            <div style="font-size:10px;font-weight:500;color:var(--text-3);margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em">Filter by project</div>
             <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px" id="ov-proj-chips"></div>
             <div id="ov-type-col" style="margin-bottom:12px">
               <div style="font-size:10px;font-weight:500;color:var(--text-3);margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em">Filter by type <span id="ov-type-count" style="font-weight:400"></span></div>
@@ -1568,9 +1580,9 @@ svg.icon { display: inline-block; vertical-align: middle; }
           <div id="as-panel-report">
 
             <div class="filter-row">
-              <select id="as-year" onchange="renderActualSpend()" aria-label="ปีข้อมูล Actual Spend">
+              <span class="filter-field"><span class="filter-label">Year</span><select id="as-year" onchange="renderActualSpend()" aria-label="ปีข้อมูล Actual Spend">
                 <option value="2026">ปี 2026</option>
-              </select>
+              </select></span>
               <div style="display:flex;align-items:center;gap:6px">
                 <label style="font-size:11px;color:var(--text-3)">จาก</label>
                 <input type="month" id="as-from" onchange="renderActualSpend()">
@@ -1588,12 +1600,12 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 <option value="infra">Infrastructure</option>
                 <option value="other">Other</option>
               </select>
-              <select id="as-source" onchange="renderActualSpend()">
+              <span class="filter-field"><span class="filter-label">Source</span><select id="as-source" onchange="renderActualSpend()">
                 <option value="all">ทุกแหล่งข้อมูล</option>
                 <option value="memo">จาก Memo</option>
                 <option value="manual">Historical / Manual</option>
                 <option value="infra">Infra Cost</option>
-              </select>
+              </select></span>
               <select id="as-budget-status" onchange="renderActualSpend()">
                 <option value="Mapped">Mapped</option>
                 <option value="Manual Override">Manual Override</option>
@@ -1618,8 +1630,8 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <input id="as-manual-search" class="ri" type="search" placeholder="Search reference or description..." oninput="renderManualEntries()" style="max-width:300px">
               <select id="as-manual-project" onchange="renderManualEntries()"></select>
               <select id="as-manual-type" onchange="renderManualEntries()"></select>
-              <select id="as-manual-frequency" onchange="renderManualEntries()"><option value="all">All frequencies</option><option value="one_time">One-time</option><option value="monthly">Monthly</option></select>
-              <input id="as-manual-from" type="month" onchange="renderManualEntries()" aria-label="Coverage from">
+              <span class="filter-field"><span class="filter-label">Frequency</span><select id="as-manual-frequency" onchange="renderManualEntries()"><option value="all">All frequencies</option><option value="one_time">One-time</option><option value="monthly">Monthly</option></select></span>
+              <span class="filter-field"><span class="filter-label">Coverage</span><input id="as-manual-from" type="month" onchange="renderManualEntries()" aria-label="Coverage from"></span>
               <input id="as-manual-to" type="month" onchange="renderManualEntries()" aria-label="Coverage to">
               <select id="as-manual-budget-status" onchange="renderManualEntries()"><option value="Mapped">Mapped</option><option value="Manual Override">Manual Override</option><option value="Needs PMO Review">Needs PMO Review</option><option value="Unbudgeted">Unbudgeted</option></select>
             </div>
@@ -1670,16 +1682,17 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <div id="bgt-tab-bva" class="cost-tab-panel" style="display:none">
 
           <div class="filter-row">
+            <input id="bva-search" class="ri" type="search" placeholder="Search reference or description..." oninput="bvaSearchDebounced()" style="max-width:220px">
             <!-- Options populated dynamically by populateBudgetYearSelect('bva-year') (views/budget.js)
                  from getCurrentBuddhistYear() — never hardcode a BE year list here (Phase 7A-9A). -->
-            <select id="bva-year" onchange="renderBudgetVsActual()"></select>
-            <select id="bva-project" onchange="renderBudgetVsActual()">
+            <span class="filter-field"><span class="filter-label">Year</span><select id="bva-year" onchange="renderBudgetVsActual()"></select></span>
+            <span class="filter-field"><span class="filter-label">Project</span><select id="bva-project" onchange="renderBudgetVsActual()">
               <option value="all">ทุกโปรเจค</option>
-            </select>
+            </select></span>
             <!-- Same short-code options, order, and labels as the Actual Spend tab's `as-type`
                  filter (index.html, "TAB: ACTUAL SPEND"), so Spend Type filtering behaves and reads
                  identically on both tabs. -->
-            <select id="bva-type" onchange="renderBudgetVsActual()">
+            <span class="filter-field"><span class="filter-label">Type</span><select id="bva-type" onchange="renderBudgetVsActual()">
               <option value="all">ทุกประเภท</option>
               <option value="sl">Software License</option>
               <option value="hw">Hardware</option>
@@ -1688,8 +1701,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <option value="dep">Deployment</option>
               <option value="infra">Infrastructure</option>
               <option value="other">Other</option>
-            </select>
-            <input id="bva-search" class="ri" type="search" placeholder="Search reference or description..." oninput="bvaSearchDebounced()" style="max-width:220px">
+            </select></span>
             <span id="bva-untagged-alert" style="display:none;font-size:11px;color:var(--amber);margin-left:8px"></span>
             <button class="btn-export" onclick="exportBudgetVsActualCSV()">⬇ Export BvA</button>
             <button class="btn-export" onclick="exportBudgetPoolsCSV()">⬇ Export Pools</button>
@@ -1713,7 +1725,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
                   <div style="display:flex;gap:8px;align-items:center">
                     <!-- Options populated dynamically by populateBudgetYearSelect('bset-year')
                          (views/budget.js) from getCurrentBuddhistYear() (Phase 7A-9A). -->
-                    <select id="bset-year" onchange="renderBudgetSettings()" style="font-size:11px;padding:3px 8px"></select>
+                    <span class="filter-field"><span class="filter-label">Year</span><select id="bset-year" onchange="renderBudgetSettings()" style="font-size:11px;padding:3px 8px"></select></span>
                     <input id="bset-search" class="ri" type="search" placeholder="Search project or pool name..." oninput="renderBudgetSettings()" style="font-size:11px;padding:3px 8px;max-width:180px">
                     <button class="btn-sm" style="font-size:11px;padding:4px 10px" onclick="downloadBudgetPoolTemplate()">⬇ Template</button>
                     <label class="btn-sm" style="font-size:11px;padding:4px 10px;cursor:pointer">
@@ -1802,8 +1814,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <div class="tab-bar" style="margin-bottom:14px">
           <button class="tab-btn active" data-tab="registry" id="dev-tbtn-registry" onclick="switchDevTab('registry',this)">Device registry</button>
           <button class="tab-btn" data-tab="orders" id="dev-tbtn-orders" onclick="switchDevTab('orders',this)">Purchase orders <span id="dev-po-badge" class="tb-badge" style="display:none"></span></button>
-          <button class="btn-export" style="margin-left:8px" onclick="exportDeviceCSV()">⬇ Export CSV</button>
-          <button class="btn-export" onclick="exportPurchaseOrdersCSV()">⬇ Export PO</button>
         </div>
 
         <!-- ── PURCHASE ORDERS PANEL ── -->
@@ -1835,6 +1845,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <input type="checkbox" id="po-filter-remaining" onchange="renderPurchaseOrders()"> Remaining &gt; 0
             </label>
             <div id="po-visible-count" style="margin-left:auto;font-size:11px;color:var(--text-3)"></div>
+            <button class="btn-export" onclick="exportPurchaseOrdersCSV()">⬇ Export PO</button>
           </div>
           <div class="card" style="padding:0;overflow:hidden;overflow-x:auto;-webkit-overflow-scrolling:touch">
             <table class="hist-table">

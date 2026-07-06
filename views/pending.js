@@ -103,8 +103,8 @@ function populatePendingFilters() {
 function renderPendingMemos() {
   // Type/Project are multi-select filters; initMultiSelect() is idempotent
   // and must run before populatePendingFilters() populates the options.
-  initMultiSelect('pend-filter-type', 'ทุกประเภท');
-  initMultiSelect('pend-filter-project', 'ทุกโครงการ');
+  initMultiSelect('pend-filter-type', 'ทุกประเภท', 'Type');
+  initMultiSelect('pend-filter-project', 'ทุกโครงการ', 'Project');
   populatePendingFilters();
 
   const allMemos = loadMemos();
@@ -231,7 +231,6 @@ const TYPE_TEXT_PENDING  = { sl:'#0C447C', hw:'#2C2C2A', int:'#27500A', ent:'#63
 function buildPendingRow(memo) {
   const days    = pendingAge(memo);
   const amt     = Number(memo.total)||0;
-  const stage   = memo.status === 'pending_a3' ? 'Pending A3' : memo.status === 'pending_a2' ? 'Pending A2' : 'Pending A1';
   const isOwn   = isMemoRequester(memo);
   const _isPMOUser = typeof isPMO === 'function' && isPMO();
   const _stage  = memo.status === 'pending_a2' ? 1 : memo.status === 'pending_a3' ? 2 : 0;
@@ -244,8 +243,10 @@ function buildPendingRow(memo) {
   const typeBg  = TYPE_BG_PENDING[memo.type]    || '#F1EFE8';
   const typeTxt = TYPE_TEXT_PENDING[memo.type]  || '#444441';
   const waitCls = days>7?'background:#FCEBEB;color:#791F1F':days>3?'background:#FAEEDA;color:#633806':'background:#EAF3DE;color:#27500A';
-  const statusCls = memo.status==='completed'?'background:#EAF3DE;color:#27500A':memo.status==='rejected'?'background:#FCEBEB;color:#791F1F':'background:#EEEDFE;color:#3C3489';
-  const statusLbl = memo.status==='completed'?'Completed':memo.status==='rejected'?'Rejected':stage;
+  // Reuse the shared History/All Memo badge mapping (app.js) so the same memo status reads
+  // identically in both places, instead of this tab's own separately-styled pill.
+  const statusBadgeCls = histStatusBadgeClass(memo);
+  const statusLbl = histStatusLabel(memo);
 
   const isPending  = ['pending','pending_a2','pending_a3'].includes(memo.status);
   const isOwner    = isOwn;
@@ -290,7 +291,7 @@ function buildPendingRow(memo) {
     <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text)">${esc(memo.requesterName||memo.reviewerName||'—')}</td>
     <td style="padding:9px 12px;border-bottom:1px solid var(--border);text-align:right;font-size:12px;font-weight:600;color:var(--text)">${money(amt)}</td>
     <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
-      <span style="font-size:10px;font-weight:500;padding:2px 7px;border-radius:4px;${statusCls}">${esc(statusLbl)}</span>
+      <span class="badge ${statusBadgeCls}">${esc(statusLbl)}</span>
     </td>
     <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text)">
       ${reqDate}<div style="font-size:10px;color:var(--text-3)">${reqTime}</div>

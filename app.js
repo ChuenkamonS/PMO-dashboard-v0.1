@@ -1836,7 +1836,7 @@ function msValues(id) {
   return el.value ? [el.value] : [];
 }
 
-function initMultiSelect(id, placeholder) {
+function initMultiSelect(id, placeholder, fieldLabel) {
   const select = document.getElementById(id);
   if (!select) return;
   const alreadyMultiple = select.multiple;
@@ -1856,6 +1856,7 @@ function initMultiSelect(id, placeholder) {
     wrap.dataset.msFor = id;
     select.insertAdjacentElement('afterend', wrap);
     wrap.innerHTML = `
+      ${fieldLabel ? `<span class="ms-field-label">${esc(fieldLabel)}</span>` : ''}
       <button type="button" class="ms-trigger" aria-haspopup="listbox" aria-expanded="false"></button>
       <div class="ms-panel" role="listbox" aria-multiselectable="true" style="display:none">
         <input type="text" class="ms-search" placeholder="ค้นหา...">

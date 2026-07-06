@@ -1148,7 +1148,7 @@ function _ovRenderBvA() {
   }).filter(d => d.actual > 0 || d.hasBudget);
 
   if (!rows.length) {
-    container.innerHTML = `<div style="padding:20px;text-align:center;font-size:12px;color:var(--text-3)">ยังไม่มีข้อมูล — Approve SL Memo หรือตั้งงบประมาณก่อน</div>`;
+    container.innerHTML = `<div class="hist-empty">No records found — approve an SL memo or set a budget first.</div>`;
     return;
   }
 
@@ -1334,7 +1334,7 @@ function _renderForecastTable() {
   const allProjects = [...new Set(forecast.rows.map(row => row.project))].sort();
 
   // Project dropdown — Part 8 (UX consistency pass): multi-select filter.
-  initMultiSelect('sl-forecast-proj', 'ทุกโปรเจค');
+  initMultiSelect('sl-forecast-proj', 'ทุกโปรเจค', 'Project');
   const projSel = document.getElementById('sl-forecast-proj');
   if(projSel) {
     const curSelected = msValues('sl-forecast-proj');
@@ -1407,7 +1407,7 @@ function _renderForecastTable() {
     <tr style="height:6px"><td colspan="${months.length+5}" style="background:var(--color-background-tertiary,#F4F3EF)"></td></tr>`;
   });
 
-  body.innerHTML = rows || `<tr><td colspan="${months.length+5}" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูล</td></tr>`;
+  body.innerHTML = rows || `<tr><td colspan="${months.length+5}" class="hist-empty">No records found. Try changing filters.</td></tr>`;
 }
 
 function exportForecastCSV() {
@@ -1484,7 +1484,7 @@ function showMemoBreakdown(proj, monthKey) {
   const total = items.reduce((s,i)=>s+i.monthly,0);
 
   tbody.innerHTML = !items.length
-    ? `<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--text-3)">ไม่มี SL memo ในเดือนนี้</td></tr>`
+    ? `<tr><td colspan="5" class="hist-empty">No SL memos found for this month.</td></tr>`
     : items.map(i => `<tr>
         <td style="padding:7px 12px;border-bottom:1px solid var(--border);color:var(--blue);font-weight:500">${esc(i.memoNo)}</td>
         <td style="padding:7px 12px;border-bottom:1px solid var(--border)">${esc(i.name)}</td>
@@ -1598,7 +1598,7 @@ function _renderBudgetVsActual(allProjects, infraEntries, licByProj) {
 
   // Table rows
   if(!projData.length) {
-    body.innerHTML = `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูลเพียงพอสำหรับ Budget vs Actual</td></tr>`;
+    body.innerHTML = `<tr><td colspan="5" class="hist-empty">No records found for Budget vs Actual.</td></tr>`;
     return;
   }
 
@@ -2034,9 +2034,9 @@ function renderManualEntries() {
   // Part 8 (UX consistency pass) — Project/Type/Budget Status are
   // multi-select filters; initMultiSelect() is idempotent and must run
   // before updateSelect() repopulates as-manual-project/-type's options.
-  initMultiSelect('as-manual-project', 'All projects');
-  initMultiSelect('as-manual-type', 'All spend types');
-  initMultiSelect('as-manual-budget-status', 'All budget statuses');
+  initMultiSelect('as-manual-project', 'All projects', 'Project');
+  initMultiSelect('as-manual-type', 'All spend types', 'Type');
+  initMultiSelect('as-manual-budget-status', 'All budget statuses', 'Budget Status');
   const selectedProject = msValues('as-manual-project');
   const selectedType = msValues('as-manual-type');
   const frequency = value('as-manual-frequency') || 'all';
@@ -2240,9 +2240,9 @@ async function renderActualSpend() {
   }
 
   // Part 8 (UX consistency pass): Project is a multi-select filter.
-  initMultiSelect('as-project', 'ทุกโปรเจค');
-  initMultiSelect('as-type', 'ทุกประเภท');
-  initMultiSelect('as-budget-status', 'ทุก Budget Status');
+  initMultiSelect('as-project', 'ทุกโปรเจค', 'Project');
+  initMultiSelect('as-type', 'ทุกประเภท', 'Type');
+  initMultiSelect('as-budget-status', 'ทุก Budget Status', 'Budget Status');
   const projSel = document.getElementById('as-project');
   if (projSel) {
     const curSelected = msValues('as-project');
@@ -2261,7 +2261,7 @@ async function renderActualSpend() {
 
   const records = filteredActualSpendRecords(canonical);
   if (!records.length) {
-    container.innerHTML = `<div class="card" style="padding:32px;text-align:center;color:var(--text-3)">ยังไม่มีข้อมูลในช่วงที่เลือก</div>`;
+    container.innerHTML = `<div class="card hist-empty">No records found for the selected period.</div>`;
     return;
   }
 
@@ -2648,15 +2648,13 @@ function _renderBvaWith(pools) {
     const filtersActive = projVal !== 'all' || typeVal !== 'all' || !!searchVal.trim();
     container.innerHTML = (hasPoolsForYear && filtersActive) ? `
       <div class="card" style="padding:32px;text-align:center">
-        <div style="font-size:32px;margin-bottom:12px">🔍</div>
-        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:8px">ไม่พบข้อมูลตามเงื่อนไขที่เลือก</div>
-        <div style="font-size:12px;color:var(--text-3)">ลองล้างตัวกรอง Project / ประเภท / คำค้นหาด้านบน</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:8px">No records found. Try changing filters.</div>
+        <div style="font-size:12px;color:var(--text-3)">Try clearing the Project, Type, or search filters above.</div>
       </div>` : `
       <div class="card" style="padding:32px;text-align:center">
-        <div style="font-size:32px;margin-bottom:12px">📋</div>
-        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:8px">ยังไม่มี Budget Pool สำหรับปี ${yearVal}</div>
-        <div style="font-size:12px;color:var(--text-3);margin-bottom:16px">ไปที่ Settings → Budget Pools เพื่อตั้งงบประมาณก่อน</div>
-        <button class="btn-primary" onclick="switchBudgetTab('bgt-settings')" style="font-size:12px">ไปที่ Settings →</button>
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:8px">No budget pools found for ${yearVal}.</div>
+        <div style="font-size:12px;color:var(--text-3);margin-bottom:16px">Go to Settings → Budget Pools to set a budget first.</div>
+        <button class="btn-primary" onclick="switchBudgetTab('bgt-settings')" style="font-size:12px">Go to Settings →</button>
       </div>`;
     return;
   }
@@ -2767,7 +2765,7 @@ function showBvaRecordDetail(recordId) {
 // every record on exactly one line and never needs horizontal scroll, regardless of how long a
 // Reference/Project value is (the full value is still available via the `title` tooltip).
 function actualSpendRowsTable(records) {
-  if (!records.length) return `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:12px">ยังไม่มี Actual Spend</div>`;
+  if (!records.length) return `<div class="hist-empty">No records found.</div>`;
   const referenceCell = record => {
     const ref = esc(record.referenceNo || '—');
     if (record.source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO && record.referenceNo) {
@@ -2862,7 +2860,7 @@ function assignBudgetPoolFromWorkspace(recordId) {
 }
 
 function budgetAssignmentRowsTable(records) {
-  if (!records.length) return `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:12px">ไม่มีรายการที่ต้อง assign</div>`;
+  if (!records.length) return `<div class="hist-empty">No records need assignment.</div>`;
   const referenceCell = record => {
     const ref = esc(record.referenceNo || '—');
     if (record.source === ACTUAL_SPEND_SOURCES.APPROVED_MEMO && record.referenceNo) {
@@ -2930,9 +2928,8 @@ function renderBudgetAssignmentWorkspace(dataset) {
     ${section('Unbudgeted', unbudgeted, dataset.totals.unbudgetedActual)}
     ${section('Needs PMO Review', needsReview, dataset.totals.needsReviewActual)}
     ${!unbudgeted.length && !needsReview.length ? `
-      <div class="card" style="padding:32px;text-align:center;color:var(--text-3)">
-        <div style="font-size:32px;margin-bottom:12px">✅</div>
-        <div style="font-size:13px;font-weight:600;color:var(--text)">Nothing needs assignment right now</div>
+      <div class="card hist-empty">
+        <div style="font-size:13px;font-weight:600;color:var(--text)">Nothing needs assignment right now.</div>
       </div>` : ''}`;
 }
 
@@ -3303,7 +3300,7 @@ async function renderBudgetSettings() {
   const pools = visibleBudgetSettingsPools();
 
   if (!pools.length) {
-    body.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:12px">ยังไม่มี Budget Pool สำหรับปี ${year} — กด "+ Add Pool" เพื่อเริ่ม</div>`;
+    body.innerHTML = `<div class="hist-empty">No budget pools found for ${year} — click "+ Add Pool" to get started.</div>`;
     return;
   }
 

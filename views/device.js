@@ -725,8 +725,11 @@ function renderDevice() {
   // Part 8 (UX consistency pass) — Platform/Type/Status/Project/Company are
   // now multi-select filters; initMultiSelect() is idempotent (no-op past
   // the first call) so it's safe to call on every render.
-  ['dev-filter-platform','dev-filter-type','dev-filter-status','dev-filter-project','dev-filter-company']
-    .forEach(id => initMultiSelect(id));
+  const _devFilterLabels = {
+    'dev-filter-platform': 'Platform', 'dev-filter-type': 'Type', 'dev-filter-status': 'Status',
+    'dev-filter-project': 'Project', 'dev-filter-company': 'Company',
+  };
+  Object.keys(_devFilterLabels).forEach(id => initMultiSelect(id, undefined, _devFilterLabels[id]));
   // Load fresh from Supabase then render
   loadDevicesAsync().then(() => _renderDeviceTable()).catch(() => _renderDeviceTable());
 }
@@ -839,7 +842,7 @@ function _renderDeviceTable() {
 
   const tbody = document.getElementById('dev-table-body');
   if(!devices.length) {
-    tbody.innerHTML = `<tr><td colspan="12" style="text-align:center;padding:34px 16px;color:var(--text-3)">ยังไม่มีอุปกรณ์${search?' ที่ตรงกับการค้นหา':''} — กด Add Device หรือ Import Excel</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="12" class="hist-empty">${search ? 'No devices found. Try changing filters.' : 'No devices found — click Add Device or Import Excel.'}</td></tr>`;
     return;
   }
 
@@ -1089,7 +1092,6 @@ function deleteDevice(id) {
 }
 
 // ── Export CSV ──
-function exportDeviceCSV() { exportDeviceCsv(); } // alias
 function exportDeviceCsv() {
   // Functional audit fix: export the same filtered set _renderDeviceTable()
   // currently shows (search + platform/type/status/project/company), not the
@@ -1307,7 +1309,8 @@ function switchDevTab(tab, btn) {
 }
 
 function renderPurchaseOrders() {
-  ['po-filter-status', 'po-filter-project'].forEach(id => initMultiSelect(id));
+  const _poFilterLabels = { 'po-filter-status': 'Status', 'po-filter-project': 'Project' };
+  Object.keys(_poFilterLabels).forEach(id => initMultiSelect(id, undefined, _poFilterLabels[id]));
   loadPurchaseOrdersAsync().then(() => _renderPOTable()).catch(() => _renderPOTable());
 }
 
@@ -1403,15 +1406,15 @@ function viewDevicesForMemo(memoNo) {
 }
 
 const PO_STATUS_BADGE = {
-  pending_order:  `<span style="font-size:10px;background:#F1EFE8;color:#444441;padding:2px 8px;border-radius:100px">Pending Order</span>`,
-  ordered:        `<span style="font-size:10px;background:#E6F1FB;color:#0C447C;padding:2px 8px;border-radius:100px">Ordered</span>`,
-  awaiting:       `<span style="font-size:10px;background:#FAEEDA;color:#633806;padding:2px 8px;border-radius:100px">Awaiting</span>`,
-  partial_arrived:`<span style="font-size:10px;background:#FAEEDA;color:#633806;padding:2px 8px;border-radius:100px">Partial arrived</span>`,
-  fulfilled:      `<span style="font-size:10px;background:#EAF3DE;color:#27500A;padding:2px 8px;border-radius:100px">Fulfilled</span>`,
+  pending_order:  `<span class="badge badge-gray">Pending Order</span>`,
+  ordered:        `<span class="badge badge-blue">Ordered</span>`,
+  awaiting:       `<span class="badge badge-amber">Awaiting</span>`,
+  partial_arrived:`<span class="badge badge-amber">Partial arrived</span>`,
+  fulfilled:      `<span class="badge badge-green">Fulfilled</span>`,
   // Voided Hardware Memo downstream PO handling: terminal status applied when
   // the PO's source memo is voided before any devices have arrived. Never
   // deleted — kept visible for audit, same as a Voided memo itself.
-  voided_source:  `<span style="font-size:10px;background:#F6E4E1;color:#7A2E20;padding:2px 8px;border-radius:100px">Voided</span>`,
+  voided_source:  `<span class="badge badge-red">Voided</span>`,
 };
 
 // Hotfix (source memo void/reject/cancel — non-actionable PO before cascade):
@@ -1450,9 +1453,9 @@ function poStatusBadgeHtml(po) {
   if (po.status === 'voided_source') return PO_STATUS_BADGE.voided_source;
   if (poIsVoidedSource(po)) {
     const label = VOIDED_SOURCE_BADGE_LABEL[poSourceMemoStatus(po)] || 'Voided Source';
-    return `<span style="font-size:10px;background:#F6E4E1;color:#7A2E20;padding:2px 8px;border-radius:100px">${label}</span>`;
+    return `<span class="badge badge-red">${label}</span>`;
   }
-  return PO_STATUS_BADGE[po.status] || `<span style="font-size:10px;background:#F1EFE8;color:#444441;padding:2px 8px;border-radius:100px">${esc(po.status)}</span>`;
+  return PO_STATUS_BADGE[po.status] || `<span class="badge badge-gray">${esc(po.status)}</span>`;
 }
 
 // Reason + timestamp recorded on a PO's own audit trail when its source memo
@@ -1570,7 +1573,7 @@ function _renderPOTable() {
   if (!tbody) return;
 
   if (!pos.length) {
-    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:34px;color:var(--text-3)">ยังไม่มี Purchase Order — Approve HW Memo เพื่อสร้างอัตโนมัติ</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="hist-empty">No purchase orders found — approve a Hardware memo to create one automatically.</td></tr>`;
     const countEl = document.getElementById('po-visible-count');
     if(countEl) countEl.textContent = '';
     return;
@@ -1581,7 +1584,7 @@ function _renderPOTable() {
   if(countEl) countEl.textContent = visible.length === pos.length ? `${pos.length} orders` : `Showing ${visible.length} of ${pos.length} orders`;
 
   if (!visible.length) {
-    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:34px;color:var(--text-3)">ไม่พบ Purchase Order ที่ตรงกับการค้นหา/filter</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="hist-empty">No purchase orders found. Try changing filters.</td></tr>`;
     return;
   }
 

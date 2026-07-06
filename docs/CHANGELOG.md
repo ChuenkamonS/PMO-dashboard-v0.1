@@ -22,6 +22,67 @@
 
 ## Current Baseline
 
+### 2026-07-06 UX Consistency Pass — Filters, Actions, Status, Empty States
+
+Scope: UI polish only across All Memos/History, Pending Approval, Budget & Spend, License
+Management, and Device Management — no calculations, memo lifecycle, approval logic, PO creation,
+Mark Arrived logic, license assignment logic, budget logic, or schema/migrations touched.
+
+#### Added
+- **Visible filter labels**: `initMultiSelect()` (`app.js`) takes an optional third `fieldLabel`
+  argument and renders it inside the multi-select trigger widget, so filters that previously showed
+  only a bare "ทั้งหมด"/"All" placeholder now read e.g. "Type ▾ All types". Applied to every
+  multi-select filter across Pending, All Memos/History, Budget & Spend (Actual Spend, Manual
+  Entries, Forecast), License (Memo Index, Users, Other), and Device Management (Registry, Purchase
+  Orders). Plain (non-multi-select) filters — Sort, Period, Year, Source, Frequency, Amount — got an
+  inline `.filter-field`/`.filter-label` wrapper instead (new CSS in `index.html`'s embedded
+  `<style>`, since `style.css` is not linked from `index.html` and has no effect on the rendered
+  app).
+- Missing `.badge-orange` CSS rule added to `index.html` (previously only existed in the unused
+  `style.css`), fixing License's 15-day expiry warning badge and the Assignment Import "ambiguous"
+  row badge, which were rendering unstyled.
+
+#### Changed
+- **Device Management action buttons**: the tab-bar-level "Export CSV"/"Export PO" buttons (visible
+  on both the Registry and Purchase Orders tabs regardless of which was active) were removed;
+  Registry already had its own scoped Export CSV button, and Purchase Orders now has its own scoped
+  Export PO button in its filter row.
+- **Pending Approval status pill** now reuses the shared `histStatusBadgeClass()`/`histStatusLabel()`
+  helpers (already the single source of truth for All Memos/History) instead of a separately-styled
+  purple pill, so a Pending memo reads the same amber badge in both places.
+- **Device Purchase Order status badges** (`PO_STATUS_BADGE`, `poStatusBadgeHtml()`) refactored from
+  hardcoded inline colors to the shared `.badge badge-*` classes (same colors, reused component).
+- Empty-state messages in Device Registry, Purchase Orders, License (Memo Index, Summary,
+  Reconciliation, Users, Other), and Budget & Spend (Overview, Actual Spend, Forecast, Budget vs
+  Actual, Assignment Workspace, Budget Settings) standardized onto the shared `.hist-empty` class and
+  a consistent "No X found. Try changing filters." / "No X found — do Y to add one." phrasing,
+  replacing one-off inline styles and (in three Budget Pool empty states) decorative emoji.
+- BvA's search input reordered to appear before its filters (search-first, matching every other
+  filter row in the app).
+
+#### Removed
+- `exportDeviceCSV()` (`views/device.js`), a dead alias for `exportDeviceCsv()` with no remaining
+  callers after the tab-bar button removal above.
+
+#### Tests
+- `tests/budget-expenses.test.js`: 3 assertions updated to match the new English Budget Pool
+  Assignment Workspace empty-state copy (same behavior, text changed only).
+- `node --check views/*.js tests/*.test.js` and `node --test tests/*.test.js` — 567 passed, 0 failed.
+
+#### Remaining Work
+- Manual browser verification was not performed this pass — the project folder had already reached
+  the 5-dev-server-per-folder preview limit from other sessions, so a preview server could not be
+  started. Static review (tag-balance check, full diff read, full test run) was done instead.
+- Memo-level `cancelled`/`voided` badges were deliberately left neutral gray (`histStatusBadgeClass()`
+  in `app.js`), not changed to red/negative as this task's Part 4 example copy suggested — there is
+  an existing, tested regression test (`workflow.test.js`, "cover every known memo status unchanged")
+  and an inline comment recording this as an intentional Milestone 1B decision (voided/cancelled/draft
+  share one neutral tone, distinct from Rejected). Flagged here rather than silently overridden.
+- Part 5 (search/filter/action row layout) found only one clear inconsistency (BvA's search-after-
+  filters ordering, fixed above); other rows already followed search → filters → actions.
+
+---
+
 ### 2026-07-06 Device Management — PO Filters and Cross-Module Navigation (Phase D2)
 
 Scope: Device Management usability only, using existing data — no PO creation, Mark Arrived, memo

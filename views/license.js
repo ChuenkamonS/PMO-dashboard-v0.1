@@ -406,12 +406,12 @@ function _renderLicMemoIndex() {
       </select>
       <select id="lic-filter-project" onchange="_renderLicMemoIndexRows()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
       </select>
-      <select id="lic-sort" onchange="_renderLicMemoIndexRows()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+      <span class="filter-field"><span class="filter-label">Sort</span><select id="lic-sort" onchange="_renderLicMemoIndexRows()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
         <option value="expiry-asc">หมดอายุใกล้สุด</option>
         <option value="cost-desc">ราคา มาก→น้อย</option>
         <option value="seats-desc">Seats มาก→น้อย</option>
         <option value="purchase-desc">ซื้อล่าสุด</option>
-      </select>
+      </select></span>
       <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="downloadTemplate('license')" title="Download Template">⬇ Template</button>
       <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="importBulk('license')" title="Import from Excel">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -451,8 +451,8 @@ function _renderLicMemoIndex() {
     </div>`;
 
   // Part 8 (UX consistency pass) — Status/Project are multi-select filters.
-  initMultiSelect('lic-filter-status', 'ทุกสถานะ');
-  initMultiSelect('lic-filter-project', 'ทุกโครงการ');
+  initMultiSelect('lic-filter-status', 'ทุกสถานะ', 'Status');
+  initMultiSelect('lic-filter-project', 'ทุกโครงการ', 'Project');
   _renderLicMemoIndexRows();
 }
 
@@ -518,7 +518,7 @@ function _renderLicMemoIndexRows() {
   const tbody = document.getElementById('lic-table-body');
   if (!tbody) return;
   if (!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="12" style="text-align:center;padding:34px 16px;color:var(--text-3)">ยังไม่มีข้อมูล${search ? ' ที่ตรงกับการค้นหา' : ''} — Approve SL Memo หรือกด Add License</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="12" class="hist-empty">${search ? 'No licenses found. Try changing filters.' : 'No licenses found — approve an SL memo or click Add License.'}</td></tr>`;
     return;
   }
 
@@ -774,7 +774,7 @@ function _bpRenderMatrix() {
   const { projects, matrixRows, grandTotal } = _bpComputeMatrix();
 
   if (!matrixRows.length) {
-    wrap.innerHTML = `<div class="card" style="padding:24px;text-align:center;color:var(--text-3)">ไม่มีข้อมูล License Summary ที่ตรงกับตัวกรอง</div>`;
+    wrap.innerHTML = `<div class="card hist-empty">No records found. Try changing filters.</div>`;
     return;
   }
 
@@ -905,7 +905,7 @@ function _renderLicReconciliation() {
   window._licReconRows = rows;
 
   if (!rows.length) {
-    wrap.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text-3)">ไม่มีข้อมูล Reconciliation${allRows.length ? ' ที่ตรงกับตัวกรอง' : ''}</div>`;
+    wrap.innerHTML = `<div class="hist-empty">${allRows.length ? 'No records found. Try changing filters.' : 'No licenses found.'}</div>`;
     return;
   }
 
@@ -1535,8 +1535,8 @@ function _renderLicUsers() {
   window._licReviewQueue = queueItems;
 
   if (!allUserRows.length && !queueItems.length) {
-    el.innerHTML = `<div style="text-align:center;padding:48px;color:var(--text-3)">
-      ยังไม่มีข้อมูลผู้ใช้ — กรอก "ตาราง Account" ใน SL Memo เพื่อให้ข้อมูลปรากฎที่นี่
+    el.innerHTML = `<div class="hist-empty">
+      No users found — fill in the "Account table" on an SL memo for data to appear here.
     </div>`;
     return;
   }
@@ -1629,8 +1629,8 @@ function _renderLicUsers() {
     </div>`;
 
   // Part 8 (UX consistency pass) — Project/Software are multi-select filters.
-  initMultiSelect('lic-usr-proj', 'ทุก project');
-  initMultiSelect('lic-usr-lic', 'ทุก license');
+  initMultiSelect('lic-usr-proj', 'ทุก project', 'Project');
+  initMultiSelect('lic-usr-lic', 'ทุก license', 'Software');
   _renderLicUsrContextBanner();
   _renderLicUsersRows();
 }
@@ -2209,9 +2209,9 @@ function _renderLicOther() {
   window._licOtherManual = manual;
   window._licOtherFxRate = fxRate;
   // Part 8 (UX consistency pass) — Type/Project/Status are multi-select filters.
-  initMultiSelect('lic-ot-type', 'ทุกประเภท');
-  initMultiSelect('lic-ot-proj', 'ทุก project');
-  initMultiSelect('lic-ot-status', 'ทุกสถานะ');
+  initMultiSelect('lic-ot-type', 'ทุกประเภท', 'Type');
+  initMultiSelect('lic-ot-proj', 'ทุก project', 'Project');
+  initMultiSelect('lic-ot-status', 'ทุกสถานะ', 'Status');
   _renderLicOtherRows();
 }
 
@@ -2237,7 +2237,7 @@ function _renderLicOtherRows() {
   window._licOtherFiltered = rows;
 
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-3)">ไม่มี manual license — กด Add License เพื่อเพิ่ม</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="hist-empty">No licenses found — click Add License to add one.</td></tr>`;
     return;
   }
 
