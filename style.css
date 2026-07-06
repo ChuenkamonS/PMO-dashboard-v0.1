@@ -524,6 +524,16 @@ body {
 }
 .hist-table--dense td { padding: 6px 8px; }
 .hist-table--dense tbody tr.hist-row { cursor: pointer; }
+
+/* License Summary matrix — Project columns grow horizontally, so
+   Software/Plan/Total stay frozen while the middle scrolls (Phase 2D). */
+.lic-bp-table-wrap { overflow: auto; max-height: calc(100vh - 320px); }
+.lic-bp-table th { position: sticky; top: 0; background: var(--surface); z-index: 2; }
+.lic-bp-freeze-name, .lic-bp-freeze-plan { position: sticky; background: var(--surface); z-index: 1; box-shadow: 1px 0 0 var(--border-md); }
+.lic-bp-freeze-total { position: sticky; right: 0; background: var(--surface); z-index: 1; box-shadow: -1px 0 0 var(--border-md); }
+.lic-bp-table th.lic-bp-freeze-name,
+.lic-bp-table th.lic-bp-freeze-plan,
+.lic-bp-table th.lic-bp-freeze-total { z-index: 3; }
 .hist-col-memo { width: 11%; padding-left: 12px !important; }
 .hist-col-actions { width: 88px; text-align: center; }
 .hist-memo-no { font-weight: 600; color: var(--blue-800); }

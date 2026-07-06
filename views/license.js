@@ -596,6 +596,26 @@ let _bpYear = 'all';
 // past the other's table.
 let _bpSubTab = 'summary';
 
+// Phase 2D — reporting filters shared by both sub-tabs. Plain module
+// variables (same pattern as _bpYear) so selections survive the full
+// lic-content rebuild that happens on every sub-tab switch; setter functions
+// below are what onchange handlers (and tests) call, since a `let` at module
+// scope isn't reachable as a property from outside the running script.
+let _bpFilterProjects = [];   // [] = all projects
+let _bpFilterSoftware = '';   // substring match on license name
+let _bpFilterPlan = 'all';
+let _bpFilterStatus = [];     // Summary only — [] = all statuses
+let _bpReconOverOnly = false;
+let _bpReconRemainingOnly = false;
+
+function _bpApplyFilters() { _bpRenderMatrix(); _renderLicReconciliation(); }
+function _bpSetFilterProjects(vals) { _bpFilterProjects = vals || []; _bpApplyFilters(); }
+function _bpSetFilterSoftware(v) { _bpFilterSoftware = v || ''; _bpApplyFilters(); }
+function _bpSetFilterPlan(v) { _bpFilterPlan = v || 'all'; _bpApplyFilters(); }
+function _bpSetFilterStatus(vals) { _bpFilterStatus = vals || []; _bpRenderMatrix(); }
+function _bpSetReconOverOnly(v) { _bpReconOverOnly = !!v; _renderLicReconciliation(); }
+function _bpSetReconRemainingOnly(v) { _bpReconRemainingOnly = !!v; _renderLicReconciliation(); }
+
 function _switchLicSummarySubTab(tab) {
   _bpSubTab = tab;
   _renderLicByProject();
@@ -605,14 +625,43 @@ function _renderLicByProject() {
   const el = document.getElementById('lic-content');
   if (!el) return;
 
-  const allLics = getAllLicenses().filter(l => getLicenseStatus(l).key !== 'cancelled');
-  const years   = [...new Set(allLics.map(l => l.memoYear).filter(Boolean))].sort((a,b)=>b-a);
+  const allLics  = getAllLicenses().filter(l => getLicenseStatus(l).key !== 'cancelled');
+  const years    = [...new Set(allLics.map(l => l.memoYear).filter(Boolean))].sort((a,b)=>b-a);
+  const projects = [...new Set(allLics.map(l => l.project || '(ไม่ระบุ)'))].sort();
+  const plans    = [...new Set(allLics.map(l => l.plan).filter(Boolean))].sort();
+  const statusOptions = [
+    ['active', 'Active'], ['expiring', 'Expiring (≤30d)'],
+    ['expiring-7', '≤ 7 วัน'], ['expiring-15', '≤ 15 วัน'], ['expiring-30', '≤ 30 วัน'],
+    ['expired', 'Expired'],
+  ];
 
   el.innerHTML = `
     <div style="display:flex;gap:8px;margin-bottom:14px">
       <button class="btn-sm${_bpSubTab === 'summary' ? ' active' : ''}" data-subtab="summary" onclick="_switchLicSummarySubTab('summary')">Summary</button>
       <button class="btn-sm${_bpSubTab === 'reconciliation' ? ' active' : ''}" data-subtab="reconciliation" onclick="_switchLicSummarySubTab('reconciliation')">Reconciliation</button>
     </div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+      <div>
+        <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Project</div>
+        <select id="lic-bp-filter-project" multiple onchange="_bpSetFilterProjects(msValues('lic-bp-filter-project'))" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1)">
+          ${projects.map(p=>`<option value="${esc(p)}" ${_bpFilterProjects.includes(p)?'selected':''}>${esc(p)}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Software</div>
+        <input type="text" id="lic-bp-search-software" value="${esc(_bpFilterSoftware)}" placeholder="🔍 Software" oninput="_bpSetFilterSoftware(this.value)"
+          style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:160px;outline:none">
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Plan</div>
+        <select id="lic-bp-filter-plan" onchange="_bpSetFilterPlan(this.value)" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1)">
+          <option value="all">All plans</option>
+          ${plans.map(p=>`<option value="${esc(p)}" ${_bpFilterPlan===p?'selected':''}>${esc(p)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
     <div id="lic-summary-panel" style="${_bpSubTab === 'summary' ? '' : 'display:none'}">
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
         <div>
@@ -622,16 +671,34 @@ function _renderLicByProject() {
             ${years.map(y=>`<option value="${y}" ${String(y)===_bpYear?'selected':''}>${y}</option>`).join('')}
           </select>
         </div>
+        <div>
+          <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Status</div>
+          <select id="lic-bp-filter-status" multiple onchange="_bpSetFilterStatus(msValues('lic-bp-filter-status'))" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1)">
+            ${statusOptions.map(([v,l])=>`<option value="${v}" ${_bpFilterStatus.includes(v)?'selected':''}>${esc(l)}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn-sm" style="font-size:12px;padding:6px 12px;margin-left:auto" onclick="exportLicSummaryCSV()">⬇ Export Summary</button>
       </div>
       <div id="bp-table-wrap"></div>
     </div>
     <div id="lic-reconciliation-panel" style="${_bpSubTab === 'reconciliation' ? '' : 'display:none'}">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px">
         <div style="font-size:13px;font-weight:700">License Reconciliation</div>
-        <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="exportLicReconciliationCSV()">⬇ Export Reconciliation</button>
+        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+          <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer">
+            <input type="checkbox" id="lic-recon-filter-over" ${_bpReconOverOnly?'checked':''} onchange="_bpSetReconOverOnly(this.checked)"> Over Assigned only
+          </label>
+          <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer">
+            <input type="checkbox" id="lic-recon-filter-remaining" ${_bpReconRemainingOnly?'checked':''} onchange="_bpSetReconRemainingOnly(this.checked)"> Has Remaining only
+          </label>
+          <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="exportLicReconciliationCSV()">⬇ Export Reconciliation</button>
+        </div>
       </div>
       <div id="lic-recon-wrap"></div>
     </div>`;
+
+  initMultiSelect('lic-bp-filter-project', 'ทุกโครงการ');
+  initMultiSelect('lic-bp-filter-status', 'ทุกสถานะ');
 
   _bpRenderMatrix();
   _renderLicReconciliation();
@@ -639,8 +706,15 @@ function _renderLicByProject() {
 
 function _bpGetFiltered() {
   return getAllLicenses().filter(l => {
-    if (getLicenseStatus(l).key === 'cancelled') return false;
+    const st = getLicenseStatus(l);
+    if (st.key === 'cancelled') return false;
     if (_bpYear !== 'all' && String(l.memoYear) !== String(_bpYear)) return false;
+    if (_bpFilterProjects.length && !_bpFilterProjects.includes(l.project || '(ไม่ระบุ)')) return false;
+    if (_bpFilterSoftware && !(l.name || '').toLowerCase().includes(_bpFilterSoftware.toLowerCase())) return false;
+    if (_bpFilterPlan !== 'all' && (l.plan || '') !== _bpFilterPlan) return false;
+    if (_bpFilterStatus.length && !_bpFilterStatus.some(f => f === 'expiring'
+      ? ['expiring-7', 'expiring-15', 'expiring-30'].includes(st.key)
+      : f === st.key)) return false;
     return true;
   });
 }
@@ -664,9 +738,10 @@ function _licSeatsByProjectSoftwarePlan(allLicenses) {
   return map;
 }
 
-function _bpRenderMatrix() {
-  const wrap = document.getElementById('bp-table-wrap');
-  if (!wrap) return;
+// Pure aggregation, shared by the on-screen matrix render and its CSV export
+// (Phase 2D) — extracted from the pre-existing calculation as-is, no math
+// changed, so both consumers always agree on the same numbers.
+function _bpComputeMatrix() {
   const filtered = _bpGetFiltered();
   const seatMap = _licSeatsByProjectSoftwarePlan(filtered);
   const projects = [...new Set([...seatMap.values()].map(r => r.project))].sort();
@@ -681,39 +756,68 @@ function _bpRenderMatrix() {
 
   const matrixRows = Object.values(rowMap).sort((a,b) => a.name.localeCompare(b.name) || a.plan.localeCompare(b.plan));
   const grandTotal = matrixRows.reduce((s,r) => s+r.total, 0);
+  return { projects, matrixRows, grandTotal };
+}
+
+// Fixed pixel widths for the frozen Software/Plan columns so their `left`
+// sticky offsets can be computed without measuring the DOM (Phase 2D).
+const _BP_NAME_COL_W = 150;
+const _BP_PLAN_COL_W = 100;
+
+function _bpRenderMatrix() {
+  const wrap = document.getElementById('bp-table-wrap');
+  if (!wrap) return;
+  const { projects, matrixRows, grandTotal } = _bpComputeMatrix();
+
+  if (!matrixRows.length) {
+    wrap.innerHTML = `<div class="card" style="padding:24px;text-align:center;color:var(--text-3)">ไม่มีข้อมูล License Summary ที่ตรงกับตัวกรอง</div>`;
+    return;
+  }
 
   const head = `<thead><tr>
-    <th style="padding-left:14px">License</th>
-    <th>Plan</th>
-    ${projects.map(p=>`<th style="text-align:right;white-space:nowrap">${esc(p)}</th>`).join('')}
-    <th style="text-align:right">Total</th>
+    <th class="lic-bp-freeze-name" style="left:0;width:${_BP_NAME_COL_W}px;min-width:${_BP_NAME_COL_W}px;padding-left:14px">License</th>
+    <th class="lic-bp-freeze-plan" style="left:${_BP_NAME_COL_W}px;width:${_BP_PLAN_COL_W}px;min-width:${_BP_PLAN_COL_W}px">Plan</th>
+    ${projects.map(p=>`<th style="text-align:right;white-space:nowrap;min-width:90px">${esc(p)}</th>`).join('')}
+    <th class="lic-bp-freeze-total" style="text-align:right;min-width:90px">Total</th>
   </tr></thead>`;
 
   const bodyRows = matrixRows.map(r => `<tr onmouseover="this.style.background='var(--bg-2)'" onmouseout="this.style.background=''">
-    <td style="padding-left:14px;font-weight:500">${esc(r.name)}</td>
-    <td style="font-size:12px;color:var(--text-2)">${esc(r.plan)||'<span style="color:var(--text-3)">—</span>'}</td>
+    <td class="lic-bp-freeze-name" style="left:0;width:${_BP_NAME_COL_W}px;min-width:${_BP_NAME_COL_W}px;padding-left:14px;font-weight:500">${esc(r.name)}</td>
+    <td class="lic-bp-freeze-plan" style="left:${_BP_NAME_COL_W}px;width:${_BP_PLAN_COL_W}px;min-width:${_BP_PLAN_COL_W}px;font-size:12px;color:var(--text-2)">${esc(r.plan)||'<span style="color:var(--text-3)">—</span>'}</td>
     ${projects.map(p => r.byProj[p]
       ? `<td style="text-align:right">${r.byProj[p]}</td>`
       : `<td style="text-align:right;color:var(--text-3)">—</td>`
     ).join('')}
-    <td style="text-align:right;font-weight:500">${r.total}</td>
+    <td class="lic-bp-freeze-total" style="text-align:right;font-weight:500">${r.total}</td>
   </tr>`).join('');
 
   const totalRow = `<tr style="font-weight:600;background:var(--bg-2,#F8F8F6);border-top:0.5px solid var(--border-md)">
-    <td style="padding-left:14px">Total</td>
-    <td></td>
+    <td class="lic-bp-freeze-name" style="left:0;width:${_BP_NAME_COL_W}px;min-width:${_BP_NAME_COL_W}px;padding-left:14px;background:var(--bg-2,#F8F8F6)">Total</td>
+    <td class="lic-bp-freeze-plan" style="left:${_BP_NAME_COL_W}px;width:${_BP_PLAN_COL_W}px;min-width:${_BP_PLAN_COL_W}px;background:var(--bg-2,#F8F8F6)"></td>
     ${projects.map(p => {
       const t = matrixRows.reduce((s,r) => s+(r.byProj[p]||0), 0);
       return `<td style="text-align:right">${t||'—'}</td>`;
     }).join('')}
-    <td style="text-align:right">${grandTotal}</td>
+    <td class="lic-bp-freeze-total" style="text-align:right;background:var(--bg-2,#F8F8F6)">${grandTotal}</td>
   </tr>`;
 
-  wrap.innerHTML = `<div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
-    <table class="hist-table" style="min-width:500px">
+  wrap.innerHTML = `<div class="card lic-bp-table-wrap" style="padding:0">
+    <table class="hist-table lic-bp-table" style="min-width:500px">
       ${head}<tbody>${bodyRows}${totalRow}</tbody>
     </table>
   </div>`;
+}
+
+// Phase 2D — Summary export mirrors the exact filtered matrix (same
+// _bpComputeMatrix() the on-screen table renders), so it can never drift
+// from what filters currently show.
+function exportLicSummaryCSV() {
+  const { projects, matrixRows, grandTotal } = _bpComputeMatrix();
+  if (!matrixRows.length) { alert('ไม่มีข้อมูล License Summary'); return; }
+  const headers = ['Software', 'Plan', ...projects, 'Total'];
+  const rows = matrixRows.map(r => [r.name, r.plan, ...projects.map(p => r.byProj[p] || 0), r.total]);
+  rows.push(['Total', '', ...projects.map(p => matrixRows.reduce((s,r) => s+(r.byProj[p]||0), 0)), grandTotal]);
+  _downloadCSV('License_Summary', headers, rows);
 }
 
 // ── Phase 1 Part 3 — License Reconciliation ───────────────────────────────
@@ -775,14 +879,29 @@ function computeLicReconciliation(memos, reviewState, overrides, manualRows) {
   }).sort((a, b) => a.project.localeCompare(b.project) || a.name.localeCompare(b.name) || a.plan.localeCompare(b.plan));
 }
 
+// Phase 2D — post-computation row filter shared by the on-screen table and
+// its CSV export. Filters the already-computed canonical rows only; never
+// touches computeLicReconciliation()'s Purchased/Assigned/Remaining math.
+function _bpReconApplyFilters(rows) {
+  return rows.filter(r => {
+    if (_bpFilterProjects.length && !_bpFilterProjects.includes(r.project)) return false;
+    if (_bpFilterSoftware && !r.name.toLowerCase().includes(_bpFilterSoftware.toLowerCase())) return false;
+    if (_bpFilterPlan !== 'all' && (r.plan || '') !== _bpFilterPlan) return false;
+    if (_bpReconOverOnly && !r.overAssigned) return false;
+    if (_bpReconRemainingOnly && !(r.remaining > 0)) return false;
+    return true;
+  });
+}
+
 function _renderLicReconciliation() {
   const wrap = document.getElementById('lic-recon-wrap');
   if (!wrap) return;
-  const rows = computeLicReconciliation(loadMemos(), _getLicReviewState(), _getLicUserOverrides());
+  const allRows = computeLicReconciliation(loadMemos(), _getLicReviewState(), _getLicUserOverrides());
+  const rows = _bpReconApplyFilters(allRows);
   window._licReconRows = rows;
 
   if (!rows.length) {
-    wrap.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text-3)">ไม่มีข้อมูล Reconciliation</div>`;
+    wrap.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text-3)">ไม่มีข้อมูล Reconciliation${allRows.length ? ' ที่ตรงกับตัวกรอง' : ''}</div>`;
     return;
   }
 
@@ -860,7 +979,8 @@ function _closeLicReconDetail() {
 // (exportUserLicensesCSV), reads the exact same canonical reconciliation
 // rows the on-screen table renders.
 function exportLicReconciliationCSV() {
-  const rows = computeLicReconciliation(loadMemos(), _getLicReviewState(), _getLicUserOverrides());
+  const allRows = computeLicReconciliation(loadMemos(), _getLicReviewState(), _getLicUserOverrides());
+  const rows = _bpReconApplyFilters(allRows);
   if (!rows.length) { alert('ไม่มีข้อมูล Reconciliation'); return; }
   const headers = ['Project', 'Software', 'Plan', 'Purchased Seats', 'Assigned Users', 'Remaining Seats'];
   const csvRows = rows.map(r => [r.project, r.name, r.plan, r.purchased, r.assignedCount, r.remaining]);

@@ -1651,3 +1651,229 @@ test('pre-existing legacy boolean overrides are unaffected by an unrelated Assig
   const importedOv = overrides['newuser@orbit.co.th|Geo9|Figma'];
   assert.deepEqual({ ...importedOv }, { active: true, licenseId: 'inv-9', source: 'import', importedAt: importedOv.importedAt });
 });
+
+// ══════════════════════════════════════════════════════════════════
+// Phase 2D — License Summary Reporting UX. Adds Project/Software/Plan/Status
+// filters (shared by Summary and Reconciliation) and Over Assigned/Has
+// Remaining filters (Reconciliation only), filtered Summary/Reconciliation
+// exports, and frozen Software/Plan/Total columns on the Summary matrix.
+// No inventory, assignment, or reconciliation math changes: Summary filters
+// are extra predicates on the license array feeding the pre-existing
+// _bpComputeMatrix() aggregation (same pattern as the pre-existing year
+// filter); Reconciliation filters are a pure post-filter on top of the
+// unchanged computeLicReconciliation() result.
+// ══════════════════════════════════════════════════════════════════
+function bpElements(extra = {}) {
+  return {
+    'lic-content': { innerHTML: '' },
+    'bp-table-wrap': { innerHTML: '' },
+    'lic-recon-wrap': { innerHTML: '' },
+    ...extra,
+  };
+}
+
+// Figma is purchased in two projects under two different plans; Slack is
+// purchased in AOA-MP with 1 seat but granted to 2 users (over-assigned).
+// This one fixture set exercises Project/Software/Plan/Over-Assigned/
+// Has-Remaining filters without needing a different memo set per test.
+function bpFixtureMemos() {
+  const memoFigmaAoa = slMemo({
+    memoNo: 'ORB-2D01-001', project: 'AOA-MP',
+    slItems: [{ name: 'Figma', plan: 'Professional', price: 500, qty: 5, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>designer1@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  const memoSlackAoa = slMemo({
+    memoNo: 'ORB-2D01-002', project: 'AOA-MP',
+    slItems: [{ name: 'Slack', plan: '', price: 50, qty: 1, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Slack</th></tr></thead>' +
+      '<tbody>' +
+      '<tr><td>a@orbit.co.th</td><td>✓</td></tr>' +
+      '<tr><td>b@orbit.co.th</td><td>✓</td></tr>' +
+      '</tbody></table>' }],
+  });
+  const memoFigmaBeta = slMemo({
+    memoNo: 'ORB-2D01-003', project: 'BETA',
+    slItems: [{ name: 'Figma', plan: 'Basic', price: 200, qty: 3, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Figma</th></tr></thead>' +
+      '<tbody><tr><td>designer2@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  return [memoFigmaAoa, memoSlackAoa, memoFigmaBeta];
+}
+
+test('Project filter narrows both the Summary matrix and the Reconciliation rows to the selected project', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  const memos = bpFixtureMemos();
+  context.storeMemos(memos);
+
+  // Unfiltered: both projects present.
+  let matrix = context._bpComputeMatrix();
+  assert.deepEqual([...matrix.projects].sort(), ['AOA-MP', 'BETA']);
+
+  context._bpSetFilterProjects(['AOA-MP']);
+  matrix = context._bpComputeMatrix();
+  assert.deepEqual([...matrix.projects], ['AOA-MP'], 'BETA column must disappear once excluded by the project filter');
+  assert.equal(matrix.grandTotal, 6, 'total must reflect only AOA-MP seats (5 Figma + 1 Slack)');
+
+  const elements = bpElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicReconciliation();
+  const reconProjects = context.window._licReconRows.map(r => r.project);
+  assert.ok(reconProjects.every(p => p === 'AOA-MP'), 'Reconciliation rows for BETA must be filtered out');
+  assert.ok(reconProjects.includes('AOA-MP'));
+});
+
+test('Software search narrows Summary matrix rows and Reconciliation rows by substring match', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.storeMemos(bpFixtureMemos());
+
+  context._bpSetFilterSoftware('figma');
+  const matrix = context._bpComputeMatrix();
+  assert.ok(matrix.matrixRows.every(r => r.name === 'Figma'), 'only Figma rows should remain');
+  assert.equal(matrix.matrixRows.length, 2, 'both Figma/plan combinations (AOA-MP Professional, BETA Basic) must remain');
+
+  const elements = bpElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicReconciliation();
+  assert.ok(context.window._licReconRows.every(r => r.name === 'Figma'));
+  assert.equal(context.window._licReconRows.length, 2);
+});
+
+test('Plan filter narrows Summary and Reconciliation to an exact plan match', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.storeMemos(bpFixtureMemos());
+
+  context._bpSetFilterPlan('Professional');
+  const matrix = context._bpComputeMatrix();
+  assert.equal(matrix.matrixRows.length, 1);
+  assert.equal(matrix.matrixRows[0].name, 'Figma');
+  assert.equal(matrix.matrixRows[0].plan, 'Professional');
+  assert.equal(matrix.grandTotal, 5);
+
+  const elements = bpElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicReconciliation();
+  assert.equal(context.window._licReconRows.length, 1);
+  assert.equal(context.window._licReconRows[0].project, 'AOA-MP');
+});
+
+test('Reconciliation "Over Assigned only" filter shows only rows where Assigned Users exceeds Purchased Seats', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.storeMemos(bpFixtureMemos());
+
+  const elements = bpElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+
+  context._renderLicReconciliation();
+  assert.ok(context.window._licReconRows.length >= 3, 'sanity: all three rows present with no filter');
+
+  context._bpSetReconOverOnly(true);
+  const overRows = context.window._licReconRows;
+  assert.equal(overRows.length, 1);
+  assert.equal(overRows[0].name, 'Slack');
+  assert.ok(overRows[0].overAssigned);
+  assert.match(elements['lic-recon-wrap'].innerHTML, /Slack/);
+  assert.doesNotMatch(elements['lic-recon-wrap'].innerHTML, /Figma/);
+});
+
+test('Reconciliation "Has Remaining only" filter shows only rows with Remaining Seats > 0', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.storeMemos(bpFixtureMemos());
+
+  const elements = bpElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+
+  context._bpSetReconRemainingOnly(true);
+  const rows = context.window._licReconRows;
+  assert.ok(rows.length > 0);
+  assert.ok(rows.every(r => r.remaining > 0), 'no row with remaining <= 0 (e.g. the over-assigned Slack row) should survive');
+  assert.ok(!rows.some(r => r.name === 'Slack'), 'over-assigned Slack (remaining -1) must be excluded');
+});
+
+test('exportLicSummaryCSV respects the current Project/Software/Plan filters and matches the on-screen matrix', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.storeMemos(bpFixtureMemos());
+  context._bpSetFilterProjects(['BETA']);
+
+  let downloaded = null;
+  context._downloadCSV = (name, headers, rows) => { downloaded = { name, headers, rows }; };
+  context.exportLicSummaryCSV();
+
+  assert.ok(downloaded);
+  assert.equal(downloaded.name, 'License_Summary');
+  const headers = Array.from(downloaded.headers);
+  assert.deepEqual(headers, ['Software', 'Plan', 'BETA', 'Total'], 'export columns must match the filtered project set, not every project');
+  const rows = downloaded.rows.map(r => Array.from(r));
+  assert.equal(rows.length, 2, 'one Figma/BETA row plus the Total row');
+  assert.deepEqual(rows[0], ['Figma', 'Basic', 3, 3]);
+  assert.deepEqual(rows[1], ['Total', '', 3, 3]);
+});
+
+test('exportLicReconciliationCSV respects the current filters (Project + Over Assigned only)', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.storeMemos(bpFixtureMemos());
+  context._bpSetFilterProjects(['AOA-MP']);
+  context._bpSetReconOverOnly(true);
+
+  let downloaded = null;
+  context._downloadCSV = (name, headers, rows) => { downloaded = { name, headers, rows }; };
+  context.exportLicReconciliationCSV();
+
+  assert.ok(downloaded);
+  const rows = downloaded.rows.map(r => Array.from(r));
+  assert.equal(rows.length, 1, 'only the over-assigned Slack/AOA-MP row should export');
+  assert.deepEqual(rows[0], ['AOA-MP', 'Slack', '', 1, 2, -1]);
+});
+
+test('License Summary matrix totals are unchanged by the new filter machinery when no filter is applied (regression control)', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.storeMemos(bpFixtureMemos());
+
+  const { projects, matrixRows, grandTotal } = context._bpComputeMatrix();
+  assert.deepEqual([...projects].sort(), ['AOA-MP', 'BETA']);
+  assert.equal(grandTotal, 9, '5 (Figma/AOA-MP) + 1 (Slack/AOA-MP) + 3 (Figma/BETA) = 9, same as before filters existed');
+  const figmaAoa = matrixRows.find(r => r.name === 'Figma' && r.plan === 'Professional');
+  const figmaBeta = matrixRows.find(r => r.name === 'Figma' && r.plan === 'Basic');
+  const slack = matrixRows.find(r => r.name === 'Slack');
+  assert.equal(figmaAoa.byProj['AOA-MP'], 5);
+  assert.equal(figmaBeta.byProj['BETA'], 3);
+  assert.equal(slack.byProj['AOA-MP'], 1);
+});
+
+test('License Summary matrix freezes Software/Plan/Total columns while Project columns scroll', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.storeMemos(bpFixtureMemos());
+
+  const elements = bpElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._bpRenderMatrix();
+
+  const html = elements['bp-table-wrap'].innerHTML;
+  assert.match(html, /class="hist-table lic-bp-table"/, 'table must carry the freeze-aware class');
+  assert.match(html, /class="lic-bp-freeze-name"/, 'Software column must be marked frozen');
+  assert.match(html, /class="lic-bp-freeze-plan"/, 'Plan column must be marked frozen');
+  assert.match(html, /class="lic-bp-freeze-total"/, 'Total column must be marked frozen');
+  // Header cells too, not just body cells, so labels stay readable while scrolling.
+  const theadMatch = html.match(/<thead>([\s\S]*?)<\/thead>/)[1];
+  assert.match(theadMatch, /lic-bp-freeze-name/);
+  assert.match(theadMatch, /lic-bp-freeze-plan/);
+  assert.match(theadMatch, /lic-bp-freeze-total/);
+});
