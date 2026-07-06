@@ -1,5 +1,63 @@
 # CHANGELOG
 
+## Phase 2B — License Assignment Excel/CSV Import (2026-07-06)
+
+Added bulk **Assignment Import** to License Management > Users — lets PMO upload a CSV to assign
+users to *existing* License Inventory records in bulk, using the same override mechanism Manage
+Licenses already writes to. This is not License Inventory import (`importBulk('license')` in
+`views/bulk_import.js`, untouched) — it never creates inventory, projects, or memos, only assigns
+users to what already exists.
+
+### 1. New data plumbing (`views/license.js`)
+- `computeLicUserMappingData()` gains an optional 4th `manualRows` parameter (defaults to `[]`,
+  every existing call site/test unaffected). A new manual/imported (email, project) row store,
+  `_LIC_USR_MANUAL_KEY` (`orbit-lic-user-manual-rows-v1`, mirrored to Supabase `settings`
+  id=`lic-user-manual-rows` — same pattern as every other License settings key, no new database
+  table), lets an imported user surface in the Users tab / Reconciliation / both exports even when
+  no memo ever granted them anything — previously `allUserRows` came solely from approved SL memos'
+  "ตาราง Account", so a brand-new user had nowhere to attach an override. `_renderLicUsers()`,
+  `exportUserLicensesCSV()`'s fallback path, and `computeLicReconciliation()` now all merge this
+  store in — one merge point, no duplicated calculation logic downstream.
+- Override shape gains optional `source`/`importedAt` fields (`{ active: true, licenseId, source:
+  'import', importedAt }`), additive only — `_ovIsActive()`/`_resolveInventoryIdentity()` still only
+  read `.active`/`.licenseId`, so every existing plain-boolean and `{active, licenseId}` override
+  keeps working unchanged. `_licUserAssignmentDetail()` surfaces this as `overrideSource`; a new
+  shared `_licAssignmentSourceLabel()` helper (replacing the duplicated Memo/Multiple
+  memos/Manual ternary in both Manage Licenses and Reconciliation's Assigned Users drill-down) now
+  also renders "Import" for an Assignment-Import-sourced entry.
+
+### 2. Matching + validation (pure, testable — no DOM)
+- `computeAssignmentImportPreview(rows, allLicenses)` matches each row by Project + Software, then
+  Plan only to disambiguate: an explicit Plan requires an exact match; a blank Plan is allowed only
+  when exactly one plan exists for that Software+Project, otherwise the row is rejected as
+  `ambiguous` (tracked separately from `rejected`, per spec). No inventory match -> rejected
+  ("inventory not found"). A duplicate (email+software+project+plan) appearing twice in the same
+  file is flagged `duplicate`, not double-counted as valid. Cancelled inventory is excluded from
+  matching (consistent with every other assignable-identity computation in this file); expired
+  inventory is allowed, matching the app's existing "expired is still assignable" behavior — import
+  does not invent a stricter rule than Manage Licenses already has.
+- `applyAssignmentImport(preview, allLicenses)` writes overrides only for `valid` rows, is idempotent
+  (re-applying the same valid row does not grow the manual-row store or double-count Reconciliation's
+  Assigned Users), and never touches an unrelated override.
+
+### 3. UI (`views/license.js`, Users tab only — Memo Index/Review Queue/Memo flow untouched)
+- "Download Assignment Template" (CSV: `User Email, Software, Plan, Project, Note`) and "Import
+  Assignments" buttons. Import shows a preview modal (Total/Valid/Duplicate/Ambiguous/Rejected
+  counts + a per-row status/reason table) before anything is written — nothing is silently skipped.
+  Confirming applies only the valid rows and re-renders the Users tab.
+- CSV only, via a small dependency-free RFC4180-ish parser (`_parseCSVText`/
+  `_parseAssignmentImportFile`) — not the XLSX-based `views/bulk_import.js` pipeline. Excel (.xlsx)
+  upload is deferred; see `docs/TECHNICAL_DEBT.md` TD-PHASE2B-01.
+
+### Tests
+- `tests/license.test.js`: 15 new tests covering CSV parsing/template download, blank-Plan
+  single/ambiguous-plan matching, explicit-Plan disambiguation, missing-inventory rejection,
+  required-field/email-format rejection reasons, cross-project disambiguation, duplicate-row
+  detection, idempotent re-import (no double count), a user with zero memo history appearing in the
+  Users tab/Reconciliation/export, Review-Queue independence, the "Import" source label, and
+  non-interference with pre-existing legacy boolean overrides. Full suite: 507/507 passing
+  (`node --test tests/*.test.js`); `node --check views/license.js tests/license.test.js` clean.
+
 ## Milestone 3B acceptance review fixes — Device delete refresh, delete scope, Mark Arrived name mapping (2026-07-03)
 
 Three issues raised during Milestone 3B acceptance review, investigated and fixed in `views/device.js`.

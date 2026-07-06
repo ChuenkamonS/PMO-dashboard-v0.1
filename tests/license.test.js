@@ -1386,3 +1386,268 @@ test('Manage Licenses "Save licenses" applies checkbox state per project section
   assert.ok(!('multi@orbit.co.th|Geo9|Slack' in overrides), 'an untouched, still-unchecked entry writes no override');
   assert.ok(!('multi@orbit.co.th|EV|Slack' in overrides), 'an untouched, still-checked (memo-granted) entry resets to memo default — no override');
 });
+
+// ══════════════════════════════════════════════════════════════════
+// Phase 2B — Assignment Import (Excel/CSV). Assigns users to *existing*
+// License Inventory records via the same override mechanism Manage Licenses
+// already uses — never creates inventory, projects, or memos. A new manual
+// user-row store (_LIC_USR_MANUAL_KEY) lets an imported (email, project)
+// pair surface in the Users tab/Reconciliation/export even when no memo ever
+// granted that user anything; every downstream number still flows through
+// the pre-existing computeLicUserMappingData()/computeLicReconciliation()/
+// exportUserLicensesCSV() — no calculation logic duplicated.
+// ══════════════════════════════════════════════════════════════════
+
+function invLicense(overrides = {}) {
+  return {
+    id: 'inv-1', name: 'Figma', plan: 'Professional', vendor: '', seats: 5, pricePerMonth: 0,
+    owner: '', department: '', project: 'Geo9', licenseType: 'subscription',
+    purchaseDate: '2026-01-01', expiry: null, billingFreq: 'monthly',
+    statusOverride: null, memoNo: '', note: '', source: 'manual',
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+test('_parseAssignmentImportFile maps the Assignment Import template header row to structured rows', () => {
+  const { context } = createLicenseContext();
+  const csv = 'User Email,Software,Plan,Project,Note\n' +
+    'designer1@orbit.co.th,Figma,Professional,Geo9,Historical assignment\n' +
+    'dev1@orbit.co.th,GitHub Copilot,,AOA-MP,\n';
+  const rows = context._parseAssignmentImportFile(csv);
+  assert.equal(rows.length, 2);
+  assert.deepEqual({ ...rows[0] }, { email: 'designer1@orbit.co.th', software: 'Figma', plan: 'Professional', project: 'Geo9', note: 'Historical assignment' });
+  assert.deepEqual({ ...rows[1] }, { email: 'dev1@orbit.co.th', software: 'GitHub Copilot', plan: '', project: 'AOA-MP', note: '' });
+});
+
+test('downloadAssignmentTemplate downloads a CSV with the required + optional template columns', () => {
+  const { context } = createLicenseContext();
+  let downloaded = null;
+  context._downloadCSV = (name, headers, rows) => { downloaded = { name, headers, rows }; };
+  context.downloadAssignmentTemplate();
+  assert.ok(downloaded);
+  assert.deepEqual(Array.from(downloaded.headers), ['User Email', 'Software', 'Plan', 'Project', 'Note']);
+  assert.ok(downloaded.rows.length >= 1);
+});
+
+test('computeAssignmentImportPreview: blank Plan matches when exactly one plan exists for that Software+Project', () => {
+  const { context } = createLicenseContext();
+  context.storeManualLicenses([invLicense()]);
+  const preview = context.computeAssignmentImportPreview([
+    { email: 'designer1@orbit.co.th', software: 'Figma', plan: '', project: 'Geo9', note: '' },
+  ], context.getAllLicenses());
+  assert.equal(preview.total, 1);
+  assert.equal(preview.validCount, 1);
+  assert.equal(preview.rows[0].status, 'valid');
+  assert.equal(preview.rows[0].matchedLicenseId, 'inv-1');
+});
+
+test('computeAssignmentImportPreview: required-field gaps and bad email format are rejected with specific reasons', () => {
+  const { context } = createLicenseContext();
+  context.storeManualLicenses([invLicense()]);
+  const allLicenses = context.getAllLicenses();
+  const preview = context.computeAssignmentImportPreview([
+    { email: '', software: 'Figma', plan: '', project: 'Geo9', note: '' },
+    { email: 'not-an-email', software: 'Figma', plan: '', project: 'Geo9', note: '' },
+    { email: 'a@orbit.co.th', software: '', plan: '', project: 'Geo9', note: '' },
+    { email: 'a@orbit.co.th', software: 'Figma', plan: '', project: '', note: '' },
+  ], allLicenses);
+  assert.equal(preview.rejectedCount, 4);
+  assert.equal(preview.rows[0].reason, 'missing email');
+  assert.equal(preview.rows[1].reason, 'invalid email format');
+  assert.equal(preview.rows[2].reason, 'missing software');
+  assert.equal(preview.rows[3].reason, 'missing project');
+});
+
+test('computeAssignmentImportPreview: rejects a row with no matching inventory record ("inventory not found")', () => {
+  const { context } = createLicenseContext();
+  context.storeManualLicenses([]);
+  const preview = context.computeAssignmentImportPreview([
+    { email: 'nobody@orbit.co.th', software: 'Nonexistent Tool', plan: '', project: 'Geo9', note: '' },
+  ], context.getAllLicenses());
+  assert.equal(preview.rejectedCount, 1);
+  assert.equal(preview.rows[0].status, 'rejected');
+  assert.equal(preview.rows[0].reason, 'inventory not found');
+});
+
+test('computeAssignmentImportPreview: blank Plan with multiple plans for the same Software+Project is rejected as ambiguous', () => {
+  const { context } = createLicenseContext();
+  context.storeManualLicenses([
+    invLicense({ id: 'inv-1', name: 'Adobe Creative Cloud', plan: 'Business', project: 'AOA-MP' }),
+    invLicense({ id: 'inv-2', name: 'Adobe Creative Cloud', plan: 'Enterprise', project: 'AOA-MP' }),
+  ]);
+  const preview = context.computeAssignmentImportPreview([
+    { email: 'dev1@orbit.co.th', software: 'Adobe Creative Cloud', plan: '', project: 'AOA-MP', note: '' },
+  ], context.getAllLicenses());
+  assert.equal(preview.ambiguousCount, 1);
+  assert.equal(preview.rows[0].status, 'ambiguous');
+  assert.equal(preview.rejectedCount, 0, 'ambiguous rows are tracked separately from rejected rows');
+});
+
+test('computeAssignmentImportPreview: an explicit Plan disambiguates when multiple plans exist for the same Software+Project', () => {
+  const { context } = createLicenseContext();
+  context.storeManualLicenses([
+    invLicense({ id: 'inv-1', name: 'Adobe Creative Cloud', plan: 'Business', project: 'AOA-MP' }),
+    invLicense({ id: 'inv-2', name: 'Adobe Creative Cloud', plan: 'Enterprise', project: 'AOA-MP' }),
+  ]);
+  const preview = context.computeAssignmentImportPreview([
+    { email: 'dev1@orbit.co.th', software: 'Adobe Creative Cloud', plan: 'Enterprise', project: 'AOA-MP', note: '' },
+  ], context.getAllLicenses());
+  assert.equal(preview.validCount, 1);
+  assert.equal(preview.rows[0].matchedLicenseId, 'inv-2');
+});
+
+test('computeAssignmentImportPreview: same user+software+project+plan appearing twice in the file is flagged duplicate, not valid twice', () => {
+  const { context } = createLicenseContext();
+  context.storeManualLicenses([invLicense()]);
+  const row = { email: 'designer1@orbit.co.th', software: 'Figma', plan: 'Professional', project: 'Geo9', note: '' };
+  const preview = context.computeAssignmentImportPreview([row, { ...row }], context.getAllLicenses());
+  assert.equal(preview.total, 2);
+  assert.equal(preview.validCount, 1);
+  assert.equal(preview.duplicateCount, 1);
+  assert.equal(preview.rows[0].status, 'valid');
+  assert.equal(preview.rows[1].status, 'duplicate');
+});
+
+test('computeAssignmentImportPreview: same software in different projects requires Project to disambiguate — no cross-project match', () => {
+  const { context } = createLicenseContext();
+  context.storeManualLicenses([
+    invLicense({ id: 'inv-geo9', name: 'Figma', plan: 'Professional', project: 'Geo9' }),
+    invLicense({ id: 'inv-aoa', name: 'Figma', plan: 'Professional', project: 'AOA-MP' }),
+  ]);
+  const preview = context.computeAssignmentImportPreview([
+    { email: 'designer1@orbit.co.th', software: 'Figma', plan: 'Professional', project: 'Geo9', note: '' },
+  ], context.getAllLicenses());
+  assert.equal(preview.rows[0].status, 'valid');
+  assert.equal(preview.rows[0].matchedLicenseId, 'inv-geo9', 'must match the Geo9 record, never the AOA-MP one');
+});
+
+test('applyAssignmentImport: re-applying the same valid row does not double-count the assignment', () => {
+  const { context } = createLicenseContext();
+  context.storeManualLicenses([invLicense({ seats: 5 })]);
+  const allLicenses = context.getAllLicenses();
+  const preview = context.computeAssignmentImportPreview([
+    { email: 'designer1@orbit.co.th', software: 'Figma', plan: 'Professional', project: 'Geo9', note: '' },
+  ], allLicenses);
+
+  const applied1 = context.applyAssignmentImport(preview, allLicenses);
+  const applied2 = context.applyAssignmentImport(preview, allLicenses);
+  assert.equal(applied1, 1);
+  assert.equal(applied2, 1);
+  assert.equal(context._getLicUserManualRows().length, 1, 'manual row store must not grow on re-import');
+
+  const recon = context.computeLicReconciliation(context.loadMemos(), context._getLicReviewState(), context._getLicUserOverrides());
+  const row = recon.find(r => r.name === 'Figma');
+  assert.equal(row.assignedCount, 1, 'assigned count must not double count a re-imported row');
+});
+
+test('an imported assignment appears in the Users tab for a user with no memo account-table row at all', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  context.storeManualLicenses([invLicense()]);
+  const allLicenses = context.getAllLicenses();
+  const preview = context.computeAssignmentImportPreview([
+    { email: 'newuser@orbit.co.th', software: 'Figma', plan: 'Professional', project: 'Geo9', note: '' },
+  ], allLicenses);
+  context.applyAssignmentImport(preview, allLicenses);
+
+  const elements = licUsersElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicUsers();
+
+  assert.match(elements['lic-usr-body'].innerHTML, /newuser@orbit\.co\.th/);
+  assert.match(elements['lic-usr-body'].innerHTML, /Figma/);
+});
+
+test('imported assignment increases Reconciliation Assigned Users and decreases Remaining Seats', () => {
+  const { context } = createLicenseContext();
+  context.storeManualLicenses([invLicense({ seats: 5 })]);
+  const before = context.computeLicReconciliation(context.loadMemos(), context._getLicReviewState(), context._getLicUserOverrides());
+  const beforeRow = before.find(r => r.name === 'Figma');
+  assert.equal(beforeRow.purchased, 5);
+  assert.equal(beforeRow.assignedCount, 0);
+  assert.equal(beforeRow.remaining, 5);
+
+  const allLicenses = context.getAllLicenses();
+  const preview = context.computeAssignmentImportPreview([
+    { email: 'newuser@orbit.co.th', software: 'Figma', plan: 'Professional', project: 'Geo9', note: '' },
+  ], allLicenses);
+  context.applyAssignmentImport(preview, allLicenses);
+
+  const after = context.computeLicReconciliation(context.loadMemos(), context._getLicReviewState(), context._getLicUserOverrides());
+  const afterRow = after.find(r => r.name === 'Figma');
+  assert.equal(afterRow.assignedCount, 1);
+  assert.equal(afterRow.remaining, 4);
+});
+
+test('imported assignment does not block on Review Queue status and is labeled "Import" in the Assigned Users drill-down', () => {
+  const { context } = createLicenseContext();
+  context.storeManualLicenses([invLicense({ seats: 2 })]);
+  const allLicenses = context.getAllLicenses();
+  const preview = context.computeAssignmentImportPreview([
+    { email: 'newuser@orbit.co.th', software: 'Figma', plan: 'Professional', project: 'Geo9', note: '' },
+  ], allLicenses);
+  context.applyAssignmentImport(preview, allLicenses);
+
+  // No memos/review state exist at all — the import must not depend on the
+  // Review Queue gate, which only governs memo-derived account-table rows.
+  const recon = context.computeLicReconciliation([], {}, context._getLicUserOverrides());
+  const row = recon.find(r => r.name === 'Figma');
+  assert.equal(row.assignedCount, 1);
+  assert.equal(row.assignedUsers[0].source, 'Import');
+});
+
+test('exportUserLicensesCSV includes an imported assignment for a user with no memo account-table row (fallback path, Users tab not yet rendered)', () => {
+  const { context } = createLicenseContext();
+  context.storeManualLicenses([invLicense()]);
+  const allLicenses = context.getAllLicenses();
+  const preview = context.computeAssignmentImportPreview([
+    { email: 'newuser@orbit.co.th', software: 'Figma', plan: 'Professional', project: 'Geo9', note: '' },
+  ], allLicenses);
+  context.applyAssignmentImport(preview, allLicenses);
+
+  let downloaded = null;
+  context._downloadCSV = (name, headers, rows) => { downloaded = { name, headers, rows }; };
+  context.exportUserLicensesCSV();
+
+  assert.ok(downloaded);
+  const headers = Array.from(downloaded.headers);
+  assert.ok(headers.includes('Figma — Professional'));
+  const rows = downloaded.rows.map(r => Array.from(r));
+  const userRow = rows.find(r => r[0] === 'newuser@orbit.co.th');
+  assert.ok(userRow, 'imported user must appear in the export even though no memo ever granted them anything');
+  assert.equal(userRow[headers.indexOf('Figma — Professional')], '✓');
+});
+
+test('pre-existing legacy boolean overrides are unaffected by an unrelated Assignment Import', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.initMultiSelect = () => {};
+  const memo = slMemo({
+    memoNo: 'ORB-2900-001', project: 'AOA-MP',
+    slItems: [{ name: 'Slack', plan: '', price: 50, qty: 3, months: 12 }],
+    sections: [{ title: 'ตาราง Account', html:
+      '<table><thead><tr><th>Email</th><th>Slack</th></tr></thead>' +
+      '<tbody><tr><td>designer@orbit.co.th</td><td>✓</td></tr></tbody></table>' }],
+  });
+  context.storeMemos([memo]);
+  // Legacy plain-boolean override, unrelated to the import below.
+  context._saveLicUserOverrides({ 'designer@orbit.co.th|AOA-MP|Slack': false });
+
+  context.storeManualLicenses([invLicense({ id: 'inv-9', name: 'Figma', plan: 'Professional', project: 'Geo9' })]);
+  const allLicenses = context.getAllLicenses();
+  const preview = context.computeAssignmentImportPreview([
+    { email: 'newuser@orbit.co.th', software: 'Figma', plan: 'Professional', project: 'Geo9', note: '' },
+  ], allLicenses);
+  context.applyAssignmentImport(preview, allLicenses);
+
+  const overrides = context._getLicUserOverrides();
+  assert.equal(overrides['designer@orbit.co.th|AOA-MP|Slack'], false, 'legacy boolean override for an unrelated user/software must survive an import untouched');
+  // Only one Figma record exists in inventory, so its assignable identity
+  // stays the bare name (no "— Plan" suffix) per _licAssignableIdentities()
+  // — same widening rule Manage Licenses already uses, reused unchanged here.
+  const importedOv = overrides['newuser@orbit.co.th|Geo9|Figma'];
+  assert.deepEqual({ ...importedOv }, { active: true, licenseId: 'inv-9', source: 'import', importedAt: importedOv.importedAt });
+});

@@ -267,7 +267,7 @@ function exportUserLicensesCSV() {
     // Users tab hasn't rendered in this session yet — fall back to the full,
     // unfiltered dataset via the same pipeline the render path uses,
     // including Part 1's widened (inventory-based) assignable list.
-    const { allUserRows, allLicCols: legacyCols } = computeLicUserMappingData(loadMemos(), _getLicReviewState());
+    const { allUserRows, allLicCols: legacyCols } = computeLicUserMappingData(loadMemos(), _getLicReviewState(), undefined, _getLicUserManualRows());
     allLicCols = _licAssignableIdentities(allLicenses, legacyCols);
     const groups = _buildLicUserGroups(allUserRows);
     const userMap = {};
@@ -334,6 +334,7 @@ function renderLicense() {
     }).catch(() => {}),
     _loadLicUserOverridesAsync().catch(() => {}),
     _loadLicReviewStateAsync().catch(() => {}),
+    _loadLicUserManualRowsAsync().catch(() => {}),
   ])
     .then(() => _renderLicTab(_licCurrentTab))
     .catch(() => _renderLicTab(_licCurrentTab));
@@ -722,11 +723,11 @@ function _bpRenderMatrix() {
 // computeLicUserMappingData()/_buildLicUserGroups()/_licActiveForGroup()
 // pipeline the Users tab uses) — pure, no DOM, so the on-screen table, its
 // export, and the Assigned Users drill-down all read one canonical result.
-function computeLicReconciliation(memos, reviewState, overrides) {
+function computeLicReconciliation(memos, reviewState, overrides, manualRows) {
   const allLicenses = getAllLicenses();
   const seatMap = _licSeatsByProjectSoftwarePlan(allLicenses);
 
-  const { allUserRows, allLicCols } = computeLicUserMappingData(memos, reviewState);
+  const { allUserRows, allLicCols } = computeLicUserMappingData(memos, reviewState, undefined, manualRows || _getLicUserManualRows());
   const assignableCols = _licAssignableIdentities(allLicenses, allLicCols);
   const groups = _buildLicUserGroups(allUserRows);
 
@@ -754,7 +755,7 @@ function computeLicReconciliation(memos, reviewState, overrides) {
       if (!row.assigned.has(group.email)) {
         row.assigned.set(group.email, {
           email: group.email,
-          source: detail.sources.length > 1 ? 'Multiple memos' : detail.sources.length === 1 ? 'Memo' : 'Manual',
+          source: _licAssignmentSourceLabel(detail),
           project: group.project,
           sourceMemo: detail.sources.length ? detail.sources.join(', ') : '',
         });
@@ -925,9 +926,16 @@ function _saveLicReviewState(data) {
 // account-list rows are visible in User Mapping vs. sitting in the Review Queue.
 // Rejected memos' rows are simply omitted (per locked decision #4): PMO can still
 // add the same users via the existing manual override editor below.
-function computeLicUserMappingData(memos, reviewState, parseAcctFn) {
+// `manualRows` (Phase 2B) — manual/imported (email, project) rows from
+// _getLicUserManualRows(), appended as-is. They carry no license grants of
+// their own (always `licenses: {}`) and are entirely independent of Review
+// Queue status — an imported assignment must not depend on Review Queue
+// approval, only on the license inventory match already validated at import
+// time. Optional and defaulted so every existing call site/test is unaffected.
+function computeLicUserMappingData(memos, reviewState, parseAcctFn, manualRows) {
   parseAcctFn = parseAcctFn || parseAccountTableFromMemo;
   reviewState = reviewState || {};
+  manualRows = manualRows || [];
   const allUserRows = [];
   const allLicColsSet = new Set();
   const queueItems = [];
@@ -948,6 +956,13 @@ function computeLicUserMappingData(memos, reviewState, parseAcctFn) {
         licenses: r.licenses,
       }));
     });
+
+  manualRows.forEach(r => allUserRows.push({
+    email: r.email,
+    project: r.project || '',
+    memoNo: r.memoNo || 'Manual Import',
+    licenses: {},
+  }));
 
   return { allUserRows, allLicCols: [...allLicColsSet].sort(), queueItems };
 }
@@ -1085,6 +1100,248 @@ function _resolveInventoryIdentity(identity, allLicenses, project, ovValue) {
   return candidates.find(l => l.project === project) || candidates.find(l => !l.project) || candidates[0];
 }
 
+// ── Phase 2B — Assignment Import (Excel/CSV) ──────────────────────────────
+// This is NOT License Inventory import (that's importBulk('license') /
+// importLicenses() in views/bulk_import.js, untouched). This import assigns
+// users to *existing* License Inventory records — same override mechanism as
+// Manage Licenses, never creates inventory, projects, or memos.
+//
+// CSV only for now — Excel (.xlsx) support is deferred, see docs/TECHNICAL_DEBT.md.
+// A dedicated, dependency-free parser (not the XLSX-based views/bulk_import.js
+// pipeline) keeps this self-contained and independently testable in Node.
+
+// Minimal RFC4180-ish CSV parser: handles quoted fields, escaped quotes ("")
+// and commas/newlines inside quotes. Blank lines are dropped.
+function _parseCSVText(text) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  const s = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inQuotes) {
+      if (c === '"') { if (s[i + 1] === '"') { field += '"'; i++; } else inQuotes = false; }
+      else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+    else field += c;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(c => c.trim() !== ''));
+}
+
+// Maps the parsed CSV table's header row to the Assignment Import template
+// columns (case-insensitive). Required: User Email, Software, Project.
+// Optional: Plan, Note.
+function _parseAssignmentImportFile(text) {
+  const table = _parseCSVText(text);
+  if (!table.length) return [];
+  const headers = table[0].map(h => String(h || '').trim());
+  const colIdx = label => headers.findIndex(h => h.toLowerCase() === label.toLowerCase());
+  const emailIdx = colIdx('User Email'), softIdx = colIdx('Software'),
+        planIdx  = colIdx('Plan'),       projIdx = colIdx('Project'), noteIdx = colIdx('Note');
+  return table.slice(1).map(cols => ({
+    email:    (cols[emailIdx] ?? '').trim(),
+    software: (cols[softIdx]  ?? '').trim(),
+    plan:     planIdx >= 0 ? (cols[planIdx] ?? '').trim() : '',
+    project:  (cols[projIdx] ?? '').trim(),
+    note:     noteIdx >= 0 ? (cols[noteIdx] ?? '').trim() : '',
+  }));
+}
+
+const _ASSIGNMENT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Pure validation + matching — no DOM, no storage writes. Given parsed rows
+// and the effective License Inventory (getAllLicenses()), classifies every
+// row as valid / duplicate / ambiguous / rejected per the locked matching
+// rules (Project + Software, Plan only to disambiguate):
+//   - Plan provided  -> exact Software + Plan + Project match required.
+//   - Plan blank + exactly one distinct plan among Software+Project matches
+//     -> allowed (single-plan match).
+//   - Plan blank + more than one distinct plan -> rejected as ambiguous.
+//   - No inventory match at all -> rejected, "inventory not found".
+// Cancelled inventory records are excluded from matching (consistent with
+// every other assignable-identity computation in this file); expired
+// records are NOT excluded — the app already treats expired licenses as
+// assignable everywhere else (_licAssignableIdentities/_resolveInventoryIdentity
+// only exclude 'cancelled'), so import does not invent a stricter rule.
+function computeAssignmentImportPreview(rows, allLicenses) {
+  const norm = v => String(v || '').trim().toLowerCase();
+  const seen = new Set();
+  const assignable = allLicenses.filter(l => getLicenseStatus(l).key !== 'cancelled');
+
+  const out = (rows || []).map((r, i) => {
+    const base = { rowIndex: i + 1, email: r.email || '', software: r.software || '', plan: r.plan || '', project: r.project || '', note: r.note || '' };
+    if (!base.email)    return { ...base, status: 'rejected', reason: 'missing email' };
+    if (!_ASSIGNMENT_EMAIL_RE.test(base.email)) return { ...base, status: 'rejected', reason: 'invalid email format' };
+    if (!base.software) return { ...base, status: 'rejected', reason: 'missing software' };
+    if (!base.project)  return { ...base, status: 'rejected', reason: 'missing project' };
+
+    const dupKey = [norm(base.email), norm(base.software), norm(base.project), norm(base.plan)].join('|');
+    if (seen.has(dupKey)) return { ...base, status: 'duplicate', reason: 'duplicate row in file' };
+    seen.add(dupKey);
+
+    let candidates = assignable.filter(l => norm(l.project) === norm(base.project) && norm(l.name) === norm(base.software));
+    if (base.plan) {
+      candidates = candidates.filter(l => norm(l.plan) === norm(base.plan));
+      if (!candidates.length) return { ...base, status: 'rejected', reason: 'inventory not found' };
+    } else {
+      if (!candidates.length) return { ...base, status: 'rejected', reason: 'inventory not found' };
+      const plans = new Set(candidates.map(l => norm(l.plan)));
+      if (plans.size > 1) return { ...base, status: 'ambiguous', reason: 'ambiguous plan — multiple plans exist for this software in this project' };
+    }
+    const matched = candidates[0];
+    return { ...base, status: 'valid', reason: '', matchedLicenseId: String(matched.id), matchedPlan: matched.plan || '' };
+  });
+
+  const countOf = st => out.filter(r => r.status === st).length;
+  return {
+    total: out.length,
+    validCount: countOf('valid'),
+    rejectedCount: countOf('rejected'),
+    duplicateCount: countOf('duplicate'),
+    ambiguousCount: countOf('ambiguous'),
+    rows: out,
+  };
+}
+
+// Resolves the exact assignable identity string ("Name" or "Name — Plan")
+// for a matched inventory record, reusing _licAssignableIdentities() (Part 1)
+// so the override key this import writes is byte-identical to what Manage
+// Licenses would compute for the same record — no separate identity logic.
+function _licIdentityForLicense(lic, allLicenses) {
+  const identities = _licAssignableIdentities(allLicenses, []);
+  if (lic.plan) {
+    const withPlan = `${lic.name} — ${lic.plan}`;
+    if (identities.includes(withPlan)) return withPlan;
+  }
+  return lic.name;
+}
+
+// Applies every 'valid' row from a computeAssignmentImportPreview() result:
+// writes an override using the exact same shape Manage Licenses writes for
+// an inventory-only assignment ({ active: true, licenseId }), tagged with
+// `source: 'import'` (additive — _ovIsActive()/_resolveInventoryIdentity()
+// only ever read `.active`/`.licenseId`, so plain boolean overrides written
+// elsewhere are completely unaffected), and ensures the (email, project)
+// pair has a manual row so it's visible in the Users tab/Reconciliation
+// even when no memo ever granted that user anything. Duplicate/ambiguous/
+// rejected rows are never written — already excluded from `valid`. Returns
+// the number of rows actually applied.
+function applyAssignmentImport(preview, allLicenses) {
+  const overrides = _getLicUserOverrides();
+  const manualRows = _getLicUserManualRows();
+  const manualKeySet = new Set(manualRows.map(r => `${String(r.email).toLowerCase()}|${String(r.project || '').toLowerCase()}`));
+  const now = new Date().toISOString();
+  let applied = 0;
+
+  (preview?.rows || []).filter(r => r.status === 'valid').forEach(r => {
+    const matched = allLicenses.find(l => String(l.id) === r.matchedLicenseId);
+    if (!matched) return;
+    const identity = _licIdentityForLicense(matched, allLicenses);
+    const ovKey = `${r.email}|${r.project}|${identity}`;
+    overrides[ovKey] = { active: true, licenseId: String(matched.id), source: 'import', importedAt: now };
+
+    const mk = `${r.email.toLowerCase()}|${r.project.toLowerCase()}`;
+    if (!manualKeySet.has(mk)) {
+      manualRows.push({ email: r.email, project: r.project, memoNo: 'Manual Import', licenses: {}, source: 'import', importedAt: now });
+      manualKeySet.add(mk);
+    }
+    applied++;
+  });
+
+  _saveLicUserOverrides(overrides);
+  _saveLicUserManualRows(manualRows);
+  return applied;
+}
+
+function downloadAssignmentTemplate() {
+  const headers = ['User Email', 'Software', 'Plan', 'Project', 'Note'];
+  const example = [
+    ['designer1@orbit.co.th', 'Figma', 'Professional', 'Geo9', 'Historical assignment'],
+    ['dev1@orbit.co.th', 'GitHub Copilot', 'Business', 'AOA-MP', 'Manual migration'],
+  ];
+  _downloadCSV('Assignment_Import_Template', headers, example);
+}
+
+function _triggerAssignmentImport() {
+  const input = document.getElementById('lic-assignment-import-input');
+  if (!input) return;
+  input.value = '';
+  input.click();
+}
+
+function _handleAssignmentImportFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const rows = _parseAssignmentImportFile(String(e.target.result || ''));
+      if (!rows.length) { alert('ไม่พบข้อมูลในไฟล์ (No rows found)'); return; }
+      const preview = computeAssignmentImportPreview(rows, getAllLicenses());
+      window._licAssignmentImportPreview = preview;
+      _renderAssignmentImportPreview(preview);
+    } catch(err) {
+      console.error(err);
+      alert('เกิดข้อผิดพลาดในการอ่านไฟล์: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function _renderAssignmentImportPreview(preview) {
+  const modal = document.getElementById('lic-assignment-import-modal');
+  if (!modal) return;
+  const stat = (label, val, color) => `<div><div style="font-size:10px;color:var(--text-3);text-transform:uppercase">${label}</div><div style="font-weight:700;font-size:16px;${color ? `color:${color}` : ''}">${val}</div></div>`;
+  const summary = document.getElementById('lic-assignment-import-summary');
+  if (summary) {
+    summary.innerHTML = stat('Total', preview.total)
+      + stat('Valid', preview.validCount, 'var(--green,#27500A)')
+      + stat('Duplicate', preview.duplicateCount, 'var(--text-2)')
+      + stat('Ambiguous', preview.ambiguousCount, 'var(--amber,#C9821A)')
+      + stat('Rejected', preview.rejectedCount, 'var(--red)');
+  }
+  const badgeCls = { valid: 'badge-green', duplicate: 'badge-gray', ambiguous: 'badge-orange', rejected: 'badge-red' };
+  const rowsWrap = document.getElementById('lic-assignment-import-rows');
+  if (rowsWrap) {
+    rowsWrap.innerHTML = `<table class="hist-table"><thead><tr>
+        <th style="padding-left:10px">#</th><th>Email</th><th>Software</th><th>Plan</th><th>Project</th>
+        <th style="text-align:center">Status</th><th>Reason</th>
+      </tr></thead><tbody>${preview.rows.map(r => `<tr>
+        <td style="padding-left:10px;font-size:11px">${r.rowIndex}</td>
+        <td style="font-size:11px">${esc(r.email)}</td>
+        <td style="font-size:11px">${esc(r.software)}</td>
+        <td style="font-size:11px">${esc(r.plan || '—')}</td>
+        <td style="font-size:11px">${esc(r.project)}</td>
+        <td style="text-align:center"><span class="badge ${badgeCls[r.status] || 'badge-gray'}" style="font-size:10px">${esc(r.status)}</span></td>
+        <td style="font-size:11px;color:var(--text-2)">${esc(r.reason || '')}</td>
+      </tr>`).join('')}</tbody></table>`;
+  }
+  const confirmBtn = document.getElementById('lic-assignment-import-confirm');
+  if (confirmBtn) confirmBtn.disabled = preview.validCount === 0;
+  modal.style.display = 'flex';
+}
+
+function _closeAssignmentImportModal() {
+  const modal = document.getElementById('lic-assignment-import-modal');
+  if (modal) modal.style.display = 'none';
+  window._licAssignmentImportPreview = null;
+}
+
+function _confirmAssignmentImport() {
+  const preview = window._licAssignmentImportPreview;
+  if (!preview || !preview.validCount) return;
+  const applied = applyAssignmentImport(preview, getAllLicenses());
+  const summary = `✓ Import สำเร็จ\nAssigned ${applied}` +
+    (preview.duplicateCount ? ` · Duplicate ${preview.duplicateCount}` : '') +
+    (preview.ambiguousCount ? ` · Ambiguous ${preview.ambiguousCount}` : '') +
+    (preview.rejectedCount  ? ` · Rejected ${preview.rejectedCount}`   : '');
+  _closeAssignmentImportModal();
+  _renderLicUsers();
+  alert(summary);
+}
+
 // ── TAB 3: USERS ─────────────────────────────────────────
 // Users tab answers one question — "which software does this user currently
 // have?" — so the primary table is User / Licenses (chips) / Action only.
@@ -1093,7 +1350,7 @@ function _resolveInventoryIdentity(identity, allLicenses, project, ovValue) {
 function _renderLicUsers() {
   const memos = loadMemos();
   const reviewState = _getLicReviewState();
-  const { allUserRows, allLicCols, queueItems } = computeLicUserMappingData(memos, reviewState);
+  const { allUserRows, allLicCols, queueItems } = computeLicUserMappingData(memos, reviewState, undefined, _getLicUserManualRows());
 
   const projects = [...new Set(allUserRows.map(r=>r.project).filter(Boolean))].sort();
 
@@ -1135,8 +1392,16 @@ function _renderLicUsers() {
           ${window._licUsrCols.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
         </select>
       </div>
-      <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="exportUserLicensesCSV()">⬇ Export User Licenses</button>
+      <div class="filter-row" style="margin-bottom:0">
+        <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="downloadAssignmentTemplate()" title="Download Assignment Template">⬇ Download Assignment Template</button>
+        <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="_triggerAssignmentImport()" title="Import User Assignments from CSV">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Import Assignments
+        </button>
+        <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="exportUserLicensesCSV()">⬇ Export User Licenses</button>
+      </div>
     </div>
+    <input type="file" id="lic-assignment-import-input" accept=".csv,text/csv" style="display:none" onchange="_handleAssignmentImportFile(event)">
     <div class="card" style="padding:0;overflow:hidden">
       <table class="hist-table" id="lic-usr-table">
         <thead><tr>
@@ -1169,6 +1434,23 @@ function _renderLicUsers() {
         <div style="flex-shrink:0;display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border)">
           <button class="btn-ghost" onclick="_closeLicUserEditor()">Cancel</button>
           <button class="btn-primary" onclick="_saveLicUserEditor()">Save licenses</button>
+        </div>
+      </div>
+    </div>
+    <div id="lic-assignment-import-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:310;align-items:center;justify-content:center">
+      <div class="card" style="width:680px;max-width:96vw;max-height:85vh;padding:20px;display:flex;flex-direction:column;overflow:hidden">
+        <div style="flex-shrink:0;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px">
+          <div>
+            <div style="font-size:15px;font-weight:700">Import Assignments — Preview</div>
+            <div style="font-size:11px;color:var(--text-2);margin-top:2px">Only valid rows will be assigned. Review duplicate/ambiguous/rejected rows below before confirming.</div>
+          </div>
+          <button class="btn-sm" onclick="_closeAssignmentImportModal()">✕</button>
+        </div>
+        <div id="lic-assignment-import-summary" style="flex-shrink:0;display:flex;gap:20px;margin-bottom:14px;flex-wrap:wrap"></div>
+        <div id="lic-assignment-import-rows" style="flex:1;min-height:0;overflow-y:auto;border:1px solid var(--border);border-radius:var(--r-sm)"></div>
+        <div style="flex-shrink:0;display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+          <button class="btn-ghost" onclick="_closeAssignmentImportModal()">Cancel</button>
+          <button class="btn-primary" id="lic-assignment-import-confirm" onclick="_confirmAssignmentImport()">Confirm Import</button>
         </div>
       </div>
     </div>`;
@@ -1225,12 +1507,28 @@ function _licUserAssignmentDetail(group, lic, allLicenses, ovValue) {
   const sources = [...(group.licenseSources[lic] || [])];
   let match = allLicenses.find(l => l.name === lic && l.project === group.project && sources.includes(l.memoNo));
   if (!match) match = _resolveInventoryIdentity(lic, allLicenses, group.project, ovValue);
+  // Phase 2B — an override written by Assignment Import carries `source:
+  // 'import'`, backward compatible with plain boolean overrides (undefined
+  // here) and the pre-existing `{active, licenseId}` shape (also undefined
+  // unless explicitly set). Lets callers label an imported assignment
+  // distinctly from a memo grant or a PMO manual edit.
+  const overrideSource = (ovValue && typeof ovValue === 'object' && ovValue.source) ? ovValue.source : null;
   return {
     plan: match?.plan || '', seat: match?.seats ?? null,
     status: match ? getLicenseStatus(match) : null,
     updatedAt: match?.updatedAt || null,
-    sources, match: match || null,
+    sources, match: match || null, overrideSource,
   };
+}
+
+// Shared "Source" label — Memo / Multiple memos / Manual / Import — used by
+// both the Manage Licenses dialog and Reconciliation's Assigned Users
+// drill-down so the two never disagree on how an assignment is labeled.
+function _licAssignmentSourceLabel(detail) {
+  if (detail.overrideSource === 'import') return 'Import';
+  if (detail.sources.length > 1) return 'Multiple memos';
+  if (detail.sources.length === 1) return 'Memo';
+  return 'Manual';
 }
 
 // Software names (not software+plan) a user currently, effectively (i.e.
@@ -1374,6 +1672,61 @@ function _toggleLicUserOverride(ovKey, currentActive) {
   _renderLicUsersRows();
 }
 
+// ── Phase 2B — manual/imported (email, project) user rows ────────────────
+// Assignment Import (and any future "add a user with no memo account-table
+// row" action) needs a place for that (email, project) pair to exist so the
+// existing group/override machinery below has something to attach to — the
+// Users tab, Reconciliation, and both exports only ever look at
+// computeLicUserMappingData()'s `allUserRows`, which was previously sourced
+// solely from approved SL memos' "ตาราง Account". This store is the manual
+// counterpart to `manual` licenses in getAllLicenses() — same merge pattern,
+// no new database table, no separate calculation path. A manual row's
+// `licenses` object is always empty; the actual assignment lives entirely in
+// the pre-existing overrides store (_LIC_USR_OV_KEY) — this store only makes
+// the (email, project) pair visible.
+const _LIC_USR_MANUAL_KEY = 'orbit-lic-user-manual-rows-v1';
+
+async function _loadLicUserManualRowsAsync() {
+  if (await checkSupa()) {
+    try {
+      const rows = await supaFetch('settings', 'GET', null, '?id=eq.lic-user-manual-rows');
+      if (rows && rows[0]?.data) {
+        const d = rows[0].data;
+        try { localStorage.setItem(_LIC_USR_MANUAL_KEY, JSON.stringify(d)); } catch(e) {}
+        return d;
+      }
+    } catch(e) { console.warn('_loadLicUserManualRowsAsync failed', e.message); }
+  }
+  return _getLicUserManualRows();
+}
+async function _saveLicUserManualRowsAsync(data) {
+  try { localStorage.setItem(_LIC_USR_MANUAL_KEY, JSON.stringify(data)); } catch(e) {}
+  if (await checkSupa()) {
+    try {
+      await supaFetch('settings', 'POST', { id: 'lic-user-manual-rows', data }, '?on_conflict=id');
+    } catch(e) { console.warn('_saveLicUserManualRowsAsync failed', e.message); }
+  }
+}
+function _getLicUserManualRows() {
+  try { const d = JSON.parse(localStorage.getItem(_LIC_USR_MANUAL_KEY) || '[]'); return Array.isArray(d) ? d : []; }
+  catch(e) { return []; }
+}
+function _saveLicUserManualRows(data) {
+  try { localStorage.setItem(_LIC_USR_MANUAL_KEY, JSON.stringify(data)); } catch(e) {}
+  _saveLicUserManualRowsAsync(data).catch(e => console.warn('Manual user rows sync failed', e));
+}
+// Idempotent: adds an (email, project) row only if one doesn't already exist.
+function _ensureLicUserManualRow(email, project) {
+  const rows = _getLicUserManualRows();
+  const key = `${String(email).toLowerCase()}|${String(project || '').toLowerCase()}`;
+  const exists = rows.some(r => `${String(r.email).toLowerCase()}|${String(r.project || '').toLowerCase()}` === key);
+  if (!exists) {
+    rows.push({ email, project: project || '', memoNo: 'Manual Import', licenses: {}, source: 'import', importedAt: new Date().toISOString() });
+    _saveLicUserManualRows(rows);
+  }
+  return rows;
+}
+
 // Users tab shows one row per user (no Project column), but assignments are
 // still tracked per (email, project) under the hood — unchanged business
 // logic. Open the editor for the user's first project group; if they have
@@ -1454,7 +1807,7 @@ function _openLicUserEditor(key) {
     const showPlanLine = e.detail?.plan && !e.license.includes(' — ');
     const parts = [];
     if (showPlanLine) parts.push(`Plan: ${esc(e.detail.plan)}`);
-    parts.push(`Source: ${esc(e.detail.sources.length > 1 ? 'Multiple memos' : e.detail.sources.length === 1 ? 'Memo' : 'Manual')}`);
+    parts.push(`Source: ${esc(_licAssignmentSourceLabel(e.detail))}`);
     e.rowPlan = e.detail?.plan || ''; e.rowProject = e.groupProject;
     return simpleRow(e, true, parts.join(' · '));
   };

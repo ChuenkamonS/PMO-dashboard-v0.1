@@ -1850,6 +1850,73 @@ Exit Criteria
 
 ---
 
+# TD-PHASE2B-01
+
+Title
+
+Assignment Import — Excel (.xlsx) Support Deferred; No Per-Import Batch Audit Trail
+
+Status
+
+OPEN (deferred by explicit instruction, Phase 2B)
+
+Priority
+
+Low
+
+Introduced
+
+Phase 2B — License Assignment Excel/CSV Import
+
+Owner Phase
+
+License Logic — Assignment Import
+
+Reason
+
+Phase 2B's Assignment Import (`views/license.js`: `_parseAssignmentImportFile()`,
+`computeAssignmentImportPreview()`, `applyAssignmentImport()`) reads CSV only, via a small
+dependency-free RFC4180-ish parser, not the existing XLSX-based `views/bulk_import.js` pipeline
+(`importBulk()`/`handleBulkImport()`, used by License Inventory/Device/Budget import). Per this
+phase's explicit instruction ("If Excel is risky, support CSV first and document Excel as
+deferred"), Excel was scoped out to keep the new matching/validation logic self-contained and
+testable in Node without a browser-only `XLSX` global.
+
+Separately, an import-sourced override is tagged `{ active: true, licenseId, source: 'import',
+importedAt }` — enough to tell an Assignment-Import assignment apart from a memo grant or a PMO
+manual edit (surfaced as "Source: Import" in Manage Licenses and Reconciliation's Assigned Users
+drill-down) — but there is no per-import-batch record (which file, how many rows, who ran it) and
+no actor captured on the override itself. This is the same class of gap TD-M3A-01 already documents
+for the pre-existing manual override editor; Assignment Import narrows it (source is now at least
+distinguishable) but does not close it.
+
+Current Situation
+
+PMO must convert an Excel workbook to CSV (Save As -> CSV) before using Import Assignments. Every
+import-created override/manual-row carries `source: 'import'` and `importedAt`, but not an actor or
+a batch/file identifier — two imports by different PMO users on the same day are indistinguishable
+after the fact.
+
+Risk
+
+Low. CSV-from-Excel is a one-extra-step workaround, not a blocker — every template download is
+already a CSV `PMO` can open and re-save from Excel if they authored it there. The missing
+batch/actor metadata means a bad import cannot be traced to who ran it or which file caused it,
+matching the risk already accepted (and documented) for the manual override editor in TD-M3A-01.
+
+Exit Criteria
+
+- Decide whether direct `.xlsx` upload for Assignment Import is worth adding — if so, route it
+  through the existing `views/bulk_import.js` `XLSX.read()`/`sheet_to_json()` pipeline into the same
+  `computeAssignmentImportPreview()`/`applyAssignmentImport()` functions (no new matching logic),
+  rather than duplicating parsing.
+- Resolve alongside TD-M3A-01's override-shape decision (per-entry `{value, actor, timestamp}` or a
+  parallel audit-log store) so Assignment Import's batch/actor metadata and the manual editor's
+  audit trail are designed together, not as two more one-off shapes bolted onto the same overrides
+  map.
+
+---
+
 # Before Release Checklist
 
 Review every OPEN Technical Debt.
