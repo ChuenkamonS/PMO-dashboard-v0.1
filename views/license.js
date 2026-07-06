@@ -602,7 +602,7 @@ let _bpSubTab = 'summary';
 // below are what onchange handlers (and tests) call, since a `let` at module
 // scope isn't reachable as a property from outside the running script.
 let _bpFilterProjects = [];   // [] = all projects
-let _bpFilterSoftware = '';   // substring match on license name
+let _bpFilterSoftware = [];   // Phase 2D-1 — exact-match multi-select, OR across selections; [] = all
 let _bpFilterPlan = 'all';
 let _bpFilterStatus = [];     // Summary only — [] = all statuses
 let _bpReconOverOnly = false;
@@ -610,7 +610,7 @@ let _bpReconRemainingOnly = false;
 
 function _bpApplyFilters() { _bpRenderMatrix(); _renderLicReconciliation(); }
 function _bpSetFilterProjects(vals) { _bpFilterProjects = vals || []; _bpApplyFilters(); }
-function _bpSetFilterSoftware(v) { _bpFilterSoftware = v || ''; _bpApplyFilters(); }
+function _bpSetFilterSoftware(vals) { _bpFilterSoftware = vals || []; _bpApplyFilters(); }
 function _bpSetFilterPlan(v) { _bpFilterPlan = v || 'all'; _bpApplyFilters(); }
 function _bpSetFilterStatus(vals) { _bpFilterStatus = vals || []; _bpRenderMatrix(); }
 function _bpSetReconOverOnly(v) { _bpReconOverOnly = !!v; _renderLicReconciliation(); }
@@ -628,6 +628,7 @@ function _renderLicByProject() {
   const allLics  = getAllLicenses().filter(l => getLicenseStatus(l).key !== 'cancelled');
   const years    = [...new Set(allLics.map(l => l.memoYear).filter(Boolean))].sort((a,b)=>b-a);
   const projects = [...new Set(allLics.map(l => l.project || '(ไม่ระบุ)'))].sort();
+  const software = [...new Set(allLics.map(l => l.name).filter(Boolean))].sort();
   const plans    = [...new Set(allLics.map(l => l.plan).filter(Boolean))].sort();
   const statusOptions = [
     ['active', 'Active'], ['expiring', 'Expiring (≤30d)'],
@@ -650,8 +651,9 @@ function _renderLicByProject() {
       </div>
       <div>
         <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Software</div>
-        <input type="text" id="lic-bp-search-software" value="${esc(_bpFilterSoftware)}" placeholder="🔍 Software" oninput="_bpSetFilterSoftware(this.value)"
-          style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:160px;outline:none">
+        <select id="lic-bp-filter-software" multiple onchange="_bpSetFilterSoftware(msValues('lic-bp-filter-software'))" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1)">
+          ${software.map(s=>`<option value="${esc(s)}" ${_bpFilterSoftware.includes(s)?'selected':''}>${esc(s)}</option>`).join('')}
+        </select>
       </div>
       <div>
         <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Plan</div>
@@ -698,6 +700,7 @@ function _renderLicByProject() {
     </div>`;
 
   initMultiSelect('lic-bp-filter-project', 'ทุกโครงการ');
+  initMultiSelect('lic-bp-filter-software', 'All software');
   initMultiSelect('lic-bp-filter-status', 'ทุกสถานะ');
 
   _bpRenderMatrix();
@@ -710,7 +713,7 @@ function _bpGetFiltered() {
     if (st.key === 'cancelled') return false;
     if (_bpYear !== 'all' && String(l.memoYear) !== String(_bpYear)) return false;
     if (_bpFilterProjects.length && !_bpFilterProjects.includes(l.project || '(ไม่ระบุ)')) return false;
-    if (_bpFilterSoftware && !(l.name || '').toLowerCase().includes(_bpFilterSoftware.toLowerCase())) return false;
+    if (_bpFilterSoftware.length && !_bpFilterSoftware.includes(l.name)) return false;
     if (_bpFilterPlan !== 'all' && (l.plan || '') !== _bpFilterPlan) return false;
     if (_bpFilterStatus.length && !_bpFilterStatus.some(f => f === 'expiring'
       ? ['expiring-7', 'expiring-15', 'expiring-30'].includes(st.key)
@@ -885,7 +888,7 @@ function computeLicReconciliation(memos, reviewState, overrides, manualRows) {
 function _bpReconApplyFilters(rows) {
   return rows.filter(r => {
     if (_bpFilterProjects.length && !_bpFilterProjects.includes(r.project)) return false;
-    if (_bpFilterSoftware && !r.name.toLowerCase().includes(_bpFilterSoftware.toLowerCase())) return false;
+    if (_bpFilterSoftware.length && !_bpFilterSoftware.includes(r.name)) return false;
     if (_bpFilterPlan !== 'all' && (r.plan || '') !== _bpFilterPlan) return false;
     if (_bpReconOverOnly && !r.overAssigned) return false;
     if (_bpReconRemainingOnly && !(r.remaining > 0)) return false;

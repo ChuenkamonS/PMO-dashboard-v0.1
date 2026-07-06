@@ -1728,22 +1728,103 @@ test('Project filter narrows both the Summary matrix and the Reconciliation rows
   assert.ok(reconProjects.includes('AOA-MP'));
 });
 
-test('Software search narrows Summary matrix rows and Reconciliation rows by substring match', () => {
+// ══════════════════════════════════════════════════════════════════
+// Phase 2D-1 — Software filter is a searchable multi-select (exact match,
+// OR across selections), not a text substring search. Reuses the same
+// msValues()/initMultiSelect() widget already used for Project/Status, so
+// PMO can see and pick from the actual available software names instead of
+// typing a guess.
+// ══════════════════════════════════════════════════════════════════
+test('Software multi-select filter (single selection) narrows Summary matrix rows', () => {
   const { context } = createLicenseContext();
   context.DOMParser = FakeAcctDOMParser;
   context.storeMemos(bpFixtureMemos());
 
-  context._bpSetFilterSoftware('figma');
+  context._bpSetFilterSoftware(['Figma']);
   const matrix = context._bpComputeMatrix();
   assert.ok(matrix.matrixRows.every(r => r.name === 'Figma'), 'only Figma rows should remain');
   assert.equal(matrix.matrixRows.length, 2, 'both Figma/plan combinations (AOA-MP Professional, BETA Basic) must remain');
+  assert.ok(!matrix.matrixRows.some(r => r.name === 'Slack'), 'Slack must be excluded once only Figma is selected');
+});
 
+test('Software multi-select filter (single selection) narrows Reconciliation rows', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.storeMemos(bpFixtureMemos());
+
+  context._bpSetFilterSoftware(['Figma']);
   const elements = bpElements();
   const origGetById = context.document.getElementById;
   context.document.getElementById = id => elements[id] || origGetById(id);
   context._renderLicReconciliation();
   assert.ok(context.window._licReconRows.every(r => r.name === 'Figma'));
   assert.equal(context.window._licReconRows.length, 2);
+});
+
+test('Selecting multiple software values acts as OR (Summary and Reconciliation both include any match)', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.storeMemos(bpFixtureMemos());
+
+  context._bpSetFilterSoftware(['Figma', 'Slack']);
+  const matrix = context._bpComputeMatrix();
+  assert.equal(matrix.matrixRows.length, 3, 'Figma (x2 plans) + Slack = all 3 rows, nothing excluded');
+
+  const elements = bpElements();
+  const origGetById = context.document.getElementById;
+  context.document.getElementById = id => elements[id] || origGetById(id);
+  context._renderLicReconciliation();
+  assert.equal(context.window._licReconRows.length, 3);
+
+  // Narrowing back down to a single value still excludes the other.
+  context._bpSetFilterSoftware(['Slack']);
+  assert.equal(context.window._licReconRows.length, 1);
+  assert.equal(context.window._licReconRows[0].name, 'Slack');
+});
+
+test('No software selected shows all software (empty selection = no filter)', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.storeMemos(bpFixtureMemos());
+
+  context._bpSetFilterSoftware(['Figma']);
+  context._bpSetFilterSoftware([]);
+  const matrix = context._bpComputeMatrix();
+  assert.equal(matrix.matrixRows.length, 3, 'clearing the selection must show every software again');
+});
+
+test('exportLicSummaryCSV respects the selected software filter', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.storeMemos(bpFixtureMemos());
+  context._bpSetFilterSoftware(['Slack']);
+
+  let downloaded = null;
+  context._downloadCSV = (name, headers, rows) => { downloaded = { name, headers, rows }; };
+  context.exportLicSummaryCSV();
+
+  assert.ok(downloaded);
+  const rows = downloaded.rows.map(r => Array.from(r));
+  const dataRows = rows.filter(r => r[0] !== 'Total');
+  assert.equal(dataRows.length, 1);
+  assert.equal(dataRows[0][0], 'Slack');
+  assert.ok(!rows.some(r => r[0] === 'Figma'), 'Figma must not appear once only Slack is selected');
+});
+
+test('exportLicReconciliationCSV respects the selected software filter', () => {
+  const { context } = createLicenseContext();
+  context.DOMParser = FakeAcctDOMParser;
+  context.storeMemos(bpFixtureMemos());
+  context._bpSetFilterSoftware(['Figma']);
+
+  let downloaded = null;
+  context._downloadCSV = (name, headers, rows) => { downloaded = { name, headers, rows }; };
+  context.exportLicReconciliationCSV();
+
+  assert.ok(downloaded);
+  const rows = downloaded.rows.map(r => Array.from(r));
+  assert.equal(rows.length, 2, 'both Figma rows (AOA-MP, BETA) export, Slack excluded');
+  assert.ok(rows.every(r => r[1] === 'Figma'));
 });
 
 test('Plan filter narrows Summary and Reconciliation to an exact plan match', () => {
