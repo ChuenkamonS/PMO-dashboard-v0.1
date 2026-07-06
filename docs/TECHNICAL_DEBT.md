@@ -8,6 +8,15 @@ Rules:
 - No workaround may become permanent without updating this document.
 - Before Release, every OPEN item must be reviewed.
 
+See `docs/audits/RELEASE_READINESS_AUDIT_2026-07-06.md` for a consolidated, priority-ranked view of
+every OPEN item below (Release Blockers vs. Should-Fix-Before-Handoff vs. Deferred/Accepted) ahead
+of Tech Team handoff. Documentation-cleanup pass (2026-07-06, Phase H1): reviewed every entry below
+against the current codebase and the latest CHANGELOG entries — no item's Exit Criteria has been met
+since it was last updated, so no status changes were made here. The 5 migration-not-yet-applied
+items (TD-M1-03, TD-M1-04, TD-M2-01, TD-M2-03, TD-M3B-01) in particular can only be closed after a
+live Supabase schema check, which this pass had no access to; do not close them on documentation
+review alone.
+
 ---
 
 # TD-7A-01

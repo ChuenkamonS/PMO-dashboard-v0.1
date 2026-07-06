@@ -1,7 +1,7 @@
 # SYSTEM_OVERVIEW.md
 
 Version: 1.0  
-Last Updated: 2026-07-03  
+Last Updated: 2026-07-06  
 Owner: PMO
 
 ---
@@ -120,7 +120,11 @@ Main areas:
 
 - License index / expiry tracking
 - License summary by software, project, and seat
+- Reconciliation of purchased seats vs. assigned users vs. remaining seats, with drill-down into
+  which users hold a given software/plan
 - User license mapping
+- Assignment Import: bulk assignment of users to existing license inventory (CSV), separate from
+  memo-derived assignment and from license inventory import itself
 - PMO review queue for account list from approved memos
 - Other subscription tracking
 
