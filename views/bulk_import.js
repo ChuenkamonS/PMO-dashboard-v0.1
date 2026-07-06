@@ -86,8 +86,13 @@ async function importLicenses(rows) {
     if(Number.isNaN(date.getTime())) return raw;
     return [date.getFullYear(), String(date.getMonth()+1).padStart(2,'0'), String(date.getDate()).padStart(2,'0')].join('-');
   };
+  // Phase 2C — project must be part of the identity key: without it, two
+  // historical records for the same Software+Plan+dates but different
+  // Project (a common historical-backfill shape, e.g. no Memo Ref yet)
+  // collide and the second silently overwrites the first instead of
+  // creating a separate per-project inventory line.
   const licenseKey = l => [
-    l.memoNo, l.name, l.plan, licenseDateKey(l.purchaseDate), licenseDateKey(l.expiry),
+    l.memoNo, l.name, l.plan, l.project, licenseDateKey(l.purchaseDate), licenseDateKey(l.expiry),
   ].map(v => String(v || '').trim().toLowerCase()).join('||');
 
   rows.forEach(row => {

@@ -1,5 +1,38 @@
 # CHANGELOG
 
+## Phase 2C — Historical License Inventory Import: dedup key fix (2026-07-06)
+
+Analysis first (per instruction): Historical License Inventory Import already exists — both
+`+ Add License` (manual, `views/license.js`) and bulk Excel import (`importBulk('license')` /
+`importLicenses()`, `views/bulk_import.js`) already support seats, project, plan, cost, purchase/
+expiry dates, and a free-text Memo Ref (never a real Memo record), and both already flow through
+the same canonical `getAllLicenses()` into Memo Index, By Project, Reconciliation, Manage Licenses,
+Assignment Import, and both exports. No new feature or template change was needed.
+
+One real gap was found and fixed: `licenseKey()` in `views/bulk_import.js`'s `importLicenses()`
+identified a license by `memoNo + name + plan + purchaseDate + expiry` — **not** `project`. Two
+historical records for the same Software+Plan+dates but different Project (plausible for a
+historical backfill with no Memo Ref yet, e.g. the same Figma Professional purchase window applied
+to two different projects) would collide on that key, and the second row would silently overwrite
+the first instead of creating a separate per-project inventory record — both across separate
+imports and within a single file's duplicate rows.
+
+### Fixed
+- `licenseKey()` (`views/bulk_import.js`) now includes `l.project` in its composite identity key.
+  No other behavior, template column, or field changed; still the same dependency-free
+  add-or-update-by-key logic, only scoped correctly per project now.
+
+### Tests
+- New `tests/bulk-import.test.js` (previously zero coverage for `views/bulk_import.js` — it wasn't
+  loaded into any VM test context before this) loads `app.js` -> `views/license.js` ->
+  `views/bulk_import.js`, mirroring `index.html`'s real script order:
+  - same Software+Plan+dates, different Project -> two separate records, neither overwritten.
+  - exact duplicate row within the same file -> collapses to one record, not two.
+  - re-importing the same Software+Plan+Project -> updates the existing record (seats change),
+    not a duplicate — proves the fix didn't turn every re-import into a duplicate-adder.
+  Full suite: 510/510 passing (`node --test tests/*.test.js`, up from 507); `node --check
+  views/bulk_import.js tests/bulk-import.test.js` clean.
+
 ## Phase 2B — License Assignment Excel/CSV Import (2026-07-06)
 
 Added bulk **Assignment Import** to License Management > Users — lets PMO upload a CSV to assign
