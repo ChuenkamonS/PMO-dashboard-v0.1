@@ -391,11 +391,10 @@ function _renderLicMemoIndex() {
       <div class="metric-card"><div class="metric-label">ค่าใช้จ่าย/ปี</div><div class="metric-val" id="lic-annual" style="font-size:18px;margin-top:4px">฿0</div><div class="metric-sub" id="lic-renewal-3m"></div></div>
     </div>
 
-    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+    <div class="filter-row" style="margin-bottom:10px">
       <input type="text" id="lic-search" placeholder="🔍 ค้นหา Software, Project, Owner..."
-        style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px;outline:none"
         oninput="_renderLicMemoIndexRows()">
-      <select id="lic-filter-status" onchange="_renderLicMemoIndexRows()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+      <select id="lic-filter-status" onchange="_renderLicMemoIndexRows()">
         <option value="active">Active</option>
         <option value="expiring">Expiring (≤30d)</option>
         <option value="expiring-7">≤ 7 วัน</option>
@@ -404,21 +403,21 @@ function _renderLicMemoIndex() {
         <option value="expired">Expired</option>
         <option value="cancelled">Cancelled</option>
       </select>
-      <select id="lic-filter-project" onchange="_renderLicMemoIndexRows()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+      <select id="lic-filter-project" onchange="_renderLicMemoIndexRows()">
       </select>
-      <span class="filter-field"><span class="filter-label">Sort</span><select id="lic-sort" onchange="_renderLicMemoIndexRows()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+      <span class="filter-field"><span class="filter-label">Sort</span><select id="lic-sort" onchange="_renderLicMemoIndexRows()">
         <option value="expiry-asc">หมดอายุใกล้สุด</option>
         <option value="cost-desc">ราคา มาก→น้อย</option>
         <option value="seats-desc">Seats มาก→น้อย</option>
         <option value="purchase-desc">ซื้อล่าสุด</option>
       </select></span>
-      <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="downloadTemplate('license')" title="Download Template">⬇ Template</button>
-      <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="importBulk('license')" title="Import from Excel">
+      <button class="btn-sm" onclick="exportLicenseCSV()" title="Export License Inventory">⬇ Export License Inventory</button>
+      <button class="btn-sm" onclick="importBulk('license')" title="Import from Excel">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Import Excel
       </button>
-      <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="exportLicenseCSV()" title="Export License Inventory">⬇ Export License Inventory</button>
-      <button class="btn-primary" style="font-size:12px;padding:6px 14px" onclick="openLicenseModal()">
+      <button class="btn-sm" onclick="downloadTemplate('license')" title="Download Template">⬇ Template</button>
+      <button class="btn-primary" onclick="openLicenseModal()">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         Add License
       </button>
@@ -643,44 +642,29 @@ function _renderLicByProject() {
       <button class="btn-sm${_bpSubTab === 'reconciliation' ? ' active' : ''}" data-subtab="reconciliation" onclick="_switchLicSummarySubTab('reconciliation')">Reconciliation</button>
     </div>
 
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
-      <div>
-        <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Project</div>
-        <select id="lic-bp-filter-project" multiple onchange="_bpSetFilterProjects(msValues('lic-bp-filter-project'))" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1)">
-          ${projects.map(p=>`<option value="${esc(p)}" ${_bpFilterProjects.includes(p)?'selected':''}>${esc(p)}</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Software</div>
-        <select id="lic-bp-filter-software" multiple onchange="_bpSetFilterSoftware(msValues('lic-bp-filter-software'))" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1)">
-          ${software.map(s=>`<option value="${esc(s)}" ${_bpFilterSoftware.includes(s)?'selected':''}>${esc(s)}</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Plan</div>
-        <select id="lic-bp-filter-plan" onchange="_bpSetFilterPlan(this.value)" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1)">
-          <option value="all">All plans</option>
-          ${plans.map(p=>`<option value="${esc(p)}" ${_bpFilterPlan===p?'selected':''}>${esc(p)}</option>`).join('')}
-        </select>
-      </div>
+    <div class="filter-row" style="margin-bottom:12px">
+      <select id="lic-bp-filter-project" multiple onchange="_bpSetFilterProjects(msValues('lic-bp-filter-project'))">
+        ${projects.map(p=>`<option value="${esc(p)}" ${_bpFilterProjects.includes(p)?'selected':''}>${esc(p)}</option>`).join('')}
+      </select>
+      <select id="lic-bp-filter-software" multiple onchange="_bpSetFilterSoftware(msValues('lic-bp-filter-software'))">
+        ${software.map(s=>`<option value="${esc(s)}" ${_bpFilterSoftware.includes(s)?'selected':''}>${esc(s)}</option>`).join('')}
+      </select>
+      <span class="filter-field"><span class="filter-label">Plan</span><select id="lic-bp-filter-plan" onchange="_bpSetFilterPlan(this.value)">
+        <option value="all">All plans</option>
+        ${plans.map(p=>`<option value="${esc(p)}" ${_bpFilterPlan===p?'selected':''}>${esc(p)}</option>`).join('')}
+      </select></span>
     </div>
 
     <div id="lic-summary-panel" style="${_bpSubTab === 'summary' ? '' : 'display:none'}">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
-        <div>
-          <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Year</div>
-          <select onchange="_bpYear=this.value;_bpRenderMatrix()" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1)">
-            <option value="all">All years</option>
-            ${years.map(y=>`<option value="${y}" ${String(y)===_bpYear?'selected':''}>${y}</option>`).join('')}
-          </select>
-        </div>
-        <div>
-          <div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Status</div>
-          <select id="lic-bp-filter-status" multiple onchange="_bpSetFilterStatus(msValues('lic-bp-filter-status'))" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1)">
-            ${statusOptions.map(([v,l])=>`<option value="${v}" ${_bpFilterStatus.includes(v)?'selected':''}>${esc(l)}</option>`).join('')}
-          </select>
-        </div>
-        <button class="btn-sm" style="font-size:12px;padding:6px 12px;margin-left:auto" onclick="exportLicSummaryCSV()">⬇ Export Summary</button>
+      <div class="filter-row" style="margin-bottom:12px">
+        <span class="filter-field"><span class="filter-label">Year</span><select onchange="_bpYear=this.value;_bpRenderMatrix()">
+          <option value="all">All years</option>
+          ${years.map(y=>`<option value="${y}" ${String(y)===_bpYear?'selected':''}>${y}</option>`).join('')}
+        </select></span>
+        <select id="lic-bp-filter-status" multiple onchange="_bpSetFilterStatus(msValues('lic-bp-filter-status'))">
+          ${statusOptions.map(([v,l])=>`<option value="${v}" ${_bpFilterStatus.includes(v)?'selected':''}>${esc(l)}</option>`).join('')}
+        </select>
+        <button class="btn-sm" style="margin-left:auto" onclick="exportLicSummaryCSV()">⬇ Export Summary</button>
       </div>
       <div id="bp-table-wrap"></div>
     </div>
@@ -700,9 +684,9 @@ function _renderLicByProject() {
       <div id="lic-recon-wrap"></div>
     </div>`;
 
-  initMultiSelect('lic-bp-filter-project', 'ทุกโครงการ');
-  initMultiSelect('lic-bp-filter-software', 'All software');
-  initMultiSelect('lic-bp-filter-status', 'ทุกสถานะ');
+  initMultiSelect('lic-bp-filter-project', 'ทุกโครงการ', 'Project');
+  initMultiSelect('lic-bp-filter-software', 'All software', 'Software');
+  initMultiSelect('lic-bp-filter-status', 'ทุกสถานะ', 'Status');
 
   _bpRenderMatrix();
   _renderLicReconciliation();
@@ -1566,12 +1550,12 @@ function _renderLicUsers() {
         </select>
       </div>
       <div class="filter-row" style="margin-bottom:0">
-        <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="downloadAssignmentTemplate()" title="Download Assignment Template">⬇ Download Assignment Template</button>
+        <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="exportUserLicensesCSV()">⬇ Export User Licenses</button>
         <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="_triggerAssignmentImport()" title="Import User Assignments from CSV">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Import Assignments
         </button>
-        <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="exportUserLicensesCSV()">⬇ Export User Licenses</button>
+        <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="downloadAssignmentTemplate()" title="Download Assignment Template">⬇ Download Assignment Template</button>
       </div>
     </div>
     <input type="file" id="lic-assignment-import-input" accept=".csv,text/csv" style="display:none" onchange="_handleAssignmentImportFile(event)">

@@ -524,6 +524,7 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
   border-radius: var(--r-sm);
   background: var(--surface); color: var(--text);
   cursor: pointer; outline: none;
+  min-width: 108px; max-width: 220px;
 }
 
 /* ── MULTI-SELECT FILTER WIDGET (UX consistency pass, Part 8) ── */
@@ -605,6 +606,7 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
   font-size: 12px; padding: 6px 10px;
   border: 1px solid var(--border-md); border-radius: var(--r-sm);
   background: var(--surface); color: var(--text);
+  min-width: 110px;
 }
 .hist-adv-panel {
   display: none; flex-wrap: wrap; gap: 8px; align-items: center;
@@ -1205,13 +1207,13 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 <div class="row-name"><span class="name-num">1.</span><input class="ri int-name" type="text" placeholder="ชื่อ-นามสกุล ตำแหน่ง" oninput="calcINT();checkIntHeadcount()"><button class="rm-btn" onclick="rmName(this,'int-names');calcINT();checkIntHeadcount()" title="ลบ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button></div>
               </div>
 
-              <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
-                <button class="add-btn" onclick="addName('int-names','int-name',true);checkIntHeadcount()" style="margin-top:0">+ เพิ่มรายชื่อ</button>
+              <div class="filter-row" style="margin-bottom:0">
                 <button class="btn-sm" onclick="downloadIntTemplate()" style="font-size:11px;padding:5px 10px">⬇ Download Template</button>
                 <label class="btn-sm" style="font-size:11px;padding:5px 10px;cursor:pointer">
                   ⬆ Upload Excel
                   <input type="file" id="int-excel-upload" accept=".xlsx,.xls" style="display:none" onchange="uploadIntExcel(this)">
                 </label>
+                <button class="add-btn" onclick="addName('int-names','int-name',true);checkIntHeadcount()" style="margin-top:0">+ เพิ่มรายชื่อ</button>
               </div>
               <div class="total-box"><span class="total-label">Total Amount</span><span class="total-val" id="int-total">฿0</span></div>
             </div>
@@ -1282,12 +1284,12 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 <tbody id="acct-body"></tbody>
               </table>
             </div>
-            <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-              <button class="add-btn" onclick="addAcctRow()" style="margin-top:0">+ เพิ่ม Account</button>
-              <button class="btn-sm" onclick="openBulkAcctModal()" style="font-size:11px;padding:5px 10px">⬆ Bulk Email</button>
+            <div class="filter-row" style="margin-bottom:0">
               <button class="btn-sm" onclick="downloadSlAccountTemplate()" style="font-size:11px;padding:5px 10px">↓ Download Template</button>
               <button class="btn-sm" onclick="document.getElementById('sl-account-upload').click()" style="font-size:11px;padding:5px 10px">⬆ Upload Excel / CSV</button>
               <input type="file" id="sl-account-upload" accept=".xlsx,.xls,.csv" style="display:none" onchange="uploadSlAccountFile(this)">
+              <button class="btn-sm" onclick="openBulkAcctModal()" style="font-size:11px;padding:5px 10px">⬆ Bulk Email</button>
+              <button class="add-btn" onclick="addAcctRow()" style="margin-top:0">+ เพิ่ม Account</button>
             </div>
           </div>
 
@@ -1433,9 +1435,8 @@ svg.icon { display: inline-block; vertical-align: middle; }
           </button>
         </div>
         <div id="hist-filters-advanced" class="hist-adv-panel filter-row" style="margin-bottom:12px">
-          <span class="filter-field"><span class="filter-label">Date</span><input type="date" id="hist-date-from" title="จากวันที่" onchange="renderHistoryMemos()"></span>
-          <span class="hist-adv-sep">–</span>
-          <input type="date" id="hist-date-to" title="ถึงวันที่" onchange="renderHistoryMemos()">
+          <span class="filter-field"><span class="filter-label">Date From</span><input type="date" id="hist-date-from" title="จากวันที่" onchange="renderHistoryMemos()"></span>
+          <span class="filter-field"><span class="filter-label">Date To</span><input type="date" id="hist-date-to" title="ถึงวันที่" onchange="renderHistoryMemos()"></span>
           <span class="filter-field"><span class="filter-label">Amount</span><select id="hist-amt-preset" onchange="renderHistoryMemos()">
             <option value="all">ทุกวงเงิน</option>
             <option value="gt100k">&gt; 100k</option>
@@ -1583,12 +1584,10 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <span class="filter-field"><span class="filter-label">Year</span><select id="as-year" onchange="renderActualSpend()" aria-label="ปีข้อมูล Actual Spend">
                 <option value="2026">ปี 2026</option>
               </select></span>
-              <div style="display:flex;align-items:center;gap:6px">
-                <label style="font-size:11px;color:var(--text-3)">จาก</label>
-                <input type="month" id="as-from" onchange="renderActualSpend()">
-                <label style="font-size:11px;color:var(--text-3)">ถึง</label>
-                <input type="month" id="as-to" onchange="renderActualSpend()">
-              </div>
+              <span class="filter-field"><span class="filter-label">จากเดือน</span>
+                <input type="month" id="as-from" onchange="renderActualSpend()"></span>
+              <span class="filter-field"><span class="filter-label">ถึงเดือน</span>
+                <input type="month" id="as-to" onchange="renderActualSpend()"></span>
               <select id="as-project" onchange="renderActualSpend()">
               </select>
               <select id="as-type" onchange="renderActualSpend()">
@@ -1621,18 +1620,18 @@ svg.icon { display: inline-block; vertical-align: middle; }
 
           <div id="as-panel-manual" style="display:none">
             <div class="filter-row">
-              <button class="btn-primary" id="as-add-manual" onclick="openManualExpenseModal()" style="font-size:11px;padding:5px 10px">+ Add Actual Spend</button>
               <button class="btn-export" id="as-import-button" onclick="document.getElementById('as-import-file').click()">⬆ Import Excel</button>
               <input id="as-import-file" type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleActualSpendImport(event)">
               <button class="btn-export" onclick="downloadActualSpendTemplate()">⬇ Download Template</button>
+              <button class="btn-primary" id="as-add-manual" onclick="openManualExpenseModal()">+ Add Actual Spend</button>
             </div>
             <div class="filter-row">
               <input id="as-manual-search" class="ri" type="search" placeholder="Search reference or description..." oninput="renderManualEntries()" style="max-width:300px">
               <select id="as-manual-project" onchange="renderManualEntries()"></select>
               <select id="as-manual-type" onchange="renderManualEntries()"></select>
               <span class="filter-field"><span class="filter-label">Frequency</span><select id="as-manual-frequency" onchange="renderManualEntries()"><option value="all">All frequencies</option><option value="one_time">One-time</option><option value="monthly">Monthly</option></select></span>
-              <span class="filter-field"><span class="filter-label">Coverage</span><input id="as-manual-from" type="month" onchange="renderManualEntries()" aria-label="Coverage from"></span>
-              <input id="as-manual-to" type="month" onchange="renderManualEntries()" aria-label="Coverage to">
+              <span class="filter-field"><span class="filter-label">Coverage From</span><input id="as-manual-from" type="month" onchange="renderManualEntries()" aria-label="Coverage from"></span>
+              <span class="filter-field"><span class="filter-label">Coverage To</span><input id="as-manual-to" type="month" onchange="renderManualEntries()" aria-label="Coverage to"></span>
               <select id="as-manual-budget-status" onchange="renderManualEntries()"><option value="Mapped">Mapped</option><option value="Manual Override">Manual Override</option><option value="Needs PMO Review">Needs PMO Review</option><option value="Unbudgeted">Unbudgeted</option></select>
             </div>
             <div id="as-manual-content"></div>
@@ -1723,17 +1722,17 @@ svg.icon { display: inline-block; vertical-align: middle; }
                     <span style="font-size:11px;color:var(--text-3);margin-left:8px">ตั้งงบประมาณต่อโปรเจค แยกตาม pool และช่วงเวลา</span>
                   </div>
                   <div style="display:flex;gap:8px;align-items:center">
+                    <input id="bset-search" class="ri" type="search" placeholder="Search project or pool name..." oninput="renderBudgetSettings()" style="max-width:180px">
                     <!-- Options populated dynamically by populateBudgetYearSelect('bset-year')
                          (views/budget.js) from getCurrentBuddhistYear() (Phase 7A-9A). -->
-                    <span class="filter-field"><span class="filter-label">Year</span><select id="bset-year" onchange="renderBudgetSettings()" style="font-size:11px;padding:3px 8px"></select></span>
-                    <input id="bset-search" class="ri" type="search" placeholder="Search project or pool name..." oninput="renderBudgetSettings()" style="font-size:11px;padding:3px 8px;max-width:180px">
-                    <button class="btn-sm" style="font-size:11px;padding:4px 10px" onclick="downloadBudgetPoolTemplate()">⬇ Template</button>
-                    <label class="btn-sm" style="font-size:11px;padding:4px 10px;cursor:pointer">
+                    <span class="filter-field"><span class="filter-label">Year</span><select id="bset-year" onchange="renderBudgetSettings()"></select></span>
+                    <label class="btn-sm" style="cursor:pointer">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                       Import Excel
                       <input type="file" id="pool-excel-upload" accept=".xlsx" style="display:none" onchange="handlePoolBulkUpload(this)">
                     </label>
-                    <button class="btn-primary" onclick="openBudgetPoolModal()" style="font-size:11px;padding:4px 10px">+ Add Pool</button>
+                    <button class="btn-sm" onclick="downloadBudgetPoolTemplate()">⬇ Template</button>
+                    <button class="btn-primary" onclick="openBudgetPoolModal()">+ Add Pool</button>
                   </div>
                 </div>
                 <div id="bset-budget-body" style="padding:14px 16px"></div>
@@ -1910,33 +1909,32 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <div id="dev-registry-context-banner" style="display:none;margin-bottom:10px"></div>
         <div class="filter-row" style="margin-bottom:10px">
           <input type="text" id="dev-search" placeholder="🔍 ค้นหา Device, Serial, Owner..."
-            style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px;outline:none"
             oninput="renderDevice()">
-          <select id="dev-filter-platform" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+          <select id="dev-filter-platform" onchange="renderDevice()">
             <option value="ios">iOS</option>
             <option value="android">Android</option>
             <option value="huawei">Huawei</option>
             <option value="windows">Windows</option>
             <option value="other">Other</option>
           </select>
-          <select id="dev-filter-type" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+          <select id="dev-filter-type" onchange="renderDevice()">
             <option value="mobile">Mobile Phone</option>
             <option value="tablet">Tablet</option>
             <option value="laptop">Laptop</option>
             <option value="other">Other</option>
           </select>
-          <select id="dev-filter-status" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+          <select id="dev-filter-status" onchange="renderDevice()">
             <option value="not_identified">Not Identified</option>
             <option value="in-use">In Use</option>
             <option value="available">Available</option>
             <option value="maintenance">Maintenance</option>
             <option value="retired">Retired</option>
           </select>
-          <select id="dev-filter-project" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+          <select id="dev-filter-project" onchange="renderDevice()">
             <option>AOA-MP</option><option>TTB</option><option>Geo9</option>
             <option>Release 2.1</option><option>Release 3</option>
           </select>
-          <select id="dev-filter-company" onchange="renderDevice()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+          <select id="dev-filter-company" onchange="renderDevice()">
             <option value="BBIK">BBIK</option>
             <option value="Orbit Digital">Orbit Digital</option>
           </select>
@@ -1944,11 +1942,11 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Export CSV
           </button>
-          <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="downloadTemplate('device')">⬇ Template</button>
-          <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="importBulk('device')">
+          <button class="btn-sm" onclick="importBulk('device')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Import Excel
           </button>
+          <button class="btn-sm" onclick="downloadTemplate('device')">⬇ Template</button>
           <button class="btn-primary" style="margin-left:auto" onclick="openDeviceModal()">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             Add Device
