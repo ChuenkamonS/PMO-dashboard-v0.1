@@ -1148,17 +1148,14 @@ test('voidManualExpenseAsync does not hide unrelated Supabase failures', async (
   await assert.rejects(() => context.voidManualExpenseAsync(created.id, 'reason'), /different column/);
 });
 
-test('Manual Entries formats audit timestamps and the search placeholder describes every searched field', () => {
+test('Manual Entries formats audit timestamps and uses the shared concise search placeholder', () => {
   const context = createBudgetContext();
   const formatted = context.formatActualSpendDateTime('2026-07-01T09:40:31.098+00:00');
   assert.match(formatted, /^\d{2} [A-Z][a-z]{2} 2026 \d{2}:\d{2}$/);
   assert.doesNotMatch(formatted, /T|\.098|\+00:00/);
   assert.equal(context.formatActualSpendDateTime(''), '—');
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-  // Phase UX-3.2 — renderManualEntries() actually matches referenceNo/description/vendorProgram/
-  // program/notes (see the `haystack` build in views/budget.js), so the placeholder was broadened
-  // from the old "reference or description" text to name the full searched-field set.
-  assert.match(html, /id="as-manual-search"[^>]*placeholder="Search reference, description, vendor, notes\.\.\."/);
+  assert.match(html, /id="as-manual-search"[^>]*placeholder="Search\.\.\."/);
   assert.match(budgetCode, /formatActualSpendDateTime\(expense\.updatedAt\)/);
   assert.match(budgetCode, /formatActualSpendDateTime\(expense\.createdAt\)/);
 });

@@ -392,7 +392,7 @@ function _renderLicMemoIndex() {
     </div>
 
     <div class="filter-toolbar">
-      <input type="text" id="lic-search" class="filter-search" placeholder="🔍 ค้นหา Software, Project, Owner..."
+      <input type="text" id="lic-search" class="filter-search" placeholder="Search..."
         oninput="_renderLicMemoIndexRows()">
       <select id="lic-filter-status" onchange="_renderLicMemoIndexRows()">
         <option value="active">Active</option>
@@ -411,7 +411,8 @@ function _renderLicMemoIndex() {
         <option value="seats-desc">Seats มาก→น้อย</option>
         <option value="purchase-desc">ซื้อล่าสุด</option>
       </select></span>
-      <div class="filter-actions">
+    </div>
+    <div class="filter-actions" style="justify-content:flex-end;margin-bottom:14px">
         <button class="btn-sm" onclick="exportLicenseCSV()" title="Export License Inventory">⬇ Export License Inventory</button>
         <button class="btn-sm" onclick="importBulk('license')" title="Import from Excel">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -422,7 +423,6 @@ function _renderLicMemoIndex() {
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Add License
         </button>
-      </div>
     </div>
 
     <div id="lic-count-display" style="font-size:11px;color:var(--text-3);padding:6px 14px;border-bottom:1px solid var(--border)">
@@ -655,21 +655,19 @@ function _renderLicByProject() {
         <option value="all">All plans</option>
         ${plans.map(p=>`<option value="${esc(p)}" ${_bpFilterPlan===p?'selected':''}>${esc(p)}</option>`).join('')}
       </select></span>
+      <span class="filter-control"><span class="filter-label">Year</span><select class="filter-input" onchange="_bpYear=this.value;_bpRenderMatrix()">
+        <option value="all">All years</option>
+        ${years.map(y=>`<option value="${y}" ${String(y)===_bpYear?'selected':''}>${y}</option>`).join('')}
+      </select></span>
+      <select id="lic-bp-filter-status" multiple onchange="_bpSetFilterStatus(msValues('lic-bp-filter-status'))">
+        ${statusOptions.map(([v,l])=>`<option value="${v}" ${_bpFilterStatus.includes(v)?'selected':''}>${esc(l)}</option>`).join('')}
+      </select>
+      <div class="filter-actions">
+        <button class="btn-sm" onclick="exportLicSummaryCSV()">⬇ Export Summary</button>
+      </div>
     </div>
 
     <div id="lic-summary-panel" style="${_bpSubTab === 'summary' ? '' : 'display:none'}">
-      <div class="filter-toolbar">
-        <span class="filter-control"><span class="filter-label">Year</span><select class="filter-input" onchange="_bpYear=this.value;_bpRenderMatrix()">
-          <option value="all">All years</option>
-          ${years.map(y=>`<option value="${y}" ${String(y)===_bpYear?'selected':''}>${y}</option>`).join('')}
-        </select></span>
-        <select id="lic-bp-filter-status" multiple onchange="_bpSetFilterStatus(msValues('lic-bp-filter-status'))">
-          ${statusOptions.map(([v,l])=>`<option value="${v}" ${_bpFilterStatus.includes(v)?'selected':''}>${esc(l)}</option>`).join('')}
-        </select>
-        <div class="filter-actions">
-          <button class="btn-sm" onclick="exportLicSummaryCSV()">⬇ Export Summary</button>
-        </div>
-      </div>
       <div id="bp-table-wrap"></div>
     </div>
     <div id="lic-reconciliation-panel" style="${_bpSubTab === 'reconciliation' ? '' : 'display:none'}">
@@ -1543,7 +1541,7 @@ function _renderLicUsers() {
     ${_renderLicReviewQueueHtml(queueItems)}
     <div id="lic-usr-context-banner" style="margin-bottom:12px;display:none"></div>
     <div class="filter-toolbar">
-      <input id="lic-usr-search" type="text" class="filter-search" placeholder="ค้นหา email..."
+      <input id="lic-usr-search" type="text" class="filter-search" placeholder="Search..."
         oninput="_renderLicUsersRows()">
       <select id="lic-usr-proj" onchange="_renderLicUsersRows()">
         ${projects.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}

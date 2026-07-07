@@ -1851,12 +1851,15 @@ function initMultiSelect(id, placeholder, fieldLabel) {
   if (!alreadyMultiple) Array.from(select.options).forEach(o => o.selected = false);
   let wrap = document.querySelector(`[data-ms-for="${id}"]`);
   if (!wrap) {
-    wrap = document.createElement('div');
-    wrap.className = 'ms-wrap';
+    const existingControl = select.parentElement?.classList.contains('filter-control') ? select.parentElement : null;
+    wrap = existingControl || document.createElement('div');
+    wrap.classList.add('filter-control', 'ms-wrap');
     wrap.dataset.msFor = id;
-    select.insertAdjacentElement('afterend', wrap);
-    wrap.innerHTML = `
-      ${fieldLabel ? `<span class="ms-field-label">${esc(fieldLabel)}</span>` : ''}
+    if (!existingControl) select.insertAdjacentElement('afterend', wrap);
+    if (fieldLabel && !wrap.querySelector('.filter-label')) {
+      wrap.insertAdjacentHTML('afterbegin', `<label class="filter-label" for="${esc(id)}">${esc(fieldLabel)}</label>`);
+    }
+    wrap.insertAdjacentHTML('beforeend', `
       <button type="button" class="ms-trigger" aria-haspopup="listbox" aria-expanded="false"></button>
       <div class="ms-panel" role="listbox" aria-multiselectable="true" style="display:none">
         <input type="text" class="ms-search" placeholder="ค้นหา...">
@@ -1865,7 +1868,7 @@ function initMultiSelect(id, placeholder, fieldLabel) {
           <button type="button" class="ms-clear">Clear all</button>
         </div>
         <div class="ms-options"></div>
-      </div>`;
+      </div>`);
     const trigger = wrap.querySelector('.ms-trigger');
     const panel   = wrap.querySelector('.ms-panel');
     const search  = wrap.querySelector('.ms-search');

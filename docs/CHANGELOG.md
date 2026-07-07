@@ -3604,3 +3604,10 @@ Added to `tests/budget-expenses.test.js`:
 
 #### Remaining Work
 - Standalone Budget vs Actual, Forecast, Settings, exports, and cleanup remain unchanged.
+# 2026-07-07 — Filter design system completion
+
+- Standardized search, select, multi-select, date/month, and action sizing across in-scope toolbars.
+- Simplified search placeholders and preserved native date/month controls.
+- Kept Manual Entries compact by hiding Updated At from the list and truncating long descriptions.
+- Hotfix: standardized labels above controls and removed duplicate multi-select labels.
+- Simplified filter information architecture by removing low-value UAT filters and separating crowded action groups.
