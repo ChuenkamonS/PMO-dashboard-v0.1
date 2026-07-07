@@ -3312,12 +3312,12 @@ async function renderBudgetSettings() {
   body.innerHTML = Object.entries(byProj).map(([proj, projPools]) => `
     <div style="margin-bottom:16px">
       <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:6px">${esc(proj)}</div>
-      <table class="hist-table">
+      <table class="hist-table bpool-table">
         <thead><tr>
-          <th style="${tdS};text-align:left">Pool Name</th>
-          <th style="${tdS};text-align:left">ช่วงเวลา</th>
-          <th style="${tdS};text-align:right">Budget (฿)</th>
-          <th style="${tdS};text-align:center">Actions</th>
+          <th>Pool Name</th>
+          <th>ช่วงเวลา</th>
+          <th style="text-align:right">Budget (฿)</th>
+          <th style="text-align:center">Actions</th>
         </tr></thead>
         <tbody>
           ${projPools.map(p => `<tr>

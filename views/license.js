@@ -431,8 +431,8 @@ function _renderLicMemoIndex() {
         <thead><tr>
           <th style="width:12%;padding-left:16px">Software</th>
           <th style="width:8%">Plan</th>
-          <th style="width:7%">Seats</th>
-          <th style="width:9%">฿/เดือน</th>
+          <th style="width:7%;text-align:right">Seats</th>
+          <th style="width:9%;text-align:right">฿/เดือน</th>
           <th style="width:9%">Owner</th>
           <th style="width:8%">Department</th>
           <th style="width:8%">โครงการ</th>
@@ -538,8 +538,8 @@ function _renderLicMemoIndexRows() {
         ${lic.memoNo ? `<div style="font-size:10px;color:var(--blue);font-weight:400;cursor:pointer" onclick="typeof openMemoReadOnly==='function'&&openMemoReadOnly('${esc(lic.memoNo)}')">${esc(lic.memoNo)}</div>` : ''}
       </td>
       <td style="font-size:12px">${esc(lic.plan || '—')}</td>
-      <td>${esc(lic.seats || 1)}</td>
-      <td class="mono">${esc(money(monthlyCostLic))}</td>
+      <td style="text-align:right">${esc(lic.seats || 1)}</td>
+      <td class="mono" style="text-align:right">${esc(money(monthlyCostLic))}</td>
       <td style="font-size:12px">${esc(lic.owner || '—')}</td>
       <td style="font-size:12px">${esc(lic.department || '—')}</td>
       <td style="font-size:12px">${esc(lic.project || '—')}</td>

@@ -1004,7 +1004,7 @@ function histActionButtons(memo) {
   const isRejected  = status === 'rejected';
   const isCancelled = status === 'cancelled';
 
-  return `<div class="hist-actions" style="display:flex;gap:4px;justify-content:center;align-items:center">
+  return `<div class="hist-actions" style="display:flex;gap:4px;justify-content:center;align-items:center;flex-wrap:nowrap">
     <button type="button" class="btn-sm hist-act-btn" data-hist-action="detail"
       data-memo="${no}" title="ดูรายละเอียด" style="padding:3px 8px;font-size:11px">
       View
@@ -1085,7 +1085,7 @@ function renderHistoryMemos() {
       <td class="hist-dt">${esc(shortDate(memo.createdAt))}</td>
       <td class="hist-dt">${esc(shortDate(histActivityAt(memo)))}</td>
       <td>${rej ? `<button type="button" class="hist-reject-btn" data-hist-action="reject-reason" data-memo="${esc(memo.memoNo)}" title="${esc(rej)}">${esc(rejShort)}</button>` : '<span style="color:var(--text-3)">—</span>'}</td>
-      <td style="text-align:center" onclick="event.stopPropagation()">${buildBudgetTagCell(memo)}</td>
+      <td class="hist-cell-clip" style="text-align:center" onclick="event.stopPropagation()">${buildBudgetTagCell(memo)}</td>
       <td style="text-align:center" onclick="event.stopPropagation()">${histActionButtons(memo)}</td>
     </tr>`;
   }).join('');

@@ -591,6 +591,9 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 .hist-table tr:last-child td { border-bottom: none; }
 .hist-table tbody tr.hist-row { transition: background .1s; cursor: pointer; }
 .hist-table tbody tr.hist-row:hover td { background: var(--bg); }
+/* Budget Pool readability (Phase UX-2.5, Part 2) — scoped to this one table only, not every
+   .hist-table, since Budget Pool is the table with the flat/hard-to-scan readability problem. */
+.bpool-table tbody tr:nth-child(even) td { background: var(--bg); }
 .filter-row input[type="search"],
 .filter-row input[type="text"] {
   font-family: 'IBM Plex Sans Thai', 'Noto Sans Thai', Sarabun, system-ui, sans-serif;
@@ -1826,9 +1829,8 @@ svg.icon { display: inline-block; vertical-align: middle; }
           </div>
           <div class="filter-row" style="margin-bottom:10px">
             <input type="text" id="po-search" placeholder="🔍 ค้นหา Memo No / Item Name..."
-              style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface);min-width:200px;outline:none"
               oninput="renderPurchaseOrders()">
-            <select id="po-filter-status" onchange="renderPurchaseOrders()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+            <select id="po-filter-status" onchange="renderPurchaseOrders()">
               <option value="pending_order">Pending Order</option>
               <option value="ordered">Ordered</option>
               <option value="awaiting">Awaiting</option>
@@ -1836,15 +1838,15 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <option value="fulfilled">Fulfilled</option>
               <option value="voided_source">Voided</option>
             </select>
-            <select id="po-filter-project" onchange="renderPurchaseOrders()" style="font-family:inherit;font-size:12px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-sm);background:var(--surface)">
+            <select id="po-filter-project" onchange="renderPurchaseOrders()">
               <option>AOA-MP</option><option>TTB</option><option>Geo9</option>
               <option>Release 2.1</option><option>Release 3</option>
             </select>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-2);white-space:nowrap">
               <input type="checkbox" id="po-filter-remaining" onchange="renderPurchaseOrders()"> Remaining &gt; 0
             </label>
-            <div id="po-visible-count" style="margin-left:auto;font-size:11px;color:var(--text-3)"></div>
-            <button class="btn-export" onclick="exportPurchaseOrdersCSV()">⬇ Export PO</button>
+            <div id="po-visible-count" style="font-size:11px;color:var(--text-3)"></div>
+            <button class="btn-export" style="margin-left:auto" onclick="exportPurchaseOrdersCSV()">⬇ Export PO</button>
           </div>
           <div class="card" style="padding:0;overflow:hidden;overflow-x:auto;-webkit-overflow-scrolling:touch">
             <table class="hist-table">
