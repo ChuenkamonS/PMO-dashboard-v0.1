@@ -886,7 +886,7 @@ function _renderDeviceTable() {
         ${d.position?`<div style="font-size:10px;color:var(--text-3)">${esc(d.position)}</div>`:''}
       </td>
       <td style="font-size:12px">${esc(d.project||'—')}</td>
-      <td style="text-align:center"><span class="badge ${statusB.cls}" style="font-size:10px">${esc(statusB.label)}</span></td>
+      <td style="text-align:center"><span class="badge ${statusB.cls}">${esc(statusB.label)}</span></td>
       <td style="font-size:11px;color:var(--text-3)">${updDate}</td>
       <td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">
         <button class="btn-sm" onclick="event.stopPropagation();openDeviceModal('${esc(String(d.id))}')" style="padding:3px 7px;font-size:11px" title="แก้ไข">✎</button>
@@ -1162,7 +1162,7 @@ function openDeviceDetail(id) {
         </div>
       </div>
       <div style="display:flex;gap:6px;align-items:center">
-        <span class="badge ${statusB.cls}" style="font-size:10px">${esc(statusB.label)}</span>
+        <span class="badge ${statusB.cls}">${esc(statusB.label)}</span>
         <button class="btn-sm" onclick="document.getElementById('dev-detail-modal').style.display='none';openDeviceModal('${idStr}')" style="font-size:11px;padding:3px 8px">✎ Edit</button>
         <button class="btn-sm" onclick="document.getElementById('dev-detail-modal').style.display='none'" style="font-size:11px;padding:3px 8px">✕</button>
       </div>

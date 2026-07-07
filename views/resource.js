@@ -204,14 +204,14 @@ function _renderResourceUI(all) {
         <td>${esc(resDisplayTeam(r))}</td>
         <td><span style="font-weight:500">${esc(resDisplayProject(r))}</span></td>
         <td>${esc(r.position)}</td>
-        <td><span class="badge badge-gray" style="font-size:10px">${esc(resDisplayLevel(r))}</span></td>
+        <td><span class="badge badge-gray">${esc(resDisplayLevel(r))}</span></td>
         <td style="text-align:center;font-weight:600">${r.hc}</td>
         <td style="font-size:11px">${esc(resDisplayHiring(r))}</td>
         <td style="font-size:11px">${r.startDate ? shortDate(r.startDate) : '—'}</td>
         <td style="font-size:11px">${r.endDate ? shortDate(r.endDate) : '—'}</td>
         <td style="font-size:11px">${r.requestDate ? shortDate(r.requestDate) : '—'}</td>
         <td style="font-size:11px">${r.resolvedDate ? shortDate(r.resolvedDate) : '—'}</td>
-        <td><span class="badge ${s.cls}" style="font-size:10px;white-space:nowrap">${esc(s.label)}</span></td>
+        <td style="text-align:center"><span class="badge ${s.cls}" style="white-space:nowrap">${esc(s.label)}</span></td>
         <td style="text-align:center;white-space:nowrap;padding:6px" onclick="event.stopPropagation()">
           <div style="display:inline-flex;gap:3px;align-items:center;justify-content:center">
             <button title="View" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:var(--r-sm);border:1px solid var(--border);background:transparent;cursor:pointer;color:var(--text-2);font-size:13px" onclick="openResDetail('${r.id}')">👁</button>
@@ -900,7 +900,7 @@ function _resShowBulkPreview(toAdd, dupCount, errors) {
             <th style="${tdS};font-weight:600">HC</th>
             <th style="${tdS};font-weight:600;text-align:left">Hiring Type</th>
             <th style="${tdS};font-weight:600;text-align:left">Start</th>
-            <th style="${tdS};font-weight:600;text-align:left">Status</th>
+            <th style="${tdS};font-weight:600;text-align:center">Status</th>
           </tr></thead>
           <tbody>
             ${toAdd.map(r => `<tr>
@@ -911,7 +911,7 @@ function _resShowBulkPreview(toAdd, dupCount, errors) {
               <td style="${tdS};text-align:center">${r.hc}</td>
               <td style="${tdS}">${esc(r.hiringType)}</td>
               <td style="${tdS}">${r.startDate || '—'}</td>
-              <td style="${tdS}"><span class="badge ${RES_STATUS[r.status]?.cls || 'badge-gray'}" style="font-size:10px">${RES_STATUS[r.status]?.label || r.status}</span></td>
+              <td style="${tdS};text-align:center"><span class="badge ${RES_STATUS[r.status]?.cls || 'badge-gray'}">${RES_STATUS[r.status]?.label || r.status}</span></td>
             </tr>`).join('')}
           </tbody>
         </table>

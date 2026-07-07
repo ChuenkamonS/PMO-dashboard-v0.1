@@ -2065,8 +2065,9 @@ function renderManualEntries() {
       && (!budgetStatus.length || budgetStatus.includes(record.budgetStatus));
   }).sort((a, b) => String(b.expense.updatedAt || b.expense.createdAt || '').localeCompare(String(a.expense.updatedAt || a.expense.createdAt || '')));
   if (!rows.length) { container.innerHTML = '<div class="card" style="padding:32px;text-align:center;color:var(--text-3)">No manual entries found</div>'; return; }
-  const cell = 'padding:8px 10px;border-bottom:1px solid var(--border);font-size:11px;vertical-align:top';
-  container.innerHTML = `<div class="card" style="padding:0;overflow:auto"><table class="hist-table"><thead><tr><th>Reference No</th><th>Project</th><th>Spend Type</th><th>Description</th><th style="text-align:right">Amount</th><th>Expense / Coverage Date</th><th>Budget Status</th><th>Updated At</th><th>Actions</th></tr></thead><tbody>${rows.map(({ expense, record, referenceNo, schedule }) => `<tr><td style="${cell};font-weight:600">${esc(referenceNo)}</td><td style="${cell}">${esc(expense.project)}</td><td style="${cell}">${esc(record.spendType)}</td><td style="${cell}">${esc(expense.description)}</td><td style="${cell};text-align:right;font-weight:600">${money(record.amount)}</td><td style="${cell}">${esc(schedule)}</td><td style="${cell}">${esc(record.budgetStatus)}</td><td style="${cell}">${esc(formatActualSpendDateTime(expense.updatedAt))}</td><td style="${cell};white-space:nowrap"><button class="btn-sm" onclick="showManualEntryDetail('${esc(expense.id)}')">View Detail</button>${isPMO() ? ` <button class="btn-sm" onclick="openManualExpenseModal('${esc(expense.id)}')">Edit</button> <button class="btn-sm" style="color:var(--red)" onclick="voidManualExpense('${esc(expense.id)}')">Delete</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
+  // Updated At is intentionally not shown here (available via View Detail) to keep this dense
+  // table scannable; Description is truncated with an ellipsis (full text via the `title` attr).
+  container.innerHTML = `<div class="card" style="padding:0;overflow:auto"><table class="hist-table"><thead><tr><th style="width:10%">Reference No</th><th style="width:9%">Project</th><th style="width:8%">Spend Type</th><th style="width:20%">Description</th><th style="width:9%;text-align:right">Amount</th><th style="width:11%">Expense / Coverage Date</th><th style="width:9%">Budget Status</th><th style="width:24%;text-align:center">Actions</th></tr></thead><tbody>${rows.map(({ expense, record, referenceNo, schedule }) => `<tr><td style="font-weight:600">${esc(referenceNo)}</td><td>${esc(expense.project)}</td><td>${esc(record.spendType)}</td><td class="hist-cell-clip" title="${esc(expense.description)}">${esc(expense.description)}</td><td style="text-align:right;font-weight:600">${money(record.amount)}</td><td>${esc(schedule)}</td><td>${esc(record.budgetStatus)}</td><td style="text-align:center;white-space:nowrap"><button class="btn-sm" onclick="showManualEntryDetail('${esc(expense.id)}')">View Detail</button>${isPMO() ? ` <button class="btn-sm" onclick="openManualExpenseModal('${esc(expense.id)}')">Edit</button> <button class="btn-sm" style="color:var(--red)" onclick="voidManualExpense('${esc(expense.id)}')">Delete</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 // Follows the same header (reference + subject + badges) / grouped-section style as the All Memo
@@ -2296,7 +2297,7 @@ async function renderActualSpend() {
       const projectTotal = Object.values(groups).reduce((sum, group) => sum + group.amount, 0);
       return `<div class="card" style="padding:0;overflow:auto;margin-bottom:10px">
         <div style="padding:10px 14px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;justify-content:space-between"><strong>${esc(project)}</strong><strong style="color:var(--blue)">${money(Math.round(projectTotal))}</strong></div>
-        <table class="hist-table"><thead><tr><th style="${tdS};text-align:left">Type</th><th style="${tdS};text-align:left">Source</th><th style="${tdS};text-align:right">Amount</th><th style="${tdS};text-align:right">รายการ</th><th style="${tdS};text-align:right">% ของ Project</th></tr></thead>
+        <table class="hist-table"><thead><tr><th>Type</th><th>Source</th><th style="text-align:right">Amount</th><th style="text-align:right">รายการ</th><th style="text-align:right">% ของ Project</th></tr></thead>
         <tbody>${Object.values(groups).sort((a,b)=>b.amount-a.amount).map(group => `<tr style="cursor:pointer" onclick="showActualSpendGroup('${encodeURIComponent(project)}','${encodeURIComponent(group.spendType)}','${encodeURIComponent(group.source)}')">
           <td style="${tdS}"><span style="padding:2px 8px;border-radius:4px;background:var(--bg)">${esc(group.spendType)}</span></td><td style="${tdS}"><span class="badge ${actualSpendSourceBadgeClass(group.source)}">${actualSpendSourceShortLabel(group.source)}</span></td>
           <td style="${tdS};text-align:right;font-weight:600">${money(Math.round(group.amount))}</td><td style="${tdS};text-align:right;color:var(--blue)">${group.records.length} <span style="color:var(--text-3)">รายการ →</span></td><td style="${tdS};text-align:right">${percentLabel(group.amount, projectTotal)}</td></tr>`).join('')}</tbody></table></div>`;
@@ -2356,10 +2357,10 @@ function showActualMemos(proj, type, memoNosStr) {
       </div>
       <table class="hist-table">
         <thead><tr>
-          <th style="${tdS};text-align:left">Memo No.</th>
-          <th style="${tdS};text-align:left">วันที่</th>
-          <th style="${tdS};text-align:left">รายการ</th>
-          <th style="${tdS};text-align:right">Amount</th>
+          <th>Memo No.</th>
+          <th>วันที่</th>
+          <th>รายการ</th>
+          <th style="text-align:right">Amount</th>
         </tr></thead>
         <tbody>
           ${memos.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(m => {
@@ -2402,11 +2403,11 @@ function showManualExpenses(proj, type) {
       </div>
       <table class="hist-table">
         <thead><tr>
-          <th style="${tdS};text-align:left">Reference</th>
-          <th style="${tdS};text-align:left">รายการ</th>
-          <th style="${tdS};text-align:left">ช่วงเวลา</th>
-          <th style="${tdS};text-align:right">Amount</th>
-          <th style="${tdS};text-align:center">Actions</th>
+          <th>Reference</th>
+          <th>รายการ</th>
+          <th>ช่วงเวลา</th>
+          <th style="text-align:right">Amount</th>
+          <th style="text-align:center">Actions</th>
         </tr></thead>
         <tbody>
           ${rows.map(e => {
@@ -3158,11 +3159,11 @@ function _showPoolImportErrors(rowResults) {
       '<div style="overflow:auto;flex:1">' +
         '<table class="hist-table" style="min-width:740px">' +
           '<thead><tr>' +
-            '<th style="' + tdS + '">Row</th>' +
-            '<th style="' + tdS + '">Pool ID</th>' +
-            '<th style="' + tdS + '">Project</th>' +
-            '<th style="' + tdS + '">Pool Name</th>' +
-            '<th style="' + tdS + '">ปัญหา</th>' +
+            '<th>Row</th>' +
+            '<th>Pool ID</th>' +
+            '<th>Project</th>' +
+            '<th>Pool Name</th>' +
+            '<th>ปัญหา</th>' +
           '</tr></thead>' +
           '<tbody>' + rows + '</tbody>' +
         '</table>' +
@@ -3227,14 +3228,14 @@ function _showPoolImportPreview(rowResults) {
       '<div style="overflow:auto;flex:1">' +
         '<table class="hist-table" style="min-width:760px">' +
           '<thead><tr>' +
-            '<th style="' + tdS + '">Pool ID</th>' +
-            '<th style="' + tdS + '">Project</th>' +
-            '<th style="' + tdS + '">Pool Name</th>' +
-            '<th style="' + tdS + ';text-align:right">Budget</th>' +
-            '<th style="' + tdS + '">ปี</th>' +
-            '<th style="' + tdS + '">ช่วงเวลา</th>' +
-            '<th style="' + tdS + '">Spend Types</th>' +
-            '<th style="' + tdS + '">การดำเนินการ</th>' +
+            '<th>Pool ID</th>' +
+            '<th>Project</th>' +
+            '<th>Pool Name</th>' +
+            '<th style="text-align:right">Budget</th>' +
+            '<th>ปี</th>' +
+            '<th>ช่วงเวลา</th>' +
+            '<th>Spend Types</th>' +
+            '<th>การดำเนินการ</th>' +
           '</tr></thead>' +
           '<tbody>' + rows + '</tbody>' +
         '</table>' +

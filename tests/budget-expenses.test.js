@@ -983,9 +983,11 @@ test('Manual Entries table stays compact while detail retains audit and schedule
   const renderer = budgetCode.match(/function renderManualEntries[\s\S]*?function showActualSpendDetailModal/)[0];
   const table = renderer.match(/container\.innerHTML = `<div class="card"[\s\S]*?;\n}/)[0];
   const detail = budgetCode.match(/function showManualEntryDetail[\s\S]*?async function renderActualSpend/)[0];
-  assert.match(table, /Reference No[\s\S]*Project[\s\S]*Spend Type[\s\S]*Description[\s\S]*Amount[\s\S]*Expense \/ Coverage Date[\s\S]*Budget Status[\s\S]*Updated At[\s\S]*Actions/);
-  assert.doesNotMatch(table, /<th>Frequency<\/th>|<th>Budget Pool|<th>Created By/);
-  assert.match(detail, /Frequency[\s\S]*Expense Date \/ Coverage[\s\S]*Vendor \/ Program[\s\S]*Budget Pool[\s\S]*Created By[\s\S]*Created Date[\s\S]*Notes[\s\S]*Creation Method/);
+  assert.match(table, /Reference No[\s\S]*Project[\s\S]*Spend Type[\s\S]*Description[\s\S]*Amount[\s\S]*Expense \/ Coverage Date[\s\S]*Budget Status[\s\S]*Actions/);
+  // Updated At was moved out of the (already dense) table in Phase UX-3 follow-up — it remains
+  // available in View Detail (asserted on `detail` below), just not as its own table column.
+  assert.doesNotMatch(table, /<th[^>]*>Frequency<\/th>|<th[^>]*>Budget Pool|<th[^>]*>Created By|<th[^>]*>Updated At/);
+  assert.match(detail, /Frequency[\s\S]*Expense Date \/ Coverage[\s\S]*Vendor \/ Program[\s\S]*Budget Pool[\s\S]*Created By[\s\S]*Created Date[\s\S]*Updated At[\s\S]*Notes[\s\S]*Creation Method/);
 });
 
 // ══════════════════════════════════════════════════════════════════
@@ -1146,14 +1148,17 @@ test('voidManualExpenseAsync does not hide unrelated Supabase failures', async (
   await assert.rejects(() => context.voidManualExpenseAsync(created.id, 'reason'), /different column/);
 });
 
-test('Manual Entries formats audit timestamps and keeps the shorter search placeholder', () => {
+test('Manual Entries formats audit timestamps and the search placeholder describes every searched field', () => {
   const context = createBudgetContext();
   const formatted = context.formatActualSpendDateTime('2026-07-01T09:40:31.098+00:00');
   assert.match(formatted, /^\d{2} [A-Z][a-z]{2} 2026 \d{2}:\d{2}$/);
   assert.doesNotMatch(formatted, /T|\.098|\+00:00/);
   assert.equal(context.formatActualSpendDateTime(''), '—');
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-  assert.match(html, /id="as-manual-search"[^>]*placeholder="Search reference or description\.\.\."/);
+  // Phase UX-3.2 — renderManualEntries() actually matches referenceNo/description/vendorProgram/
+  // program/notes (see the `haystack` build in views/budget.js), so the placeholder was broadened
+  // from the old "reference or description" text to name the full searched-field set.
+  assert.match(html, /id="as-manual-search"[^>]*placeholder="Search reference, description, vendor, notes\.\.\."/);
   assert.match(budgetCode, /formatActualSpendDateTime\(expense\.updatedAt\)/);
   assert.match(budgetCode, /formatActualSpendDateTime\(expense\.createdAt\)/);
 });
@@ -2200,7 +2205,11 @@ test('Phase 7A-8: index.html BvA filter row has a Spend Type filter matching Act
   ['sl','hw','int','ent','dep','infra','other'].forEach(code =>
     assert.match(bvaFilterRow, new RegExp(`<option value="${code}">`)));
   assert.match(bvaFilterRow, /id="bva-search"/);
-  assert.match(bvaFilterRow, /class="ri"/, 'the search input should reuse the shared .ri input style, not a new one');
+  // Phase UX-3.2 — search inputs across the app were standardized onto the shared
+  // .filter-search class (part of the Filter System Contract) instead of the older,
+  // narrower .ri "form row input" class; a one-off inline style is what's disallowed.
+  assert.match(bvaFilterRow, /id="bva-search"[^>]*class="filter-search"/, 'the search input should reuse the shared .filter-search style, not a new one');
+  assert.doesNotMatch(bvaFilterRow, /id="bva-search"[^>]*style="[^"]*width/, 'search input should not have a one-off inline width override');
 });
 
 test('Phase 7A-8: BvA Spend Type filter narrows the Budget Pool table, hides non-matching Unbudgeted/Needs Review sections, and keeps the total consistent', () => {

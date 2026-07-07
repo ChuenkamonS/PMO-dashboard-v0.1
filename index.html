@@ -576,7 +576,7 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 .btn-export:hover { background: var(--bg); }
 
 /* ── HISTORY TABLE ── */
-.hist-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+.hist-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; min-width: 900px; }
 .hist-table th {
   text-align: left; padding: 8px 12px;
   font-size: 10px; font-weight: 700; color: var(--text-3);
@@ -803,9 +803,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
 .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .table-scroll table { min-width: 820px; }
 
-/* hist-table specific min-width */
-.hist-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; min-width: 900px; }
-
 /* ── SIDEBAR COLLAPSE ── */
 :root { --sidebar-w: 196px; --sidebar-w-collapsed: 52px; }
 .sidebar {
@@ -908,6 +905,67 @@ svg.icon { display: inline-block; vertical-align: middle; }
   font-size: 11px; font-weight: 500; color: var(--text-3);
   white-space: nowrap; margin-right: 5px;
 }
+
+/* ── FILTER SYSTEM (Phase UX-3.2 — standardized toolbar contract) ──
+   Every toolbar reads Search | Filters | Actions.
+   - .filter-toolbar   row wrapper (same rhythm/gap as the older .filter-row)
+   - .filter-search    the always-first search box
+   - .filter-control    groups one label+control pair (sizing twin of the older
+                        .filter-field, kept separate so any not-yet-migrated
+                        .filter-row toolbar is unaffected)
+   - .filter-select     explicit class for a standard-width plain select
+   - .filter-date       explicit class for a standard-width date input
+   - .filter-month      explicit class for a standard-width month input
+   - .filter-input      generic alias of the above, for a plain select/date/
+                        month control living outside a .filter-toolbar row
+   - .filter-range      groups a From/To pair (Date/Month/Coverage From+To)
+                        into one nowrap unit so a range never splits mid-pair
+   - .filter-actions    clusters trailing buttons into one nowrap group so
+                        they move to a new line together, never mid-group,
+                        and standardizes their height
+   Any plain <select>/<input type="month">/<input type="date"> inside
+   .filter-toolbar or .filter-control is auto-sized to the standard even
+   without an explicit class; the explicit classes exist for controls that
+   sit outside those wrappers. */
+.filter-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+.filter-search,
+.filter-toolbar input[type="search"],
+.filter-toolbar input[type="text"].filter-search {
+  flex: 1 1 220px; min-width: 200px; max-width: 340px;
+  font-family: 'IBM Plex Sans Thai', 'Noto Sans Thai', Sarabun, system-ui, sans-serif;
+  font-size: 12px; padding: 6px 10px;
+  border: 1px solid var(--border-md); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--text); outline: none;
+}
+.filter-toolbar select,
+.filter-input,
+.filter-select {
+  font-family: 'IBM Plex Sans Thai', 'Noto Sans Thai', Sarabun, system-ui, sans-serif;
+  font-size: 12px; padding: 6px 10px; min-width: 150px;
+  border: 1px solid var(--border-md); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--text); cursor: pointer;
+}
+.filter-toolbar input[type="month"],
+.filter-toolbar input[type="date"],
+.filter-control input[type="month"],
+.filter-control input[type="date"],
+.filter-date,
+.filter-month {
+  font-family: 'IBM Plex Sans Thai', 'Noto Sans Thai', Sarabun, system-ui, sans-serif;
+  font-size: 12px; padding: 6px 10px; width: 140px;
+  border: 1px solid var(--border-md); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--text);
+}
+.filter-control { display: inline-flex; align-items: center; gap: 5px; }
+/* Groups 2+ tightly-related controls (a From/To pair like Date From + Date To or
+   Coverage From + Coverage To, or two closely-paired filters like min/max amount
+   or Requester/Approver) into one nowrap unit, so the group always wraps to a new
+   line together and never splits — no half of it is ever left alone on its own line. */
+.filter-range { display: inline-flex; gap: 8px; align-items: center; flex-wrap: nowrap; }
+.filter-actions { display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; margin-left: auto; }
+.filter-actions .btn-export,
+.filter-actions .btn-primary,
+.filter-actions .btn-sm { height: 30px; box-sizing: border-box; }
 
 
   .load-more-bar {
@@ -1350,9 +1408,8 @@ svg.icon { display: inline-block; vertical-align: middle; }
         </div>
 
         <!-- Filters -->
-        <div class="filter-row" style="margin-bottom:12px">
-          <input type="text" id="pend-search" placeholder="🔍 ค้นหา Memo No, Project, Requester..."
-            style="min-width:220px;flex:1 1 200px"
+        <div class="filter-toolbar">
+          <input type="text" id="pend-search" class="filter-search" placeholder="🔍 ค้นหา Memo No, Project, Requester..."
             oninput="_pendingSearch=this.value;renderPendingContent()">
           <select id="pend-filter-type" onchange="renderPendingContent()">
             <option value="sl">SL</option><option value="hw">HW</option>
@@ -1365,9 +1422,11 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <option value="amount-desc">วงเงิน มาก→น้อย</option>
             <option value="amount-asc">วงเงิน น้อย→มาก</option>
           </select></span>
-          <button class="btn-export" id="pending-refresh-btn" onclick="refreshPendingMemos()">↻ Refresh</button>
-          <span id="pending-last-refreshed" style="font-size:11px;color:var(--text-3)"></span>
-          <button class="btn-export" onclick="exportPendingCSV()">⬇ Export CSV</button>
+          <div class="filter-actions">
+            <span id="pending-last-refreshed" style="font-size:11px;color:var(--text-3)"></span>
+            <button class="btn-export" id="pending-refresh-btn" onclick="refreshPendingMemos()">↻ Refresh</button>
+            <button class="btn-export" onclick="exportPendingCSV()">⬇ Export CSV</button>
+          </div>
         </div>
 
         <div id="pending-list"></div>
@@ -1404,8 +1463,8 @@ svg.icon { display: inline-block; vertical-align: middle; }
             </button>
           </div>
         </div>
-        <div class="filter-row" style="margin-bottom:12px">
-          <input type="search" id="hist-search" placeholder="🔍 ค้นหา Memo, ผู้ขอ, โครงการ…" oninput="renderHistoryMemos()">
+        <div class="filter-toolbar">
+          <input type="search" id="hist-search" class="filter-search" placeholder="🔍 ค้นหา Memo, ผู้ขอ, โครงการ…" oninput="renderHistoryMemos()">
           <select id="hist-status" onchange="renderHistoryMemos()" style="display:none">
             <option value="all">ทุกสถานะ</option>
             <option value="completed">Completed</option>
@@ -1431,25 +1490,33 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <option value="project-asc">โครงการ A-Z</option>
             <option value="status-asc">สถานะ</option>
           </select></span>
-          <button type="button" class="btn-sm" id="hist-filter-toggle" onclick="toggleHistFilters()" aria-expanded="false">ตัวกรองเพิ่มเติม</button>
-          <button type="button" class="btn-export" onclick="exportHistoryCsv()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Export CSV
-          </button>
+          <div class="filter-actions">
+            <button type="button" class="btn-sm" id="hist-filter-toggle" onclick="toggleHistFilters()" aria-expanded="false">ตัวกรองเพิ่มเติม</button>
+            <button type="button" class="btn-export" onclick="exportHistoryCsv()">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Export CSV
+            </button>
+          </div>
         </div>
-        <div id="hist-filters-advanced" class="hist-adv-panel filter-row" style="margin-bottom:12px">
-          <span class="filter-field"><span class="filter-label">Date From</span><input type="date" id="hist-date-from" title="จากวันที่" onchange="renderHistoryMemos()"></span>
-          <span class="filter-field"><span class="filter-label">Date To</span><input type="date" id="hist-date-to" title="ถึงวันที่" onchange="renderHistoryMemos()"></span>
-          <span class="filter-field"><span class="filter-label">Amount</span><select id="hist-amt-preset" onchange="renderHistoryMemos()">
+        <div id="hist-filters-advanced" class="hist-adv-panel filter-toolbar" style="margin-bottom:12px">
+          <span class="filter-range">
+            <span class="filter-control"><span class="filter-label">Date From</span><input type="date" id="hist-date-from" class="filter-date" title="จากวันที่" onchange="renderHistoryMemos()"></span>
+            <span class="filter-control"><span class="filter-label">Date To</span><input type="date" id="hist-date-to" class="filter-date" title="ถึงวันที่" onchange="renderHistoryMemos()"></span>
+          </span>
+          <span class="filter-control"><span class="filter-label">Amount</span><select id="hist-amt-preset" onchange="renderHistoryMemos()">
             <option value="all">ทุกวงเงิน</option>
             <option value="gt100k">&gt; 100k</option>
             <option value="50k-100k">50k – 100k</option>
             <option value="lt50k">&lt; 50k</option>
           </select></span>
-          <input type="number" id="hist-amt-min" class="hist-amt-input" placeholder="ขั้นต่ำ ฿" min="0" onchange="renderHistoryMemos()">
-          <input type="number" id="hist-amt-max" class="hist-amt-input" placeholder="สูงสุด ฿" min="0" onchange="renderHistoryMemos()">
-          <select id="hist-requester" onchange="renderHistoryMemos()"><option value="all">— กรองตามผู้ขอ —</option></select>
-          <select id="hist-approver" onchange="renderHistoryMemos()"><option value="all">— กรองตามผู้อนุมัติ —</option></select>
+          <span class="filter-range">
+            <input type="number" id="hist-amt-min" class="hist-amt-input" placeholder="ขั้นต่ำ ฿" min="0" onchange="renderHistoryMemos()">
+            <input type="number" id="hist-amt-max" class="hist-amt-input" placeholder="สูงสุด ฿" min="0" onchange="renderHistoryMemos()">
+          </span>
+          <span class="filter-range">
+            <select id="hist-requester" onchange="renderHistoryMemos()"><option value="all">— กรองตามผู้ขอ —</option></select>
+            <select id="hist-approver" onchange="renderHistoryMemos()"><option value="all">— กรองตามผู้อนุมัติ —</option></select>
+          </span>
         </div>
         <div class="card" style="padding:0;overflow:hidden" id="hist-table-wrap">
           <div class="card-head" style="padding:14px 16px 12px;border-bottom:1px solid var(--border);margin:0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
@@ -1583,14 +1650,16 @@ svg.icon { display: inline-block; vertical-align: middle; }
 
           <div id="as-panel-report">
 
-            <div class="filter-row">
-              <span class="filter-field"><span class="filter-label">Year</span><select id="as-year" onchange="renderActualSpend()" aria-label="ปีข้อมูล Actual Spend">
+            <div class="filter-toolbar">
+              <span class="filter-control"><span class="filter-label">Year</span><select id="as-year" onchange="renderActualSpend()" aria-label="ปีข้อมูล Actual Spend">
                 <option value="2026">ปี 2026</option>
               </select></span>
-              <span class="filter-field"><span class="filter-label">จากเดือน</span>
-                <input type="month" id="as-from" onchange="renderActualSpend()"></span>
-              <span class="filter-field"><span class="filter-label">ถึงเดือน</span>
-                <input type="month" id="as-to" onchange="renderActualSpend()"></span>
+              <span class="filter-range">
+                <span class="filter-control"><span class="filter-label">Month From</span>
+                  <input type="month" id="as-from" class="filter-month" onchange="renderActualSpend()"></span>
+                <span class="filter-control"><span class="filter-label">Month To</span>
+                  <input type="month" id="as-to" class="filter-month" onchange="renderActualSpend()"></span>
+              </span>
               <select id="as-project" onchange="renderActualSpend()">
               </select>
               <select id="as-type" onchange="renderActualSpend()">
@@ -1602,7 +1671,7 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 <option value="infra">Infrastructure</option>
                 <option value="other">Other</option>
               </select>
-              <span class="filter-field"><span class="filter-label">Source</span><select id="as-source" onchange="renderActualSpend()">
+              <span class="filter-control"><span class="filter-label">Source</span><select id="as-source" onchange="renderActualSpend()">
                 <option value="all">ทุกแหล่งข้อมูล</option>
                 <option value="memo">จาก Memo</option>
                 <option value="manual">Historical / Manual</option>
@@ -1614,28 +1683,32 @@ svg.icon { display: inline-block; vertical-align: middle; }
                 <option value="Needs PMO Review">Needs PMO Review</option>
                 <option value="Unbudgeted">Unbudgeted</option>
               </select>
-              <span id="as-period-label" style="font-size:11px;color:var(--text-3)">ทั้งหมด</span>
-              <button class="btn-export" onclick="exportActualSpendCSV()">⬇ Export CSV</button>
+              <div class="filter-actions">
+                <span id="as-period-label" style="font-size:11px;color:var(--text-3);white-space:nowrap">ทั้งหมด</span>
+                <button class="btn-export" onclick="exportActualSpendCSV()">⬇ Export CSV</button>
+              </div>
             </div>
 
             <div id="as-content"></div>
           </div>
 
           <div id="as-panel-manual" style="display:none">
-            <div class="filter-row">
-              <button class="btn-export" id="as-import-button" onclick="document.getElementById('as-import-file').click()">⬆ Import Excel</button>
-              <input id="as-import-file" type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleActualSpendImport(event)">
-              <button class="btn-export" onclick="downloadActualSpendTemplate()">⬇ Download Template</button>
-              <button class="btn-primary" id="as-add-manual" onclick="openManualExpenseModal()">+ Add Actual Spend</button>
-            </div>
-            <div class="filter-row">
-              <input id="as-manual-search" class="ri" type="search" placeholder="Search reference or description..." oninput="renderManualEntries()" style="max-width:300px">
+            <div class="filter-toolbar">
+              <input id="as-manual-search" type="search" class="filter-search" placeholder="Search reference, description, vendor, notes..." oninput="renderManualEntries()">
               <select id="as-manual-project" onchange="renderManualEntries()"></select>
               <select id="as-manual-type" onchange="renderManualEntries()"></select>
-              <span class="filter-field"><span class="filter-label">Frequency</span><select id="as-manual-frequency" onchange="renderManualEntries()"><option value="all">All frequencies</option><option value="one_time">One-time</option><option value="monthly">Monthly</option></select></span>
-              <span class="filter-field"><span class="filter-label">Coverage From</span><input id="as-manual-from" type="month" onchange="renderManualEntries()" aria-label="Coverage from"></span>
-              <span class="filter-field"><span class="filter-label">Coverage To</span><input id="as-manual-to" type="month" onchange="renderManualEntries()" aria-label="Coverage to"></span>
+              <span class="filter-control"><span class="filter-label">Frequency</span><select id="as-manual-frequency" onchange="renderManualEntries()"><option value="all">All frequencies</option><option value="one_time">One-time</option><option value="monthly">Monthly</option></select></span>
+              <span class="filter-range">
+                <span class="filter-control"><span class="filter-label">Coverage From</span><input id="as-manual-from" type="month" onchange="renderManualEntries()" aria-label="Coverage from"></span>
+                <span class="filter-control"><span class="filter-label">Coverage To</span><input id="as-manual-to" type="month" onchange="renderManualEntries()" aria-label="Coverage to"></span>
+              </span>
               <select id="as-manual-budget-status" onchange="renderManualEntries()"><option value="Mapped">Mapped</option><option value="Manual Override">Manual Override</option><option value="Needs PMO Review">Needs PMO Review</option><option value="Unbudgeted">Unbudgeted</option></select>
+              <div class="filter-actions">
+                <button class="btn-export" id="as-import-button" onclick="document.getElementById('as-import-file').click()">⬆ Import Excel</button>
+                <input id="as-import-file" type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleActualSpendImport(event)">
+                <button class="btn-export" onclick="downloadActualSpendTemplate()">⬇ Download Template</button>
+                <button class="btn-primary" id="as-add-manual" onclick="openManualExpenseModal()">+ Add Actual Spend</button>
+              </div>
             </div>
             <div id="as-manual-content"></div>
           </div>
@@ -1646,14 +1719,16 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <div id="bgt-tab-forecast" class="cost-tab-panel" style="display:none">
           <div style="padding:10px 0 12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <span style="font-size:11px;color:var(--text-3)">Rolling 6 months Actual + 6 months Forecast · Software และ Infra</span>
-            <div class="filter-row" style="margin-bottom:0">
+            <div class="filter-toolbar" style="margin-bottom:0">
               <select id="sl-forecast-proj" onchange="renderBudgetSLInfra()">
                 <option value="all">ทุกโปรเจค</option>
               </select>
-              <select id="sl-forecast-months" onchange="renderBudgetSLInfra()">
+              <span class="filter-control"><span class="filter-label">Months</span><select id="sl-forecast-months" class="filter-select" onchange="renderBudgetSLInfra()">
                 <option value="6">6 เดือน</option>
-              </select>
-              <button class="btn-export" onclick="exportForecastCSV()">⬇ Export CSV</button>
+              </select></span>
+              <div class="filter-actions">
+                <button class="btn-export" onclick="exportForecastCSV()">⬇ Export CSV</button>
+              </div>
             </div>
           </div>
           <div class="card" style="padding:0;overflow:hidden">
@@ -1683,18 +1758,18 @@ svg.icon { display: inline-block; vertical-align: middle; }
         <!-- ── TAB: BUDGET VS ACTUAL ── -->
         <div id="bgt-tab-bva" class="cost-tab-panel" style="display:none">
 
-          <div class="filter-row">
-            <input id="bva-search" class="ri" type="search" placeholder="Search reference or description..." oninput="bvaSearchDebounced()" style="max-width:220px">
+          <div class="filter-toolbar">
+            <input id="bva-search" type="search" class="filter-search" placeholder="Search reference, description, project, type..." oninput="bvaSearchDebounced()">
             <!-- Options populated dynamically by populateBudgetYearSelect('bva-year') (views/budget.js)
                  from getCurrentBuddhistYear() — never hardcode a BE year list here (Phase 7A-9A). -->
-            <span class="filter-field"><span class="filter-label">Year</span><select id="bva-year" onchange="renderBudgetVsActual()"></select></span>
-            <span class="filter-field"><span class="filter-label">Project</span><select id="bva-project" onchange="renderBudgetVsActual()">
+            <span class="filter-control"><span class="filter-label">Year</span><select id="bva-year" class="filter-select" onchange="renderBudgetVsActual()"></select></span>
+            <span class="filter-control"><span class="filter-label">Project</span><select id="bva-project" onchange="renderBudgetVsActual()">
               <option value="all">ทุกโปรเจค</option>
             </select></span>
             <!-- Same short-code options, order, and labels as the Actual Spend tab's `as-type`
                  filter (index.html, "TAB: ACTUAL SPEND"), so Spend Type filtering behaves and reads
                  identically on both tabs. -->
-            <span class="filter-field"><span class="filter-label">Type</span><select id="bva-type" onchange="renderBudgetVsActual()">
+            <span class="filter-control"><span class="filter-label">Type</span><select id="bva-type" onchange="renderBudgetVsActual()">
               <option value="all">ทุกประเภท</option>
               <option value="sl">Software License</option>
               <option value="hw">Hardware</option>
@@ -1704,9 +1779,11 @@ svg.icon { display: inline-block; vertical-align: middle; }
               <option value="infra">Infrastructure</option>
               <option value="other">Other</option>
             </select></span>
-            <span id="bva-untagged-alert" style="display:none;font-size:11px;color:var(--amber);margin-left:8px"></span>
-            <button class="btn-export" onclick="exportBudgetVsActualCSV()">⬇ Export BvA</button>
-            <button class="btn-export" onclick="exportBudgetPoolsCSV()">⬇ Export Pools</button>
+            <span id="bva-untagged-alert" style="display:none;flex-basis:100%;font-size:11px;color:var(--amber)"></span>
+            <div class="filter-actions">
+              <button class="btn-export" onclick="exportBudgetVsActualCSV()">⬇ Export BvA</button>
+              <button class="btn-export" onclick="exportBudgetPoolsCSV()">⬇ Export Pools</button>
+            </div>
           </div>
 
           <div id="bva-content"></div>
@@ -1724,18 +1801,20 @@ svg.icon { display: inline-block; vertical-align: middle; }
                     <span style="font-size:12px;font-weight:600">Budget Pools</span>
                     <span style="font-size:11px;color:var(--text-3);margin-left:8px">ตั้งงบประมาณต่อโปรเจค แยกตาม pool และช่วงเวลา</span>
                   </div>
-                  <div style="display:flex;gap:8px;align-items:center">
-                    <input id="bset-search" class="ri" type="search" placeholder="Search project or pool name..." oninput="renderBudgetSettings()" style="max-width:180px">
+                  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                    <input id="bset-search" type="search" class="filter-search" placeholder="Search project or pool name..." oninput="renderBudgetSettings()">
                     <!-- Options populated dynamically by populateBudgetYearSelect('bset-year')
                          (views/budget.js) from getCurrentBuddhistYear() (Phase 7A-9A). -->
-                    <span class="filter-field"><span class="filter-label">Year</span><select id="bset-year" onchange="renderBudgetSettings()"></select></span>
-                    <label class="btn-sm" style="cursor:pointer">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                      Import Excel
-                      <input type="file" id="pool-excel-upload" accept=".xlsx" style="display:none" onchange="handlePoolBulkUpload(this)">
-                    </label>
-                    <button class="btn-sm" onclick="downloadBudgetPoolTemplate()">⬇ Template</button>
-                    <button class="btn-primary" onclick="openBudgetPoolModal()">+ Add Pool</button>
+                    <span class="filter-control"><span class="filter-label">Year</span><select id="bset-year" class="filter-input" onchange="renderBudgetSettings()"></select></span>
+                    <div class="filter-actions">
+                      <label class="btn-sm" style="cursor:pointer">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        Import Excel
+                        <input type="file" id="pool-excel-upload" accept=".xlsx" style="display:none" onchange="handlePoolBulkUpload(this)">
+                      </label>
+                      <button class="btn-sm" onclick="downloadBudgetPoolTemplate()">⬇ Template</button>
+                      <button class="btn-primary" onclick="openBudgetPoolModal()">+ Add Pool</button>
+                    </div>
                   </div>
                 </div>
                 <div id="bset-budget-body" style="padding:14px 16px"></div>
@@ -1827,26 +1906,28 @@ svg.icon { display: inline-block; vertical-align: middle; }
             <div class="metric-card"><div class="metric-label">Partially arrived</div><div class="metric-val" id="po-kpi-partial" style="color:#854F0B">0</div></div>
             <div class="metric-card"><div class="metric-label">Fulfilled</div><div class="metric-val" id="po-kpi-fulfilled" style="color:#3B6D11">0</div></div>
           </div>
-          <div class="filter-row" style="margin-bottom:10px">
-            <input type="text" id="po-search" placeholder="🔍 ค้นหา Memo No / Item Name..."
+          <div class="filter-toolbar">
+            <input type="text" id="po-search" class="filter-search" placeholder="🔍 ค้นหา Memo No / Item Name..."
               oninput="renderPurchaseOrders()">
-            <select id="po-filter-status" onchange="renderPurchaseOrders()">
+            <span class="filter-control"><span class="filter-label">Status</span><select id="po-filter-status" onchange="renderPurchaseOrders()">
               <option value="pending_order">Pending Order</option>
               <option value="ordered">Ordered</option>
               <option value="awaiting">Awaiting</option>
               <option value="partial_arrived">Partial arrived</option>
               <option value="fulfilled">Fulfilled</option>
               <option value="voided_source">Voided</option>
-            </select>
-            <select id="po-filter-project" onchange="renderPurchaseOrders()">
+            </select></span>
+            <span class="filter-control"><span class="filter-label">Project</span><select id="po-filter-project" onchange="renderPurchaseOrders()">
               <option>AOA-MP</option><option>TTB</option><option>Geo9</option>
               <option>Release 2.1</option><option>Release 3</option>
-            </select>
+            </select></span>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-2);white-space:nowrap">
               <input type="checkbox" id="po-filter-remaining" onchange="renderPurchaseOrders()"> Remaining &gt; 0
             </label>
             <div id="po-visible-count" style="font-size:11px;color:var(--text-3)"></div>
-            <button class="btn-export" style="margin-left:auto" onclick="exportPurchaseOrdersCSV()">⬇ Export PO</button>
+            <div class="filter-actions">
+              <button class="btn-export" onclick="exportPurchaseOrdersCSV()">⬇ Export PO</button>
+            </div>
           </div>
           <div class="card" style="padding:0;overflow:hidden;overflow-x:auto;-webkit-overflow-scrolling:touch">
             <table class="hist-table">
@@ -1909,50 +1990,52 @@ svg.icon { display: inline-block; vertical-align: middle; }
 
         <!-- Filter row -->
         <div id="dev-registry-context-banner" style="display:none;margin-bottom:10px"></div>
-        <div class="filter-row" style="margin-bottom:10px">
-          <input type="text" id="dev-search" placeholder="🔍 ค้นหา Device, Serial, Owner..."
+        <div class="filter-toolbar">
+          <input type="text" id="dev-search" class="filter-search" placeholder="🔍 ค้นหา Device, Serial, Owner..."
             oninput="renderDevice()">
-          <select id="dev-filter-platform" onchange="renderDevice()">
+          <span class="filter-control"><span class="filter-label">Platform</span><select id="dev-filter-platform" onchange="renderDevice()">
             <option value="ios">iOS</option>
             <option value="android">Android</option>
             <option value="huawei">Huawei</option>
             <option value="windows">Windows</option>
             <option value="other">Other</option>
-          </select>
-          <select id="dev-filter-type" onchange="renderDevice()">
+          </select></span>
+          <span class="filter-control"><span class="filter-label">Type</span><select id="dev-filter-type" onchange="renderDevice()">
             <option value="mobile">Mobile Phone</option>
             <option value="tablet">Tablet</option>
             <option value="laptop">Laptop</option>
             <option value="other">Other</option>
-          </select>
-          <select id="dev-filter-status" onchange="renderDevice()">
+          </select></span>
+          <span class="filter-control"><span class="filter-label">Status</span><select id="dev-filter-status" onchange="renderDevice()">
             <option value="not_identified">Not Identified</option>
             <option value="in-use">In Use</option>
             <option value="available">Available</option>
             <option value="maintenance">Maintenance</option>
             <option value="retired">Retired</option>
-          </select>
-          <select id="dev-filter-project" onchange="renderDevice()">
+          </select></span>
+          <span class="filter-control"><span class="filter-label">Project</span><select id="dev-filter-project" onchange="renderDevice()">
             <option>AOA-MP</option><option>TTB</option><option>Geo9</option>
             <option>Release 2.1</option><option>Release 3</option>
-          </select>
-          <select id="dev-filter-company" onchange="renderDevice()">
+          </select></span>
+          <span class="filter-control"><span class="filter-label">Company</span><select id="dev-filter-company" onchange="renderDevice()">
             <option value="BBIK">BBIK</option>
             <option value="Orbit Digital">Orbit Digital</option>
-          </select>
-          <button class="btn-export" onclick="exportDeviceCsv()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Export CSV
-          </button>
-          <button class="btn-sm" onclick="importBulk('device')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Import Excel
-          </button>
-          <button class="btn-sm" onclick="downloadTemplate('device')">⬇ Template</button>
-          <button class="btn-primary" style="margin-left:auto" onclick="openDeviceModal()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add Device
-          </button>
+          </select></span>
+          <div class="filter-actions">
+            <button class="btn-export" onclick="exportDeviceCsv()">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Export CSV
+            </button>
+            <button class="btn-sm" onclick="importBulk('device')">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Import Excel
+            </button>
+            <button class="btn-sm" onclick="downloadTemplate('device')">⬇ Template</button>
+            <button class="btn-primary" onclick="openDeviceModal()">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add Device
+            </button>
+          </div>
         </div>
 
         <!-- Main registry table -->
@@ -2176,7 +2259,6 @@ svg.icon { display: inline-block; vertical-align: middle; }
 <script src="views/settings.js"></script>
 <style>
   #resource-detail-drawer.open { transform: translateX(0); }
-  .badge-purple { background:#E9D5FF; color:#6B21A8; }
   .badge-teal   { background:#CCFBF1; color:#115E59; }
   .badge-yellow { background:#FEF9C3; color:#854D0E; }
 

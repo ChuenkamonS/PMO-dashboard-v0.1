@@ -290,42 +290,44 @@ async function renderUsersTable() {
   const users = _userProfilesCache || [];
   if(!users.length){ container.innerHTML='<div style="color:var(--text-3)">ยังไม่มีผู้ใช้</div>'; return; }
   container.innerHTML = `
-    <table style="width:100%;border-collapse:collapse;font-size:12px">
-      <thead><tr style="background:var(--bg)">
-        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid var(--border)">ชื่อ-นามสกุล</th>
-        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid var(--border)">ตำแหน่ง</th>
-        <th style="padding:6px 10px;text-align:center;border-bottom:1px solid var(--border)">A1 Review</th>
-        <th style="padding:6px 10px;text-align:center;border-bottom:1px solid var(--border)">A2/A3 Approve</th>
-        <th style="padding:6px 10px;text-align:center;border-bottom:1px solid var(--border)">PMO</th>
-        <th style="padding:6px 10px;text-align:center;border-bottom:1px solid var(--border)">Active</th>
-        <th style="padding:6px 10px;border-bottom:1px solid var(--border)">Email</th>
-        <th style="padding:6px 10px;border-bottom:1px solid var(--border)"></th>
+    <div style="overflow-x:auto">
+    <table class="hist-table" style="min-width:0">
+      <thead><tr>
+        <th style="width:17%">ชื่อ-นามสกุล</th>
+        <th style="width:14%">ตำแหน่ง</th>
+        <th style="width:9%;text-align:center">A1 Review</th>
+        <th style="width:11%;text-align:center">A2/A3 Approve</th>
+        <th style="width:7%;text-align:center">PMO</th>
+        <th style="width:8%;text-align:center">Active</th>
+        <th style="width:18%">Email</th>
+        <th style="width:16%;text-align:center">Actions</th>
       </tr></thead>
       <tbody>
-        ${users.map((u,i)=>`
-          <tr style="${i%2===0?'':'background:var(--bg)'}">
-            <td style="padding:7px 10px;border-bottom:1px solid var(--border)">${esc(u.full_name)}</td>
-            <td style="padding:7px 10px;border-bottom:1px solid var(--border)">${esc(u.title||'')}</td>
-            <td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:center">
+        ${users.map((u)=>`
+          <tr>
+            <td>${esc(u.full_name)}</td>
+            <td>${esc(u.title||'')}</td>
+            <td style="text-align:center">
               <input type="checkbox" data-uid="${u.id}" data-field="can_review" ${(u.can_review??u.is_approver)?'checked':''} onchange="toggleUserField(this)" ${canEdit?'':'disabled'}>
             </td>
-            <td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:center">
+            <td style="text-align:center">
               <input type="checkbox" data-uid="${u.id}" data-field="can_approve" ${(u.can_approve??u.is_approver)?'checked':''} onchange="toggleUserField(this)" ${canEdit?'':'disabled'}>
             </td>
-            <td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:center">
+            <td style="text-align:center">
               <input type="checkbox" data-uid="${u.id}" data-field="is_pmo" ${u.is_pmo?'checked':''} onchange="toggleUserField(this)" ${canEdit?'':'disabled'}>
             </td>
-            <td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:center">
+            <td style="text-align:center">
               <input type="checkbox" data-uid="${u.id}" data-field="is_active" ${u.is_active!==false?'checked':''} onchange="toggleUserField(this)" ${canEdit?'':'disabled'}>
             </td>
-            <td style="padding:7px 10px;border-bottom:1px solid var(--border);color:var(--text-3)">${esc(u.email||'')}</td>
-            <td style="padding:7px 10px;border-bottom:1px solid var(--border)">
-              ${canEdit ? `<button class="btn-sm" onclick="openEditUserModal(${u.id})" style="font-size:11px;padding:2px 8px">✎</button>
-              ${u.is_active!==false ? `<button class="btn-sm" onclick="deactivateUser(${u.id},'${esc(u.full_name)}')" style="font-size:11px;padding:2px 6px;color:var(--red);margin-left:4px">Deactivate</button>` : ''}` : '<span style="font-size:10px;color:var(--text-3)">View only</span>'}
+            <td style="color:var(--text-3)">${esc(u.email||'')}</td>
+            <td style="text-align:center;white-space:nowrap">
+              ${canEdit ? `<button class="btn-sm" onclick="openEditUserModal(${u.id})" style="padding:3px 7px" title="แก้ไข">✎</button>
+              ${u.is_active!==false ? `<button class="btn-sm" onclick="deactivateUser(${u.id},'${esc(u.full_name)}')" style="padding:3px 7px;color:var(--red);margin-left:4px">Deactivate</button>` : ''}` : '<span style="font-size:10px;color:var(--text-3)">View only</span>'}
             </td>
           </tr>`).join('')}
       </tbody>
-    </table>`;
+    </table>
+    </div>`;
 }
 
 async function toggleUserField(cb) {
@@ -467,17 +469,18 @@ async function renderAuthorityTable() {
   const titles = Object.keys(byTitle);
   if(!titles.length){ container.innerHTML='<div style="color:var(--text-3)">ยังไม่มีข้อมูล authority limits</div>'; return; }
   container.innerHTML = `
-    <table style="width:100%;border-collapse:collapse;font-size:11px">
-      <thead><tr style="background:var(--bg)">
-        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid var(--border)">ตำแหน่ง</th>
-        ${MEMO_TYPES_AUTHORITY.map(t=>`<th style="padding:6px 8px;text-align:center;border-bottom:1px solid var(--border)">${MEMO_TYPE_LABELS_AUTH[t]}</th>`).join('')}
+    <div style="overflow-x:auto">
+    <table class="hist-table" style="min-width:0">
+      <thead><tr>
+        <th style="width:40%">ตำแหน่ง</th>
+        ${MEMO_TYPES_AUTHORITY.map(t=>`<th style="text-align:center">${MEMO_TYPE_LABELS_AUTH[t]}</th>`).join('')}
       </tr></thead>
       <tbody>
-        ${titles.map((title,i)=>`
-          <tr style="${i%2===0?'':'background:var(--bg)'}">
-            <td style="padding:6px 10px;border-bottom:1px solid var(--border);font-weight:500">${esc(title)}</td>
+        ${titles.map((title)=>`
+          <tr>
+            <td style="font-weight:500">${esc(title)}</td>
             ${MEMO_TYPES_AUTHORITY.map(t=>`
-              <td style="padding:4px 6px;border-bottom:1px solid var(--border)">
+              <td>
                 <input type="number" class="ri auth-limit-input" data-title="${esc(title)}" data-type="${t}"
                   value="${byTitle[title][t]||0}" min="0"
                   style="font-size:11px;padding:3px 6px;text-align:right;width:80px"
@@ -487,6 +490,7 @@ async function renderAuthorityTable() {
           </tr>`).join('')}
       </tbody>
     </table>
+    </div>
     <div style="font-size:10px;color:var(--text-3);margin-top:8px">0 = ตำแหน่งนี้ไม่มีสิทธิ์อนุมัติ type นั้น · INT = ไม่ระบุวงเงินใน Policy</div>`;
 }
 

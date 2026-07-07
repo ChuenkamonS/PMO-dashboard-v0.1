@@ -270,11 +270,11 @@ function buildPendingRow(memo) {
   } else if (isOwner && isPending) {
     // Requester (own memo) — View + Cancel
     actionBtns = `
-      <button class="btn-sm" data-action="detail" data-memo="${esc(memo.memoNo)}" style="font-size:11px;padding:3px 10px">View</button>
-      <button class="btn-sm" data-action="cancel" data-memo="${esc(memo.memoNo)}" style="font-size:11px;padding:3px 8px;margin-left:4px;color:var(--red)" title="ยกเลิก">✕ Cancel</button>`;
+      <button class="btn-sm" data-action="detail" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px">View</button>
+      <button class="btn-sm" data-action="cancel" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px;color:var(--red)" title="ยกเลิก">✕ Cancel</button>`;
   } else {
     // Default (view only)
-    actionBtns = `<button class="btn-sm" data-action="detail" data-memo="${esc(memo.memoNo)}" style="font-size:11px;padding:3px 10px">View</button>`;
+    actionBtns = `<button class="btn-sm" data-action="detail" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px">View</button>`;
   }
 
   const reqDate = memo.createdAt ? shortDate(memo.createdAt) : '—';

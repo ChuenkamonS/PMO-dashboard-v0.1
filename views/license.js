@@ -391,8 +391,8 @@ function _renderLicMemoIndex() {
       <div class="metric-card"><div class="metric-label">ค่าใช้จ่าย/ปี</div><div class="metric-val" id="lic-annual" style="font-size:18px;margin-top:4px">฿0</div><div class="metric-sub" id="lic-renewal-3m"></div></div>
     </div>
 
-    <div class="filter-row" style="margin-bottom:10px">
-      <input type="text" id="lic-search" placeholder="🔍 ค้นหา Software, Project, Owner..."
+    <div class="filter-toolbar">
+      <input type="text" id="lic-search" class="filter-search" placeholder="🔍 ค้นหา Software, Project, Owner..."
         oninput="_renderLicMemoIndexRows()">
       <select id="lic-filter-status" onchange="_renderLicMemoIndexRows()">
         <option value="active">Active</option>
@@ -405,22 +405,24 @@ function _renderLicMemoIndex() {
       </select>
       <select id="lic-filter-project" onchange="_renderLicMemoIndexRows()">
       </select>
-      <span class="filter-field"><span class="filter-label">Sort</span><select id="lic-sort" onchange="_renderLicMemoIndexRows()">
+      <span class="filter-control"><span class="filter-label">Sort</span><select id="lic-sort" onchange="_renderLicMemoIndexRows()">
         <option value="expiry-asc">หมดอายุใกล้สุด</option>
         <option value="cost-desc">ราคา มาก→น้อย</option>
         <option value="seats-desc">Seats มาก→น้อย</option>
         <option value="purchase-desc">ซื้อล่าสุด</option>
       </select></span>
-      <button class="btn-sm" onclick="exportLicenseCSV()" title="Export License Inventory">⬇ Export License Inventory</button>
-      <button class="btn-sm" onclick="importBulk('license')" title="Import from Excel">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Import Excel
-      </button>
-      <button class="btn-sm" onclick="downloadTemplate('license')" title="Download Template">⬇ Template</button>
-      <button class="btn-primary" onclick="openLicenseModal()">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Add License
-      </button>
+      <div class="filter-actions">
+        <button class="btn-sm" onclick="exportLicenseCSV()" title="Export License Inventory">⬇ Export License Inventory</button>
+        <button class="btn-sm" onclick="importBulk('license')" title="Import from Excel">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Import Excel
+        </button>
+        <button class="btn-sm" onclick="downloadTemplate('license')" title="Download Template">⬇ Template</button>
+        <button class="btn-primary" onclick="openLicenseModal()">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add License
+        </button>
+      </div>
     </div>
 
     <div id="lic-count-display" style="font-size:11px;color:var(--text-3);padding:6px 14px;border-bottom:1px solid var(--border)">
@@ -642,29 +644,31 @@ function _renderLicByProject() {
       <button class="btn-sm${_bpSubTab === 'reconciliation' ? ' active' : ''}" data-subtab="reconciliation" onclick="_switchLicSummarySubTab('reconciliation')">Reconciliation</button>
     </div>
 
-    <div class="filter-row" style="margin-bottom:12px">
+    <div class="filter-toolbar">
       <select id="lic-bp-filter-project" multiple onchange="_bpSetFilterProjects(msValues('lic-bp-filter-project'))">
         ${projects.map(p=>`<option value="${esc(p)}" ${_bpFilterProjects.includes(p)?'selected':''}>${esc(p)}</option>`).join('')}
       </select>
       <select id="lic-bp-filter-software" multiple onchange="_bpSetFilterSoftware(msValues('lic-bp-filter-software'))">
         ${software.map(s=>`<option value="${esc(s)}" ${_bpFilterSoftware.includes(s)?'selected':''}>${esc(s)}</option>`).join('')}
       </select>
-      <span class="filter-field"><span class="filter-label">Plan</span><select id="lic-bp-filter-plan" onchange="_bpSetFilterPlan(this.value)">
+      <span class="filter-control"><span class="filter-label">Plan</span><select id="lic-bp-filter-plan" class="filter-input" onchange="_bpSetFilterPlan(this.value)">
         <option value="all">All plans</option>
         ${plans.map(p=>`<option value="${esc(p)}" ${_bpFilterPlan===p?'selected':''}>${esc(p)}</option>`).join('')}
       </select></span>
     </div>
 
     <div id="lic-summary-panel" style="${_bpSubTab === 'summary' ? '' : 'display:none'}">
-      <div class="filter-row" style="margin-bottom:12px">
-        <span class="filter-field"><span class="filter-label">Year</span><select onchange="_bpYear=this.value;_bpRenderMatrix()">
+      <div class="filter-toolbar">
+        <span class="filter-control"><span class="filter-label">Year</span><select class="filter-input" onchange="_bpYear=this.value;_bpRenderMatrix()">
           <option value="all">All years</option>
           ${years.map(y=>`<option value="${y}" ${String(y)===_bpYear?'selected':''}>${y}</option>`).join('')}
         </select></span>
         <select id="lic-bp-filter-status" multiple onchange="_bpSetFilterStatus(msValues('lic-bp-filter-status'))">
           ${statusOptions.map(([v,l])=>`<option value="${v}" ${_bpFilterStatus.includes(v)?'selected':''}>${esc(l)}</option>`).join('')}
         </select>
-        <button class="btn-sm" style="margin-left:auto" onclick="exportLicSummaryCSV()">⬇ Export Summary</button>
+        <div class="filter-actions">
+          <button class="btn-sm" onclick="exportLicSummaryCSV()">⬇ Export Summary</button>
+        </div>
       </div>
       <div id="bp-table-wrap"></div>
     </div>
@@ -900,7 +904,7 @@ function _renderLicReconciliation() {
       <td style="text-align:right">${r.purchased}</td>
       <td style="text-align:right"><span style="color:var(--blue);cursor:pointer;text-decoration:underline" onclick="_openLicReconDetail(${idx})">${r.assignedCount}</span></td>
       <td style="text-align:right;font-weight:600;${r.overAssigned ? 'color:var(--red)' : ''}">
-        ${r.remaining}${r.overAssigned ? ' <span class="badge badge-red" style="font-size:10px;margin-left:4px">Over Assigned</span>' : ''}
+        ${r.remaining}${r.overAssigned ? ' <span class="badge badge-red" style="margin-left:4px">Over Assigned</span>' : ''}
       </td>
     </tr>`).join('');
 
@@ -1473,7 +1477,7 @@ function _renderAssignmentImportPreview(preview) {
         <td style="font-size:11px">${esc(r.software)}</td>
         <td style="font-size:11px">${esc(r.plan || '—')}</td>
         <td style="font-size:11px">${esc(r.project)}</td>
-        <td style="text-align:center"><span class="badge ${badgeCls[r.status] || 'badge-gray'}" style="font-size:10px">${esc(r.status)}</span></td>
+        <td style="text-align:center"><span class="badge ${badgeCls[r.status] || 'badge-gray'}">${esc(r.status)}</span></td>
         <td style="font-size:11px;color:var(--text-2)">${esc(r.reason || '')}</td>
       </tr>`).join('')}</tbody></table>`;
   }
@@ -1538,24 +1542,22 @@ function _renderLicUsers() {
   el.innerHTML = `
     ${_renderLicReviewQueueHtml(queueItems)}
     <div id="lic-usr-context-banner" style="margin-bottom:12px;display:none"></div>
-    <div class="filter-row" style="margin-bottom:12px;justify-content:space-between">
-      <div class="filter-row" style="margin-bottom:0">
-        <input id="lic-usr-search" type="text" placeholder="ค้นหา email..."
-          oninput="_renderLicUsersRows()">
-        <select id="lic-usr-proj" onchange="_renderLicUsersRows()">
-          ${projects.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
-        </select>
-        <select id="lic-usr-lic" onchange="_renderLicUsersRows()">
-          ${window._licUsrCols.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
-        </select>
-      </div>
-      <div class="filter-row" style="margin-bottom:0">
-        <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="exportUserLicensesCSV()">⬇ Export User Licenses</button>
-        <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="_triggerAssignmentImport()" title="Import User Assignments from CSV">
+    <div class="filter-toolbar">
+      <input id="lic-usr-search" type="text" class="filter-search" placeholder="ค้นหา email..."
+        oninput="_renderLicUsersRows()">
+      <select id="lic-usr-proj" onchange="_renderLicUsersRows()">
+        ${projects.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
+      </select>
+      <select id="lic-usr-lic" onchange="_renderLicUsersRows()">
+        ${window._licUsrCols.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+      </select>
+      <div class="filter-actions">
+        <button class="btn-sm" onclick="exportUserLicensesCSV()">⬇ Export User Licenses</button>
+        <button class="btn-sm" onclick="_triggerAssignmentImport()" title="Import User Assignments from CSV">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Import Assignments
         </button>
-        <button class="btn-sm" style="font-size:12px;padding:6px 12px" onclick="downloadAssignmentTemplate()" title="Download Assignment Template">⬇ Download Assignment Template</button>
+        <button class="btn-sm" onclick="downloadAssignmentTemplate()" title="Download Assignment Template">⬇ Download Assignment Template</button>
       </div>
     </div>
     <input type="file" id="lic-assignment-import-input" accept=".csv,text/csv" style="display:none" onchange="_handleAssignmentImportFile(event)">
@@ -2156,23 +2158,23 @@ function _renderLicOther() {
   if (!el) return;
 
   el.innerHTML = `
-    <div class="filter-row" style="margin-bottom:12px;justify-content:space-between">
-      <div class="filter-row" style="margin-bottom:0">
-        <select id="lic-ot-type" onchange="_renderLicOtherRows()">
-          ${licTypes.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}
-        </select>
-        <select id="lic-ot-proj" onchange="_renderLicOtherRows()">
-          ${projects.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
-        </select>
-        <select id="lic-ot-status" onchange="_renderLicOtherRows()">
-          <option value="active">Active</option>
-          <option value="expiring">Expiring</option>
-          <option value="expired">Expired</option>
-        </select>
+    <div class="filter-toolbar">
+      <select id="lic-ot-type" onchange="_renderLicOtherRows()">
+        ${licTypes.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}
+      </select>
+      <select id="lic-ot-proj" onchange="_renderLicOtherRows()">
+        ${projects.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
+      </select>
+      <select id="lic-ot-status" onchange="_renderLicOtherRows()">
+        <option value="active">Active</option>
+        <option value="expiring">Expiring</option>
+        <option value="expired">Expired</option>
+      </select>
+      <div class="filter-actions">
+        <button class="btn-primary" onclick="openLicenseModal()">
+          + Add License
+        </button>
       </div>
-      <button class="btn-primary" style="font-size:12px;padding:6px 14px" onclick="openLicenseModal()">
-        + Add License
-      </button>
     </div>
     <div class="card" style="padding:0;overflow:hidden;overflow-x:auto;-webkit-overflow-scrolling:touch">
       <table class="hist-table"><thead><tr>
