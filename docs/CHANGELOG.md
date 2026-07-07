@@ -22,6 +22,34 @@
 
 ## Current Baseline
 
+### 2026-07-07 Light UX Alignment Pass
+
+Scope: presentation-only alignment across All Memos, Pending Approval, Budget & Spend, License
+Management, and Device Management. No data, workflow, permission, routing, or calculation changes.
+Implemented against `UI_CONSISTENCY.md`, `UX_ALIGNMENT_GUIDELINE.md`, `UX_COMPONENT_SPEC.md`,
+`TABLE_GUIDELINE.md`, `UX_GUARDRAILS.md`, and `UAT_ACCEPTANCE.md`.
+
+#### Changed
+- Standardized toolbar, result-count, table-row, card, and modal-footer spacing across the five
+  target modules using the existing layout classes and a small shared CSS layer.
+- Reduced All Memos list density by keeping the primary workflow columns in the table; Approver,
+  Created date, and Reject Reason remain available in the existing memo detail view.
+- Removed redundant Pending Approval `View` buttons because every row already opens the same detail
+  view; all role-based Approve, Reject, and Cancel actions remain unchanged and available.
+- Moved License Memo Index actions into the toolbar's right-side action group and reduced its table
+  to primary inventory columns; Owner, Department, Purchase Date, and Source remain in the existing
+  license detail/edit surface.
+- Moved Device Registry's secondary summary tables below the primary filter-and-table workflow.
+- Aligned two-card Pending KPI sizing, modal footer separation, and Template-before-Import action
+  order with the documented component and toolbar standards.
+
+#### Tests
+- `node --check views/history.js views/pending.js views/license.js`
+- `node --test tests/*.test.js` — 567 passed, 0 failed.
+
+#### Remaining Work
+- Browser visual verification remains required at normal UAT desktop widths.
+
 ### 2026-07-06 UX Consistency Pass — Filters, Actions, Status, Empty States
 
 Scope: UI polish only across All Memos/History, Pending Approval, Budget & Spend, License

@@ -411,21 +411,21 @@ function _renderLicMemoIndex() {
         <option value="seats-desc">Seats มาก→น้อย</option>
         <option value="purchase-desc">ซื้อล่าสุด</option>
       </select></span>
-    </div>
-    <div class="filter-actions" style="justify-content:flex-end;margin-bottom:14px">
+      <div class="filter-actions">
         <button class="btn-sm" onclick="exportLicenseCSV()" title="Export License Inventory">⬇ Export License Inventory</button>
+        <button class="btn-sm" onclick="downloadTemplate('license')" title="Download Template">⬇ Template</button>
         <button class="btn-sm" onclick="importBulk('license')" title="Import from Excel">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Import Excel
         </button>
-        <button class="btn-sm" onclick="downloadTemplate('license')" title="Download Template">⬇ Template</button>
         <button class="btn-primary" onclick="openLicenseModal()">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Add License
         </button>
+      </div>
     </div>
 
-    <div id="lic-count-display" style="font-size:11px;color:var(--text-3);padding:6px 14px;border-bottom:1px solid var(--border)">
+    <div id="lic-count-display" class="result-count">
       แสดง — รายการ
     </div>
     <div class="card" style="padding:0;overflow:hidden;overflow-x:auto;-webkit-overflow-scrolling:touch">
@@ -435,13 +435,9 @@ function _renderLicMemoIndex() {
           <th style="width:8%">Plan</th>
           <th style="width:7%;text-align:right">Seats</th>
           <th style="width:9%;text-align:right">฿/เดือน</th>
-          <th style="width:9%">Owner</th>
-          <th style="width:8%">Department</th>
           <th style="width:8%">โครงการ</th>
-          <th style="width:8%">วันที่ซื้อ</th>
           <th style="width:8%">หมดอายุ</th>
           <th style="width:9%;text-align:center">สถานะ</th>
-          <th style="width:7%;text-align:center">Source</th>
           <th style="width:8%;text-align:center">Actions</th>
         </tr></thead>
         <tbody id="lic-table-body"></tbody>
@@ -519,7 +515,7 @@ function _renderLicMemoIndexRows() {
   const tbody = document.getElementById('lic-table-body');
   if (!tbody) return;
   if (!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="12" class="hist-empty">${search ? 'No licenses found. Try changing filters.' : 'No licenses found — approve an SL memo or click Add License.'}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="hist-empty">${search ? 'No licenses found. Try changing filters.' : 'No licenses found — approve an SL memo or click Add License.'}</td></tr>`;
     return;
   }
 
@@ -530,9 +526,6 @@ function _renderLicMemoIndexRows() {
   tbody.innerHTML = visible.map((lic, _idx) => {
     const s = getLicenseStatus(lic);
     const monthlyCostLic = (lic.pricePerMonthTHB ?? lic.pricePerMonth ?? 0) * (lic.seats || 1);
-    const sourceBadge = lic.source === 'memo'
-      ? `<span style="font-size:10px;background:#E6F1FB;color:#0C447C;padding:1px 6px;border-radius:3px;white-space:nowrap">Memo</span>`
-      : `<span style="font-size:10px;background:#F1EFE8;color:#5F5E5A;padding:1px 6px;border-radius:3px;white-space:nowrap">Manual</span>`;
     return `<tr>
       <td style="padding-left:16px;font-weight:600">
         ${esc(lic.name)}
@@ -542,13 +535,9 @@ function _renderLicMemoIndexRows() {
       <td style="font-size:12px">${esc(lic.plan || '—')}</td>
       <td style="text-align:right">${esc(lic.seats || 1)}</td>
       <td class="mono" style="text-align:right">${esc(money(monthlyCostLic))}</td>
-      <td style="font-size:12px">${esc(lic.owner || '—')}</td>
-      <td style="font-size:12px">${esc(lic.department || '—')}</td>
       <td style="font-size:12px">${esc(lic.project || '—')}</td>
-      <td style="font-size:11px">${esc(shortDate(lic.purchaseDate))}</td>
       <td style="font-size:11px">${esc(shortDate(lic.expiry))}</td>
       <td style="text-align:center"><span class="badge ${s.badge}">${esc(s.label)}</span></td>
-      <td style="text-align:center">${sourceBadge}</td>
       <td style="text-align:center;white-space:nowrap">
         <button class="btn-sm" data-action="edit" data-idx="${_idx}" style="padding:3px 7px;font-size:11px" title="${lic.source === 'memo' ? 'แก้ไข owner/dept/note' : 'แก้ไข'}">✎</button>
         ${lic.source !== 'memo' ? `<button class="btn-sm" data-action="delete" data-idx="${_idx}" style="padding:3px 7px;font-size:11px;color:var(--red)" title="ลบ">✕</button>` : ''}
@@ -1551,11 +1540,11 @@ function _renderLicUsers() {
       </select>
       <div class="filter-actions">
         <button class="btn-sm" onclick="exportUserLicensesCSV()">⬇ Export User Licenses</button>
+        <button class="btn-sm" onclick="downloadAssignmentTemplate()" title="Download Assignment Template">⬇ Download Assignment Template</button>
         <button class="btn-sm" onclick="_triggerAssignmentImport()" title="Import User Assignments from CSV">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Import Assignments
         </button>
-        <button class="btn-sm" onclick="downloadAssignmentTemplate()" title="Download Assignment Template">⬇ Download Assignment Template</button>
       </div>
     </div>
     <input type="file" id="lic-assignment-import-input" accept=".csv,text/csv" style="display:none" onchange="_handleAssignmentImportFile(event)">

@@ -1066,13 +1066,11 @@ function renderHistoryMemos() {
   if (countEl) countEl.textContent = `แสดง ${memos.length} จาก ${allMemos.length} รายการ · คลิกแถวเพื่อดูรายละเอียด`;
 
   if (!memos.length) {
-    body.innerHTML = `<tr><td colspan="13" class="hist-empty">ยังไม่มี Memo ตามเงื่อนไขที่เลือก</td></tr>`;
+    body.innerHTML = `<tr><td colspan="9" class="hist-empty">ยังไม่มี Memo ตามเงื่อนไขที่เลือก</td></tr>`;
     return;
   }
 
   body.innerHTML = memos.map(memo => {
-    const rej = memo.rejectionReason || '';
-    const rejShort = rej ? truncateText(rej, 32) : '';
     return `
     <tr class="hist-row" data-memo="${esc(memo.memoNo)}" title="คลิกเพื่อดูรายละเอียด">
       <td class="mono hist-memo-no" style="padding-left:16px">${esc(memo.memoNo)}</td>
@@ -1081,16 +1079,13 @@ function renderHistoryMemos() {
       <td class="hist-cell-clip" title="${esc(histRequesterName(memo))}">${esc(histRequesterName(memo))}</td>
       <td class="mono hist-amt">${esc(money(memo.total || 0))}</td>
       <td><span class="badge ${histStatusBadgeClass(memo)}">${esc(histStatusLabel(memo))}</span></td>
-      <td class="hist-cell-clip" title="${esc(histApproverName(memo))}">${esc(histApproverName(memo))}</td>
-      <td class="hist-dt">${esc(shortDate(memo.createdAt))}</td>
       <td class="hist-dt">${esc(shortDate(histActivityAt(memo)))}</td>
-      <td>${rej ? `<button type="button" class="hist-reject-btn" data-hist-action="reject-reason" data-memo="${esc(memo.memoNo)}" title="${esc(rej)}">${esc(rejShort)}</button>` : '<span style="color:var(--text-3)">—</span>'}</td>
       <td class="hist-cell-clip" style="text-align:center" onclick="event.stopPropagation()">${buildBudgetTagCell(memo)}</td>
       <td style="text-align:center" onclick="event.stopPropagation()">${histActionButtons(memo)}</td>
     </tr>`;
   }).join('');
 
-  body.querySelectorAll('.hist-act-btn, .hist-reject-btn').forEach(btn => {
+  body.querySelectorAll('.hist-act-btn').forEach(btn => {
     btn.addEventListener('click', handleHistoryTableClick);
   });
   body.querySelectorAll('tr[data-memo]').forEach(row => {

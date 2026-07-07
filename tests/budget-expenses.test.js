@@ -344,7 +344,7 @@ test('Actual Spend separates the unchanged report from manual maintenance action
   assert.match(reportPanel, /exportActualSpendCSV\(\)/);
   assert.doesNotMatch(reportPanel, /openManualExpenseModal|handleActualSpendImport|downloadActualSpendTemplate/);
   assert.match(manualPanel, /openManualExpenseModal\(\)[\s\S]*Add Actual Spend/);
-  assert.match(manualPanel, /handleActualSpendImport\(event\)[\s\S]*Download Template/);
+  assert.match(manualPanel, /downloadActualSpendTemplate\(\)[\s\S]*handleActualSpendImport\(event\)/);
   assert.match(manualPanel, /Import Excel/);
   assert.doesNotMatch(manualPanel, /exportActualSpendCSV\(\)/);
 });

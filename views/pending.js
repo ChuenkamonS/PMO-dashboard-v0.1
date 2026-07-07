@@ -196,7 +196,7 @@ function renderPendingContent() {
   const rows = _pendingSlice.map(m => buildPendingRow(m)).join('');
 
   list.innerHTML = `<div class="card" style="padding:0;overflow:hidden">
-    <div style="padding:8px 14px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-3)">
+    <div class="result-count">
       แสดง ${Math.min(memos.length, window._pendingVisible||20)} จาก ${memos.length} รายการ · คลิกแถวเพื่อดูรายละเอียด
     </div>
     <div style="overflow-x:auto">${thead}${rows}</tbody></table></div>
@@ -255,26 +255,22 @@ function buildPendingRow(memo) {
   // Row action buttons — different per role
   let actionBtns = '';
   if (canActAsPMO) {
-    // PMO sees Approve + Reject + View — but NOT on their own memo
+    // PMO sees decision actions (and the existing override cancel) — row click opens detail.
     actionBtns = `
       <button class="btn-approve" data-action="approve" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px" title="Approve">✓</button>
       <button class="btn-reject"  data-action="reject"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px" title="Reject">✕</button>
-      <button class="btn-sm"      data-action="cancel"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px;color:var(--red)" title="ยกเลิก">✕ Cancel</button>
-      <button class="btn-sm"      data-action="detail"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px">View</button>`;
+      <button class="btn-sm"      data-action="cancel"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px;color:var(--red)" title="ยกเลิก">✕ Cancel</button>`;
   } else if (!isOwner && canAct) {
-    // Approver (not own memo, their turn) — Approve + Reject + View
+    // Approver (not own memo, their turn) — row click opens detail.
     actionBtns = `
       <button class="btn-approve" data-action="approve" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px" title="Approve">✓</button>
-      <button class="btn-reject"  data-action="reject"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px" title="Reject">✕</button>
-      <button class="btn-sm"      data-action="detail"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px">View</button>`;
+      <button class="btn-reject"  data-action="reject"  data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px" title="Reject">✕</button>`;
   } else if (isOwner && isPending) {
-    // Requester (own memo) — View + Cancel
-    actionBtns = `
-      <button class="btn-sm" data-action="detail" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px">View</button>
-      <button class="btn-sm" data-action="cancel" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;margin-left:2px;color:var(--red)" title="ยกเลิก">✕ Cancel</button>`;
+    // Requester (own memo) — Cancel stays available; row click opens detail.
+    actionBtns = `<button class="btn-sm" data-action="cancel" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px;color:var(--red)" title="ยกเลิก">✕ Cancel</button>`;
   } else {
-    // Default (view only)
-    actionBtns = `<button class="btn-sm" data-action="detail" data-memo="${esc(memo.memoNo)}" style="font-size:10px;padding:2px 8px">View</button>`;
+    // Default users open detail by clicking the row.
+    actionBtns = '';
   }
 
   const reqDate = memo.createdAt ? shortDate(memo.createdAt) : '—';
